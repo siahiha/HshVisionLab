@@ -242,6 +242,7 @@ export interface LiveOverlaySnapshot {
   width: number;
   height: number;
   rois: LiveOverlayRoi[];
+  motionRois: LiveOverlayRoi[];
   detections: LiveOverlayDetection[];
   processingOverlays: LiveOverlayPrimitive[];
   updatedUtc: string;

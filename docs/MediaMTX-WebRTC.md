@@ -20,10 +20,12 @@ MediaMTX WHEP خام ───────────────► <video> م
 GET /api/v1/streams/{id}/overlay ────┘  SVG overlay (`LiveOverlaySvg`)
 ```
 
-پاسخ Overlay شامل ابعاد فریم، ROIهای ثابت، bounds و مشخصات detectionها و
-primitiveهای پردازشی است. detectionهای پویا پس از حدود 2.5 ثانیه منقضی
-می‌شوند. به این ترتیب inference یا render کند، latency خود ویدئو را افزایش
-نمی‌دهد.
+پاسخ Overlay شامل ابعاد فریم، ROIهای ثابت (`rois`)، ناحیه‌های Motion ROI
+(`motionRois`)، bounds و مشخصات detectionها و primitiveهای پردازشی است. `rois`
+با خط پیوسته و نام ROI و `motionRois` با همان هندسهٔ scale‌شده و خط‌چین رسم
+می‌شوند تا با previewهای قبلی یکسان باشند. detectionهای پویا پس از حدود 2.5
+ثانیه منقضی می‌شوند. به این ترتیب inference یا render کند، latency خود ویدئو
+را افزایش نمی‌دهد.
 
 مسیر WebRTC هیچ HLS segment یا transcoding ندارد. مرورگر از endpoint سرویس
 استفاده می‌کند:

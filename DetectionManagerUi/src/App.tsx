@@ -1777,16 +1777,15 @@ function LiveOverlaySvg({ overlay }: { overlay?: LiveOverlaySnapshot }) {
                 y: point.y * overlay.height,
               })),
             )}
-            fill="rgba(255, 180, 0, .08)"
+            fill="none"
             stroke="#ffb400"
             strokeWidth={Math.max(2, overlay.width / 900)}
-            strokeDasharray="10 8"
           />
           {roi.points[0] && (
             <text
-              x={roi.points[0].x * overlay.width + 5}
-              y={roi.points[0].y * overlay.height - 5}
-              fill="#ffc44d"
+              x={roi.points[0].x * overlay.width}
+              y={roi.points[0].y * overlay.height}
+              fill="#ffb400"
               fontSize={fontSize * 0.78}
               paintOrder="stroke"
               stroke="#111"
@@ -1796,6 +1795,22 @@ function LiveOverlaySvg({ overlay }: { overlay?: LiveOverlaySnapshot }) {
             </text>
           )}
         </g>
+      ))}
+      {(overlay.motionRois ?? []).map((roi) => (
+        <polygon
+          key={`motion-roi-${roi.id}`}
+          points={pointString(
+            roi.points.map((point) => ({
+              x: point.x * overlay.width,
+              y: point.y * overlay.height,
+            })),
+          )}
+          fill="none"
+          stroke="#ffbe00"
+          strokeWidth={Math.max(1.5, overlay.width / 900)}
+          strokeDasharray="10 8"
+          strokeLinecap="round"
+        />
       ))}
       {overlay.processingOverlays.map((item, index) => {
         const color = `rgb(${item.red} ${item.green} ${item.blue})`;

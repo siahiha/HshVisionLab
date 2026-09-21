@@ -126,6 +126,7 @@ public class CameraRuntime : IDisposable
         int Width,
         int Height,
         IReadOnlyList<LiveOverlayRoi> Rois,
+        IReadOnlyList<LiveOverlayRoi> MotionRois,
         IReadOnlyList<LiveOverlayDetection> Detections,
         IReadOnlyList<LiveOverlayPrimitive> ProcessingOverlays,
         DateTime UpdatedUtc);
@@ -248,16 +249,16 @@ public class CameraRuntime : IDisposable
     {
         Size size = _lastFrameSize;
         DateTime now = DateTime.UtcNow;
-        IReadOnlyList<LiveOverlayRoi> rois = Settings.DrawBoxes
-            ? (Settings.Rois ?? [])
-                .Where(roi => roi.Enabled && roi.Points is { Count: >= 3 })
-                .Select(roi => new LiveOverlayRoi(
-                    roi.Id,
-                    roi.Name,
-                    roi.Enabled,
-                    roi.Points.Select(point => new LiveOverlayPoint(point.X, point.Y)).ToArray()))
-                .ToArray()
-            : [];
+        IReadOnlyList<LiveOverlayRoi> rois = [];
+        IReadOnlyList<LiveOverlayRoi> motionRois = [];
+        if (Settings.DrawBoxes && size.Width > 0 && size.Height > 0)
+        {
+            List<RuntimeRoi> detectionRois = GetNamedRois(size);
+            rois = detectionRois.Select(roi => ToLiveOverlayRoi(roi, size)).ToArray();
+            motionRois = GetMotionRois(size, detectionRois)
+                .Select(roi => ToLiveOverlayRoi(roi, size))
+                .ToArray();
+        }
 
         lock (_overlayGate)
         {
@@ -292,11 +293,21 @@ public class CameraRuntime : IDisposable
                 size.Width,
                 size.Height,
                 rois,
+                motionRois,
                 detections,
                 processingOverlays,
                 now);
         }
     }
+
+    private static LiveOverlayRoi ToLiveOverlayRoi(RuntimeRoi roi, Size size)
+        => new(
+            roi.Id,
+            roi.Name,
+            roi.Enabled,
+            roi.Polygon.Select(point => new LiveOverlayPoint(
+                point.X / Math.Max(1, size.Width - 1),
+                point.Y / Math.Max(1, size.Height - 1))).ToArray());
 
     private static LiveOverlayDetection ToLiveOverlayDetection(
         AnalysisDetection detection,
