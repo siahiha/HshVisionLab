@@ -1,0 +1,72 @@
+# Build outputs and generated folders
+[Bb]in/
+[Oo]bj/
+**/[Bb]in/
+**/[Oo]bj/
+DetectionManagerUi/dist/
+DetectionManagerUi/node_modules/
+.vs/
+.service-smoke/
+.service-smoke2/
+TestResults/
+artifacts/
+publish/
+coverage/
+
+# Visual Studio / local-user files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local runtime state, databases, logs and captured media
+**/settings.json
+**/service-settings.json
+**/events.db
+**/face-database.db
+**/history-archive.json
+**/media/
+**/logs/
+*.log
+*.mp4
+*.avi
+*.mkv
+*.wav
+*.jpg
+*.jpeg
+*.png
+
+# Secrets, certificates and machine/customer licenses
+auto.key
+auto.crt
+*.pfx
+*.p12
+*.hshlic
+vendor-private.pem
+private*.pem
+*_private.pem
+license*.json
+secrets*.json
+
+# Raw/experimental model sources and archives; runtime packages are handled below.
+HshDetectionEngin.Tools/RawModels/
+*.onnx
+*.pt
+*.pth
+*.zip
+*.7z
+*.rar
+
+# Model packages over GitHub's regular 100 MB file limit.
+HshDetectionEngin.Plate/Models/best.hshmodel
+HshDetectionEngin.Plate/Models/best_416_static.hshmodel
+
+# Keep package-manager caches and temporary files out of the repository.
+.npm/
+.nuget/
+*.tmp
+*.temp
+*.bak
+*.swp
+Thumbs.db
+Desktop.ini

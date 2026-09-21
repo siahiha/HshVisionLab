@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseSystemDrawing>true</UseSystemDrawing>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>HshDetectionEngin.Face</AssemblyName>
+    <RootNamespace>HshDetectionEngin.Face</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HshDetectionEngin.Abstractions\HshDetectionEngin.Abstractions.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin.Licensing\HshDetectionEngin.Licensing.csproj" />
+    <PackageReference Include="Emgu.CV" Version="4.13.0.5924" />
+    <PackageReference Include="Emgu.CV.Bitmap" Version="4.13.0.5924" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+  </ItemGroup>
+</Project>

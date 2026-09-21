@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseSystemDrawing>true</UseSystemDrawing>
+    <AssemblyName>HshDetectionEngin.Plate</AssemblyName>
+    <RootNamespace>HshDetectionEngin.Plate</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HshDetectionEngin.Abstractions\HshDetectionEngin.Abstractions.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin.Licensing\HshDetectionEngin.Licensing.csproj" />
+    <PackageReference Include="Emgu.CV" Version="4.13.0.5924" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
+  </ItemGroup>
+</Project>

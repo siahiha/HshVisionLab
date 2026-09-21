@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+    <AssemblyName>HshVisionLab</AssemblyName>
+    <RootNamespace>HshVisionLab</RootNamespace>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="HshDetectionEngin.Face\HshDetectionEngin.Face.csproj" />
+    <ProjectReference Include="HshDetectionEngin.Plate\HshDetectionEngin.Plate.csproj" />
+    <ProjectReference Include="HshDetectionEngin\HshDetectionEngin.csproj" />
+    <ProjectReference Include="HshDetectionEngin.Abstractions\HshDetectionEngin.Abstractions.csproj" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
+	   <PackageReference Include="Emgu.CV" Version="4.13.0.5924" />	  
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+    <None Include="license.hshlic" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="third_party\mediamtx\mediamtx.exe"
+             Link="MediaMTX\mediamtx.exe"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="Always" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\MaterialIcons\MaterialIcons-Regular.ttf" LogicalName="HshVisionLab.MaterialIcons.ttf" />
+    <Compile Remove="HshDetectionEngin\**\*.cs" />
+    <Compile Remove="HshDetectionEngin.Abstractions\**\*.cs" />
+    <Compile Remove="HshDetectionEngin.Plate\**\*.cs" />
+    <Compile Remove="HshDetectionEngin.Face\**\*.cs" />
+    <Compile Remove="HshDetectionEngin.Licensing\**\*.cs" />
+    <!-- Old build artifacts can remain after removing the legacy CLI project. -->
+    <Compile Remove="HshDetectionEngin.LicenseTool\**\*.cs" />
+    <Compile Remove="HshDetectionEngin.LicenseRequest\**\*.cs" />
+    <Compile Remove="HshDetectionEngin.LicenseIssuer\**\*.cs" />
+    <Compile Remove="HshDetectionEngin.Tools\**\*.cs" />
+    <!-- The Windows service is a separate SDK project and must not be included
+         by the root project's recursive Compile glob. -->
+    <Compile Remove="HshDetectionService\**\*.cs" />
+  </ItemGroup>
+
+</Project>

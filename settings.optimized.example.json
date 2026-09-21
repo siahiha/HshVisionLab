@@ -1,0 +1,110 @@
+{
+  "Cameras": [
+    {
+      "Id": "entrance-camera",
+      "Name": "Entrance",
+      "SourceUrl": "rtsp://192.168.1.100:554/stream",
+      "ModelFile": "best.onnx",
+      "PlateEnabled": true,
+      "Processing": [],
+      "FaceModelFile": "face_yunet_2023mar.onnx",
+      "FaceEnabled": true,
+      "FaceInputSize": 320,
+      "FaceConfidence": 0.8,
+      "FaceRecordConfidence": 0.8,
+      "FaceRecognitionEnabled": true,
+      "FaceRecognitionModelFile": "face_recognition_sface_2021dec.onnx",
+      "FaceRecognitionThreshold": 0.4,
+      "FaceMatchIou": 0.25,
+      "FaceTrackMaxMisses": 10,
+      "FacePreprocessing": "None",
+      "FaceMaxFps": 8,
+      "FaceNmsThreshold": 0.3,
+      "FaceTopK": 5000,
+      "FaceUnknownMatchThreshold": 0.35,
+      "FaceEventCooldownSeconds": 60,
+      "Transport": "TCP",
+      "CaptureBackend": "FFmpeg",
+      "BufferCount": 0,
+      "ReconnectDelaySec": 3,
+      "Confidence": 0.35,
+      "NmsIoU": 0.45,
+      "MaxFps": 8,
+      "InputSize": 416,
+      "Threads": 1,
+      "DrawBoxes": true,
+      "MotionGateEnabled": true,
+      "MotionFps": 8,
+      "MotionThreshold": 20,
+      "MotionChangedPercent": 0.7,
+      "MotionRoiScalePercent": 85,
+      "MotionHoldMs": 1200,
+      "ActiveDetectionFps": 8,
+      "IdleDetectionFps": 0,
+      "RoiLeft": 0,
+      "RoiTop": 0,
+      "RoiRight": 1,
+      "RoiBottom": 1,
+      "RoiEnabled": true,
+      "RoiPolygon": [],
+      "Rois": [
+        {
+          "Name": "Entrance ROI",
+          "Enabled": true,
+          "Points": [
+            { "X": 0.05, "Y": 0.35 },
+            { "X": 0.95, "Y": 0.35 },
+            { "X": 0.95, "Y": 0.98 },
+            { "X": 0.05, "Y": 0.98 }
+          ],
+          "Processing": [
+            {
+              "Id": "plate-entrance",
+              "Type": "Plate",
+              "Name": "Plate detection",
+              "Enabled": true,
+              "MaxFps": 8,
+              "Threads": 1,
+              "Options": {
+                "ModelFile": "best.onnx",
+                "InputSize": 416,
+                "Preprocessing": "Standard",
+                "Confidence": 0.35,
+                "NmsIoU": 0.45,
+                "TrackMaxMisses": 6
+              }
+            },
+            {
+              "Id": "face-entrance",
+              "Type": "Face",
+              "Name": "Face detection",
+              "Enabled": true,
+              "MaxFps": 8,
+              "Threads": 1,
+              "Options": {
+                "ModelFile": "face_yunet_2023mar.onnx",
+                "InputSize": 320,
+                "Preprocessing": "None",
+                "Confidence": 0.7,
+                "RecordConfidence": 0.8,
+                "RecognitionEnabled": true,
+                "RecognitionModelFile": "face_recognition_sface_2021dec.onnx",
+                "RecognitionThreshold": 0.4,
+                "MatchIou": 0.25,
+                "TrackMaxMisses": 10,
+                "NmsThreshold": 0.3,
+                "TopK": 5000,
+                "UnknownMatchThreshold": 0.35,
+                "EventCooldownSeconds": 60
+              }
+            }
+          ]
+        }
+      ],
+      "TrackMaxMisses": 6,
+      "PlatePreprocessing": "Standard",
+      "ProcessingSchemaVersion": 3
+    }
+  ],
+  "SelectedCameraId": "entrance-camera"
+}
