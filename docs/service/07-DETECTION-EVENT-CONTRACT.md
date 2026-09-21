@@ -310,6 +310,11 @@ VehiclePersonAssociation
 | `PlateCrop` | crop نهایی پلاک |
 | `CharacterCrop` | crop یا image sheet جزئیات characterها، در صورت نیاز |
 
+در پیاده‌سازی فعلی آرشیو تشخیص، `FullFrameRaw` و `RoiRaw` از snapshot خام قبل
+از اجرای pipeline و قبل از هرگونه رسم ROI یا detection ساخته می‌شوند. تصویر
+رندرشدهٔ preview و overlay زنده مسیر جداگانه‌ای دارند و نباید به‌عنوان artifact
+آرشیو استفاده شوند.
+
 هر artifact:
 
 ```json

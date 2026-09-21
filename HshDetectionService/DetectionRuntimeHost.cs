@@ -340,7 +340,12 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
 
     private void QueueEvent(CameraRuntime camera, Bitmap crop, AnalysisDetection? detection, DateTime timestamp, AnalysisKind kind, string label, AnalysisDetection? sourceDetection)
     {
-        Bitmap? full = GetLatestFrame(camera.Settings.Id);
+        Bitmap? full = camera.TryGetLatestRawFrame(out long rawSequence);
+        long sourceFrameSequence = rawSequence > 0
+            ? rawSequence
+            : _latestFrames.TryGetValue(camera.Settings.Id, out LatestFrameSlot? slot)
+                ? slot.Sequence
+                : camera.FrameSource.CapturedFrames;
         _eventQueue.Writer.TryWrite(new DetectionWork(
             camera.Settings.Id,
             kind,
@@ -349,7 +354,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             sourceDetection,
             new Bitmap(crop),
             full,
-            _latestFrames.TryGetValue(camera.Settings.Id, out LatestFrameSlot? slot) ? slot.Sequence : camera.FrameSource.CapturedFrames));
+            sourceFrameSequence));
     }
 
     private void Camera_StatusChanged(CameraRuntime camera, string message, bool isError)
@@ -377,7 +382,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         DetectionEventEnvelope envelope = BuildEvent(work, eventId, service);
 
         if (work.FullFrame is not null)
-            envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "FullFrameAnnotated", work.FullFrame, work.SourceFrameSequence, retention));
+            envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "FullFrameRaw", work.FullFrame, work.SourceFrameSequence, retention));
         envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, work.Kind == AnalysisKind.Face ? "DetectionCrop" : "PlateCrop", work.Crop, work.SourceFrameSequence, retention));
 
         if (work.FullFrame is not null)
@@ -386,7 +391,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 ?? new CameraSettings { Id = work.CameraId };
             using Bitmap? roi = CropForDetection(work.FullFrame, work.SourceDetection, camera);
             if (roi is not null)
-                envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "RoiAnnotated", roi, work.SourceFrameSequence, retention));
+                envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "RoiRaw", roi, work.SourceFrameSequence, retention));
         }
 
         if (TryGetMetadataBytes(work.SourceDetection, "AlignedFaceJpeg", out byte[]? alignedFace) && alignedFace is not null)

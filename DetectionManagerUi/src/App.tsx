@@ -234,21 +234,6 @@ function App() {
   return (
     <BrowserRouter>
       <div className="app-shell">
-        <div className="window-titlebar">
-          <div className="window-caption">
-            <span className="window-app-icon">
-              <Zap size={13} />
-            </span>
-            <span>HSH Vision</span>
-            <small>Detection Manager</small>
-          </div>
-          <div className="window-title">مدیریت هوشمند تشخیص</div>
-          <div className="window-system-actions" aria-hidden="true">
-            <span>—</span>
-            <span>□</span>
-            <span className="window-close">×</span>
-          </div>
-        </div>
         <div className="app-body">
         <aside className={`sidebar ${mobile ? "open" : ""}`}>
           <div className="brand">
@@ -362,13 +347,15 @@ function PageHead({
   title,
   description,
   action,
+  className,
 }: {
   title: string;
   description?: string;
   action?: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="page-head">
+    <div className={`page-head ${className ?? ""}`}>
       <div>
         <h1>{title}</h1>
         {description && <p>{description}</p>}
@@ -751,7 +738,7 @@ function DetectionHistoryPanel({
           {events.map((event) => {
             const crop = event.artifacts.find((artifact) => {
               const type = artifact.type.toLocaleLowerCase();
-              return type.includes("platecrop") || type.includes("detectioncrop") || type.includes("facealignedcrop") || type.includes("roiannotated");
+              return type.includes("platecrop") || type.includes("detectioncrop") || type.includes("facealignedcrop") || type.includes("roiraw") || type.includes("roiannotated");
             });
             const camera = s(event.source.cameraName, s(event.source.cameraId, "دوربین نامشخص"));
             return (
@@ -1909,14 +1896,30 @@ function RawMediaMtxStream({
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const viewerId = useRef(`web-${crypto.randomUUID().replaceAll("-", "")}`);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const overlay = useLiveOverlay(cameraId, enabled);
 
   useEffect(() => {
     let disposed = false;
-    let connection: RTCPeerConnection | undefined;
+    let connecting = false;
+    let reconnecting = false;
+    let reconnectTimer: number | undefined;
+    let healthTimer: number | undefined;
+    let reconnectAttempt = 0;
+    const reconnectDelays = [2000, 5000, 10000, 30000];
+    type ActiveSession = {
+      pc: RTCPeerConnection;
+      viewerId: string;
+      stream?: MediaStream;
+      lastProgressAt: number;
+      lastFramesDecoded?: number;
+      lastVideoTime?: number;
+      highJitterSince?: number;
+      closed?: boolean;
+    };
+    let activeSession: ActiveSession | undefined;
+
     const waitForIce = async (current: RTCPeerConnection) => {
       if (current.iceGatheringState === "complete") return;
       await new Promise<void>((resolve) => {
@@ -1934,48 +1937,177 @@ function RawMediaMtxStream({
       });
     };
 
-    const start = async () => {
-      if (!enabled || !cameraId) return;
-      setError("");
-      connection = new RTCPeerConnection();
+    const closeSession = (session: ActiveSession | undefined) => {
+      if (!session || session.closed) return;
+      session.closed = true;
+      if (activeSession === session) activeSession = undefined;
+      if (pcRef.current === session.pc) pcRef.current = null;
+      const video = videoRef.current;
+      if (video && video.srcObject === session.stream) video.srcObject = null;
+      session.pc.ontrack = null;
+      session.pc.onconnectionstatechange = null;
+      session.pc.oniceconnectionstatechange = null;
+      session.pc.close();
+      void api.whep(cameraId, session.viewerId, "DELETE").catch(() => undefined);
+    };
+
+    const scheduleReconnect = () => {
+      if (disposed || !enabled || connecting || reconnecting || reconnectTimer !== undefined) return;
+      const delay = reconnectDelays[Math.min(reconnectAttempt, reconnectDelays.length - 1)];
+      reconnectAttempt = Math.min(reconnectAttempt + 1, reconnectDelays.length - 1);
+      setError(`پخش زنده در حال بازیابی است؛ تلاش بعدی تا ${delay / 1000} ثانیه دیگر.`);
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = undefined;
+        void restart();
+      }, delay);
+    };
+
+    const restart = async () => {
+      if (disposed || !enabled || reconnecting) return;
+      reconnecting = true;
+      setRunning(false);
+      closeSession(activeSession);
+      try {
+        await connect();
+      } finally {
+        reconnecting = false;
+        // If the camera is temporarily unavailable, keep retrying this tile
+        // without requiring a full page refresh.
+        if (!disposed && !activeSession) scheduleReconnect();
+      }
+    };
+
+    const checkHealth = async () => {
+      const session = activeSession;
+      const video = videoRef.current;
+      if (disposed || !session || session.closed || !video) return;
+
+      const now = Date.now();
+      let framesDecoded: number | undefined;
+      let averageJitterBufferDelay: number | undefined;
+      try {
+        const stats = await session.pc.getStats();
+        stats.forEach((report) => {
+          if (report.type !== "inbound-rtp") return;
+          const inbound = report as RTCInboundRtpStreamStats & { mediaType?: string };
+          if (inbound.kind !== "video" && inbound.mediaType !== "video") return;
+          if (typeof inbound.framesDecoded === "number") framesDecoded = inbound.framesDecoded;
+          if (
+            typeof inbound.jitterBufferDelay === "number" &&
+            typeof inbound.jitterBufferEmittedCount === "number" &&
+            inbound.jitterBufferEmittedCount > 0
+          ) {
+            averageJitterBufferDelay =
+              inbound.jitterBufferDelay / inbound.jitterBufferEmittedCount;
+          }
+        });
+      } catch {
+        // A closed peer connection is handled by the state listeners below.
+      }
+
+      const videoAdvanced =
+        typeof session.lastVideoTime === "number" &&
+        video.currentTime > session.lastVideoTime + 0.01;
+      const framesAdvanced =
+        typeof framesDecoded === "number" &&
+        (typeof session.lastFramesDecoded !== "number" || framesDecoded > session.lastFramesDecoded);
+      session.lastVideoTime = video.currentTime;
+      session.lastFramesDecoded = framesDecoded;
+      if (videoAdvanced || framesAdvanced) session.lastProgressAt = now;
+
+      if (typeof averageJitterBufferDelay === "number" && averageJitterBufferDelay > 1.5) {
+        session.highJitterSince ??= now;
+      } else {
+        session.highJitterSince = undefined;
+      }
+
+      const peerIsBroken =
+        session.pc.connectionState === "failed" ||
+        session.pc.connectionState === "closed" ||
+        session.pc.iceConnectionState === "failed" ||
+        session.pc.iceConnectionState === "closed";
+      const videoIsStalled = now - session.lastProgressAt > 7000;
+      const jitterIsGrowing =
+        typeof session.highJitterSince === "number" && now - session.highJitterSince > 4000;
+      if (peerIsBroken || videoIsStalled || jitterIsGrowing) scheduleReconnect();
+    };
+
+    async function connect() {
+      if (disposed || !enabled || !cameraId || connecting) return;
+      connecting = true;
+      const session: ActiveSession = {
+        pc: new RTCPeerConnection(),
+        viewerId: `web-${crypto.randomUUID().replaceAll("-", "")}`,
+        lastProgressAt: Date.now(),
+      };
+      const connection = session.pc;
+      activeSession = session;
       pcRef.current = connection;
+      setError("");
       connection.addTransceiver("video", { direction: "recvonly" });
       connection.ontrack = (event) => {
-        if (!disposed && videoRef.current && event.streams[0]) {
-          videoRef.current.srcObject = event.streams[0];
-          setRunning(true);
+        const video = videoRef.current;
+        if (disposed || activeSession !== session || !video || !event.streams[0]) return;
+        session.stream = event.streams[0];
+        video.srcObject = session.stream;
+        video.defaultPlaybackRate = 1;
+        video.playbackRate = 1;
+        setRunning(true);
+        void video.play().catch(() => undefined);
+      };
+      connection.onconnectionstatechange = () => {
+        if (connection.connectionState === "failed" || connection.connectionState === "closed")
+          scheduleReconnect();
+        else if (connection.connectionState === "connected") {
+          reconnectAttempt = 0;
+          setError("");
         }
+      };
+      connection.oniceconnectionstatechange = () => {
+        if (connection.iceConnectionState === "failed" || connection.iceConnectionState === "closed")
+          scheduleReconnect();
       };
       try {
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
         await waitForIce(connection);
+        if (disposed || activeSession !== session) return;
         const response = await api.whep(
           cameraId,
-          viewerId.current,
+          session.viewerId,
           "POST",
           connection.localDescription?.sdp ?? "",
         );
         if (!response.ok)
           throw new Error((await response.text()) || `${response.status} ${response.statusText}`);
+        if (disposed || activeSession !== session) return;
         await connection.setRemoteDescription({
           type: "answer",
           sdp: await response.text(),
         });
       } catch (cause) {
-        if (!disposed) {
+        if (!disposed && activeSession === session) {
           setError(cause instanceof Error ? cause.message : "اتصال خام MediaMTX برقرار نشد.");
           setRunning(false);
+          closeSession(session);
+          scheduleReconnect();
         }
+      } finally {
+        connecting = false;
+        if (!disposed && !activeSession) scheduleReconnect();
       }
-    };
-    void start();
+    }
+
+    if (enabled && cameraId) {
+      void connect();
+      healthTimer = window.setInterval(() => void checkHealth(), 2000);
+    }
     return () => {
       disposed = true;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      if (healthTimer !== undefined) window.clearInterval(healthTimer);
       setRunning(false);
-      connection?.close();
-      pcRef.current = null;
-      void api.whep(cameraId, viewerId.current, "DELETE").catch(() => undefined);
+      closeSession(activeSession);
     };
   }, [cameraId, enabled]);
 
@@ -3103,8 +3235,8 @@ function Faces() {
   const [similarOpen, setSimilarOpen] = useState(false);
   const create = useMutation({
     mutationFn: api.createPerson,
-    onSuccess: (person) => {
-      void health.invalidateQueries({ queryKey: keys.people });
+    onSuccess: async (person) => {
+      await health.invalidateQueries({ queryKey: keys.people, refetchType: "active" });
       setSelected(person.id);
       setName("");
     },
@@ -3112,13 +3244,13 @@ function Faces() {
   const rename = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       api.renamePerson(id, name),
-    onSuccess: () => void health.invalidateQueries({ queryKey: keys.people }),
+    onSuccess: () => health.invalidateQueries({ queryKey: keys.people, refetchType: "active" }),
   });
   const remove = useMutation({
     mutationFn: api.deletePerson,
-    onSuccess: () => {
+    onSuccess: async () => {
       setSelected(undefined);
-      void health.invalidateQueries({ queryKey: keys.people });
+      await health.invalidateQueries({ queryKey: keys.people, refetchType: "active" });
     },
   });
   const filtered =
@@ -3212,18 +3344,28 @@ function Faces() {
             <Button
               icon={Plus}
               onClick={() => name.trim() && create.mutate(name.trim())}
+              disabled={create.isPending}
             >
               افزودن
             </Button>
           </div>
+          {create.error instanceof Error && (
+            <div className="preview-error">
+              <AlertTriangle size={15} />
+              {create.error.message}
+            </div>
+          )}
         </section>
         <section className="person-detail">
           {selected ? (
             <PersonDetail
               id={selected}
               people={people.data ?? []}
-              onRename={(next) => rename.mutate({ id: selected, name: next })}
+              onRename={(next) => rename.mutateAsync({ id: selected, name: next })}
               onDelete={() => remove.mutate(selected)}
+              renamePending={rename.isPending}
+              renameError={rename.error instanceof Error ? rename.error.message : undefined}
+              deleteError={remove.error instanceof Error ? remove.error.message : undefined}
             />
           ) : (
             <div className="panel editor-placeholder">
@@ -3251,11 +3393,17 @@ function PersonDetail({
   people,
   onRename,
   onDelete,
+  renamePending = false,
+  renameError,
+  deleteError,
 }: {
   id: string;
   people: FaceIdentity[];
-  onRename: (name: string) => void;
+  onRename: (name: string) => Promise<void>;
   onDelete: () => void;
+  renamePending?: boolean;
+  renameError?: string;
+  deleteError?: string;
 }) {
   const samples = usePersonSamples(id);
   const client = useQueryClient();
@@ -3301,9 +3449,13 @@ function PersonDetail({
                 <Button
                   variant="soft"
                   icon={Save}
+                  disabled={renamePending}
                   onClick={() => {
-                    if (nextName.trim()) onRename(nextName.trim());
-                    setEdit(false);
+                    const value = nextName.trim();
+                    if (!value) return;
+                    void onRename(value)
+                      .then(() => setEdit(false))
+                      .catch(() => undefined);
                   }}
                 >
                   ثبت
@@ -3335,6 +3487,12 @@ function PersonDetail({
           </Button>
         </div>
       </section>
+      {(renameError || deleteError) && (
+        <div className="preview-error">
+          <AlertTriangle size={15} />
+          {renameError ?? deleteError}
+        </div>
+      )}
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -3590,6 +3748,7 @@ function Events() {
   return (
     <>
       <PageHead
+        className="events-page-head"
         title="تاریخچه تشخیص و evidence"
         description="رخدادها پایدار ذخیره می‌شوند؛ با قطع UI eventها از دست نمی‌روند و پس از اتصال مجدد replay می‌شوند."
         action={
@@ -3615,7 +3774,21 @@ function Events() {
           </div>
         }
       />
-      <div className="events-layout">
+      <div className={`events-layout ${selected ? "has-selection" : "empty-selection"}`}>
+        <section className="event-side event-preview-top">
+          {selected ? (
+            <EventPreview id={selected} />
+          ) : (
+            <div className="panel editor-placeholder">
+              <Activity size={35} />
+              <b>یک رخداد را انتخاب کنید</b>
+              <span>
+                فریم کامل، cropهای ROI/Plate/Face و payload جزئی آن نمایش داده
+                می‌شود.
+              </span>
+            </div>
+          )}
+        </section>
         <section className="panel events-panel">
           <div className="panel-head compact">
             <div>
@@ -3681,26 +3854,13 @@ function Events() {
             )}
           </div>
         </section>
-        <section className="event-side">
-          {selected ? (
-            <EventPreview id={selected} />
-          ) : (
-            <div className="panel editor-placeholder">
-              <Activity size={35} />
-              <b>یک رخداد را انتخاب کنید</b>
-              <span>
-                فریم کامل، cropهای ROI/Plate/Face و payload جزئی آن نمایش داده
-                می‌شود.
-              </span>
-            </div>
-          )}
-        </section>
       </div>
     </>
   );
 }
 function EventPreview({ id }: { id: string }) {
   const event = useEvent(id);
+  const [payloadOpen, setPayloadOpen] = useState(false);
   if (event.isLoading)
     return (
       <div className="panel">
@@ -3722,15 +3882,19 @@ function EventPreview({ id }: { id: string }) {
           {item.scenario}
         </Badge>
       </div>
-      <div className="evidence-summary">
+      <div className="event-record-meta">
+        <span><b>رخداد</b>{item.eventType}</span>
+        <span><b>دوربین</b>{s(item.source.cameraName, s(item.source.cameraId, "—"))}</span>
+        <span><b>ROI</b>{s(item.source.roiName, "—")}</span>
+        <span><b>Sequence</b>#{item.sequence}</span>
+        <span><b>زمان</b>{fmtDate(item.occurredAtUtc)}</span>
+        <span><b>Trigger</b>{Boolean(item.trigger.matched) ? "matched" : "stored"}</span>
         {Object.entries(item.components).map(([key, value]) => (
-          <div key={key}>
+          <span key={key}>
             <b>{key}</b>
-            <span>
-              {s(value.label, s(value.plateText, "جزئیات در payload"))}
-            </span>
+            {s(value.label, s(value.plateText, "جزئیات در payload"))}
             <small>confidence {fmt(value.confidence, 3)}</small>
-          </div>
+          </span>
         ))}
       </div>
       <div className="artifact-grid">
@@ -3748,12 +3912,24 @@ function EventPreview({ id }: { id: string }) {
           </a>
         ))}
       </div>
-      <div className="json-block">
-        <div className="json-title">
-          <FileJson size={15} /> payload کامل تریگر و components
-        </div>
-        <pre>{JSON.stringify(item, null, 2)}</pre>
+      <div className="event-payload-actions">
+        <Button
+          variant="soft"
+          icon={FileJson}
+          aria-expanded={payloadOpen}
+          onClick={() => setPayloadOpen((open) => !open)}
+        >
+          {payloadOpen ? "بستن payload" : "نمایش payload"}
+        </Button>
       </div>
+      {payloadOpen && (
+        <div className="json-block">
+          <div className="json-title">
+            <FileJson size={15} /> payload کامل تریگر و components
+          </div>
+          <pre>{JSON.stringify(item, null, 2)}</pre>
+        </div>
+      )}
     </div>
   );
 }

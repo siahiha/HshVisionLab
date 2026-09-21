@@ -145,6 +145,18 @@ PATCH  /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 ```
 
+### ۴.۳ پایش سلامت و بازیابی خودکار پخش
+
+`RawMediaMtxStream` فقط به باز بودن اتصال اکتفا نمی‌کند. هر دو ثانیه وضعیت
+`RTCPeerConnection`، `iceConnectionState` و آمار `inbound-rtp` را بررسی می‌کند.
+اگر اتصال failed/closed شود، فریم‌های ویدئو بیشتر از حدود ۷ ثانیه جلو نروند، یا
+میانگین `jitterBufferDelay` برای چند ثانیه از حدود ۱٫۵ ثانیه بالاتر بماند، فقط
+همان tile با یک `viewerId` جدید WHEP را دوباره برقرار می‌کند. اتصال قبلی بسته و
+DELETE می‌شود و `<video>` دوباره `play()` می‌شود؛ بنابراین برای رفع lag نیازی
+به refresh کل صفحه نیست. خطای موقت دوربین نیز با retry خودکار همان tile دنبال
+می‌شود. فاصلهٔ retryها پلکانی و محدود به ۲، ۵، ۱۰ و حداکثر ۳۰ ثانیه است و پس
+از اتصال سالم دوباره از ۲ ثانیه شروع می‌شود.
+
 ## ۵. مسیر LibVLC/VLC
 
 در حالت `LibVLC`، MediaMTX در مسیر capture دوربین قرار ندارد:

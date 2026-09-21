@@ -28,6 +28,9 @@ public class CameraRuntime : IDisposable
     private readonly object _previewFrameGate = new();
     private readonly AutoResetEvent _previewFrameReady = new(false);
     private Mat? _latestPreviewFrame;
+    private readonly object _rawFrameGate = new();
+    private Bitmap? _latestRawFrame;
+    private long _latestRawFrameSequence;
     private volatile bool _running;
     private volatile bool _motionActive;
     private long _motionActiveUntilTicks;
@@ -77,6 +80,20 @@ public class CameraRuntime : IDisposable
     public IReadOnlyList<AnalysisHistoryItem> AnalysisHistory { get { lock (_analysisHistoryGate) return _analysisHistory.ToArray(); } }
     public IReadOnlyList<HistoryItem> ArchivedHistory => CameraHistoryArchive.LoadPlate(Settings.Id);
     public IReadOnlyList<AnalysisHistoryItem> ArchivedAnalysisHistory => CameraHistoryArchive.LoadFace(Settings.Id);
+
+    /// <summary>
+    /// Returns the raw source frame captured for the latest detection pass.
+    /// This is separate from FrameReady, which may contain ROI and detection
+    /// drawings for the live preview.
+    /// </summary>
+    public Bitmap? TryGetLatestRawFrame(out long sequence)
+    {
+        lock (_rawFrameGate)
+        {
+            sequence = _latestRawFrameSequence;
+            return _latestRawFrame is null ? null : new Bitmap(_latestRawFrame);
+        }
+    }
 
     private const int PreviewFps = 15;
     internal sealed record RuntimeRoi(string Id, string Name, PointF[] Polygon, Rectangle Bounds, bool Enabled);
@@ -441,7 +458,12 @@ public class CameraRuntime : IDisposable
                     Volatile.Write(ref _lastInferenceMs, 0);
                     if (anyValidRoi && HasConfiguredRoiPipelines())
                     {
+                        // Pipelines may transform their input. Preserve a
+                        // clean copy before running them for event artifacts.
+                        using Mat rawFrame = frame.Clone();
                         CameraPipelineCoordinator.PipelineExecutionResult execution = RunPipelines(frame, rois);
+                        if (execution.Detections.Count > 0)
+                            StoreLatestRawFrame(rawFrame, FrameSource.CapturedFrames);
                         UpdatePlateOverlays(frame, execution.Detections);
                         UpdateAnalysisOverlays(execution.Detections);
                         UpdateProcessingOverlays(execution);
@@ -493,6 +515,19 @@ public class CameraRuntime : IDisposable
             _latestPreviewFrame = null;
         }
         frame?.Dispose();
+    }
+
+    private void StoreLatestRawFrame(Mat frame, long sequence)
+    {
+        using Bitmap bitmap = frame.ToBitmap();
+        Bitmap replacement = new(bitmap);
+        lock (_rawFrameGate)
+        {
+            Bitmap? previous = _latestRawFrame;
+            _latestRawFrame = replacement;
+            _latestRawFrameSequence = sequence;
+            previous?.Dispose();
+        }
     }
 
     private CameraPipelineCoordinator.PipelineExecutionResult RunPipelines(Mat frame, List<RuntimeRoi> rois)
@@ -1126,7 +1161,32 @@ public class CameraRuntime : IDisposable
     private PointF[] GetRoiPolygon(Size size){if(!Settings.RoiEnabled)return [new(0,0),new(size.Width-1,0),new(size.Width-1,size.Height-1),new(0,size.Height-1)];if(Settings.RoiPolygon.Count>=3)return Settings.RoiPolygon.Select(p=>new PointF((float)Math.Clamp(p.X,0,1)*(size.Width-1),(float)Math.Clamp(p.Y,0,1)*(size.Height-1))).ToArray();double l=Math.Clamp(Settings.RoiLeft,0,1),t=Math.Clamp(Settings.RoiTop,0,1),r=Math.Clamp(Settings.RoiRight,l+.01,1),b=Math.Clamp(Settings.RoiBottom,t+.01,1);return[new((float)(size.Width*l),(float)(size.Height*t)),new((float)(size.Width*r),(float)(size.Height*t)),new((float)(size.Width*r),(float)(size.Height*b)),new((float)(size.Width*l),(float)(size.Height*b))];}
     private static Rectangle GetPolygonBounds(PointF[] p,Size s){if(p.Length<3)return Rectangle.Empty;float minX=p.Min(x=>x.X),maxX=p.Max(x=>x.X),minY=p.Min(x=>x.Y),maxY=p.Max(x=>x.Y);int x=Math.Clamp((int)Math.Floor(minX),0,s.Width-1),y=Math.Clamp((int)Math.Floor(minY),0,s.Height-1);int x2=Math.Clamp((int)Math.Ceiling(maxX),x+1,s.Width),y2=Math.Clamp((int)Math.Ceiling(maxY),y+1,s.Height);return new(x,y,Math.Max(1,x2-x),Math.Max(1,y2-y));}
     private static Point[] ToLocalPolygon(PointF[] p,Rectangle b)=>p.Select(x=>new Point(Math.Clamp((int)Math.Round(x.X-b.X),0,Math.Max(0,b.Width-1)),Math.Clamp((int)Math.Round(x.Y-b.Y),0,Math.Max(0,b.Height-1)))).ToArray();
-    public void Dispose(){Stop();foreach(var h in History)h.Crop.Dispose();foreach(var h in AnalysisHistory)h.Crop.Dispose();lock(_overlayGate){foreach(var overlay in _plateOverlay.Values)overlay.Crop?.Dispose();_plateOverlay.Clear();_analysisOverlay.Clear();_lastProcessingOverlays=[];_lastProcessingOverlaysUpdatedUtc=DateTime.MinValue;_analysisHistoryTimes.Clear();}lock(_analysisHistoryGate){_analysisHistory.Clear();}_pipelineCoordinator.Dispose();FrameSource.Dispose();_previewFrameReady.Dispose();GC.SuppressFinalize(this);}
+    public void Dispose()
+    {
+        Stop();
+        foreach (var h in History) h.Crop.Dispose();
+        foreach (var h in AnalysisHistory) h.Crop.Dispose();
+        lock (_rawFrameGate)
+        {
+            _latestRawFrame?.Dispose();
+            _latestRawFrame = null;
+            _latestRawFrameSequence = 0;
+        }
+        lock (_overlayGate)
+        {
+            foreach (var overlay in _plateOverlay.Values) overlay.Crop?.Dispose();
+            _plateOverlay.Clear();
+            _analysisOverlay.Clear();
+            _lastProcessingOverlays = [];
+            _lastProcessingOverlaysUpdatedUtc = DateTime.MinValue;
+            _analysisHistoryTimes.Clear();
+        }
+        lock (_analysisHistoryGate) { _analysisHistory.Clear(); }
+        _pipelineCoordinator.Dispose();
+        FrameSource.Dispose();
+        _previewFrameReady.Dispose();
+        GC.SuppressFinalize(this);
+    }
 }
 
 internal static class CameraHistoryArchive

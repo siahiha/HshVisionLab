@@ -329,8 +329,15 @@ public static class ServiceApi
         app.MapPost("/api/v1/face/people", (CreatePersonRequest request, DetectionRuntimeHost host) =>
         {
             if (string.IsNullOrWhiteSpace(request.Name)) return Results.BadRequest(new { error = "Name is required." });
-            FaceIdentity person = host.FaceDatabase.CreatePerson(request.Name);
-            return Results.Created($"/api/v1/face/people/{person.Id}", person);
+            try
+            {
+                FaceIdentity person = host.FaceDatabase.CreatePerson(request.Name);
+                return Results.Created($"/api/v1/face/people/{person.Id}", person);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
         });
         app.MapGet("/api/v1/face/people/{personId}", (string personId, DetectionRuntimeHost host) =>
         {
@@ -339,7 +346,18 @@ public static class ServiceApi
         });
 
         app.MapPatch("/api/v1/face/people/{personId}", (string personId, RenamePersonRequest request, DetectionRuntimeHost host) =>
-            host.FaceDatabase.Rename(personId, request.Name) ? Results.Ok() : Results.NotFound());
+        {
+            if (string.IsNullOrWhiteSpace(request.Name)) return Results.BadRequest(new { error = "Name is required." });
+            FaceIdentity? person = host.FaceDatabase.Identities.FirstOrDefault(item => item.Id == personId);
+            if (person is null) return Results.NotFound();
+            string normalizedName = request.Name.Trim();
+            if (host.FaceDatabase.Identities.Any(item => item.Id != personId &&
+                item.Name.Equals(normalizedName, StringComparison.OrdinalIgnoreCase)))
+                return Results.Conflict(new { error = $"A person named '{normalizedName}' already exists." });
+            return host.FaceDatabase.Rename(personId, normalizedName)
+                ? Results.NoContent()
+                : Results.Conflict(new { error = "The person name could not be changed." });
+        });
         app.MapDelete("/api/v1/face/people/{personId}", (string personId, DetectionRuntimeHost host) =>
             host.FaceDatabase.Remove(personId) ? Results.NoContent() : Results.NotFound());
         app.MapGet("/api/v1/face/people/{personId}/samples", (string personId, DetectionRuntimeHost host) =>

@@ -33,7 +33,6 @@ UI یک shell تاریک با حس برنامهٔ دسکتاپ ویندوزی د
 
 ```text
 app-shell
-├─ window-titlebar                 ارتفاع 38px
 └─ app-body
    ├─ sidebar                       عرض 248px در دسکتاپ
    └─ main-area
@@ -41,15 +40,11 @@ app-shell
       └─ page-content               حداکثر عرض 1660px، padding 27/30/58px
 ```
 
-### ۲.۱ نوار عنوان شبیه پنجرهٔ ویندوز
+`window-titlebar` در نسخهٔ فعلی وجود ندارد؛ shell مستقیماً با `app-body` شروع
+می‌شود. صفحه از جریان عادی مرورگر استفاده می‌کند و اجزایی مثل جدول‌ها، لیست‌ها
+و گریدها در صورت نیاز می‌توانند اسکرول داخلی داشته باشند.
 
-در `window-titlebar`، از چپ به راست این عناصر وجود دارند: آیکون آبی Zap، متن
-`HSH Vision`، متن کوچک `Detection Manager`، عنوان مرکزی
-`مدیریت هوشمند تشخیص` و سه نشانهٔ ظاهری minimize، maximize و close. این سه
-نشانه فقط ظاهر هستند و `aria-hidden` دارند؛ رفتار واقعی بستن یا minimize مرورگر
-ندارند.
-
-### ۲.۱.۱ توکن‌های بصری نهایی
+### ۲.۱ توکن‌های بصری نهایی
 
 در `styles.css` یک theme اولیه وجود دارد، اما بلوک `Windows desktop shell` در
 ادامهٔ همان فایل theme نهایی را override می‌کند. برای بازسازی، مقادیر نهایی
@@ -407,11 +402,19 @@ people`، نتایج جفت تصویر، similarity، `ادغام در اولی`
 `پلاک، نام، دوربین...`، select سناریوهای `همهٔ سناریوها`، `پلاک`، `چهره` و
 `پلاک + چهره` و دکمهٔ `تازه‌سازی` دارد.
 
-جدول `Event Store` ستون‌های `رخداد`، `دوربین / ROI`، `Trigger` و `زمان` دارد.
-انتخاب ردیف، سمت راست `EventPreview` را نشان می‌دهد: title، sequence/date،
-component summary با confidence، تمام artifactها شامل frame/crop و سپس JSON کامل
-در بخش `payload کامل تریگر و components`. `/events/:eventId` همین preview را
-با PageHead مستقل `جزئیات رخداد` نشان می‌دهد.
+در حالت عادی، عنوان صفحه، توضیح کوتاه و فیلترها تا حد امکان در یک ردیف
+فشرده قرار می‌گیرند. پیش از انتخاب رخداد، preview فقط یک نوار کوتاه با پیام
+`یک رخداد را انتخاب کنید` است تا فضای عمودی برای گرید تاریخچه حفظ شود.
+
+جدول `Event Store` در پایین صفحه و تمام‌عرض قرار دارد تا ستون‌های بیشتری از
+`رخداد`، `دوربین / ROI`، `Trigger` و `زمان` هم‌زمان دیده شوند؛ در صورت کمبود
+عرض، خود جدول اسکرول افقی دارد. انتخاب ردیف، `EventPreview` را در بالای جدول
+نشان می‌دهد. preview شامل title و یک ردیف فشردهٔ اطلاعات رکورد شامل event type،
+دوربین، ROI، sequence، زمان، وضعیت trigger و component summary با confidence است.
+تمام artifactها شامل frame/crop در یک ردیف افقی قرار می‌گیرند و در صورت زیاد
+بودن تعدادشان همان ردیف اسکرول افقی دارد. payload کامل تریگر و components به‌صورت
+پیش‌فرض بسته است و با دکمهٔ `نمایش payload` باز و با `بستن payload` بسته می‌شود.
+`/events/:eventId` همین preview را با PageHead مستقل `جزئیات رخداد` نشان می‌دهد.
 
 ## ۱۰. تریگرها `/triggers`
 
@@ -462,6 +465,14 @@ Content-Type: application/sdp
 با unmount شدن component، DELETE همان viewer ارسال می‌شود. مسیر `PATCH` برای
 trickle ICE در API helper وجود دارد، ولی start فعلی offer کامل را با POST
 ارسال می‌کند.
+
+برای جلوگیری از عقب‌افتادن تدریجی پخش، این component هر دو ثانیه سلامت اتصال و
+پیشرفت فریم را پایش می‌کند. حالت‌های `failed/closed` در PeerConnection یا ICE،
+توقف فریم برای حدود ۷ ثانیه، و jitter buffer بالاتر از حدود ۱٫۵ ثانیه برای چند
+ثانیه، recovery را فعال می‌کنند. recovery فقط همان stream را می‌بندد و با
+`viewerId` جدید WHEP را می‌سازد؛ در نتیجه refresh صفحه یا قطع stream دوربین‌های
+دیگر لازم نیست. retry خطای handshake نیز scoped به همان tile است و با backoff
+۲، ۵، ۱۰ و حداکثر ۳۰ ثانیه انجام می‌شود؛ پس از اتصال سالم شمارنده reset می‌شود.
 
 `useLiveOverlay` برای هر stream فعال endpoint زیر را ابتدا بلافاصله و سپس هر
 180ms با `setTimeout` poll می‌کند:
@@ -528,10 +539,9 @@ GET  /api/v1/settings
 
 | عنصر | دسکتاپ | responsive |
 | --- | --- | --- |
-| titlebar | 38px | 34px در ≤820 |
 | sidebar | 248px | drawer 270px در ≤820 |
 | topbar | 56px | 52px در ≤820 |
-| dashboard detection panel | 335px | 300px در ≤1100، زیر workspace در ≤820 |
+| dashboard detection panel | حداکثر 250px | تمام‌عرض در ≤820 |
 | camera tile | 184px | 170px در ≤500 |
 | ROI canvas | حداقل 345px | 300px در focus در ≤820 |
 | fullscreen legacy/modal | حداکثر 1480×900 و 96vh | یک ستون در ≤900 |
@@ -545,7 +555,7 @@ layoutهای camera/faces/events/triggers تک‌ستونه، formها تک‌س
 بازسازی فقط زمانی با این سند هم‌خوان است که همهٔ موارد زیر قابل مشاهده و قابل
 تست باشند:
 
-- shell شامل titlebar ویندوزی، sidebar، topbar و routeهای شش‌گانه باشد؛
+- shell شامل sidebar، topbar و routeهای شش‌گانه باشد؛
 - داشبورد commandbar، hero، چهار stat، wall، پنل crop+متن تشخیص و پنل runtime
   را به همین ترتیب داشته باشد؛
 - tile فقط Start/Stop، Edit و Fullscreen داشته باشد و حذف به آن نسبت داده نشود؛
@@ -554,6 +564,8 @@ layoutهای camera/faces/events/triggers تک‌ستونه، formها تک‌س
 - در focus ابزارهای view/edit/new/delete و در edit/new ذخیره/لغو وجود داشته
   باشد؛
 - MediaMTX از WHEP خام و Overlay SVG با polling حدود 180ms استفاده کند؛
+- MediaMTX در UI پایش سلامت WebRTC و recovery خودکار per-tile داشته باشد تا
+  lag تدریجی با refresh کل صفحه برطرف نشود؛
 - backendهای دیگر snapshot باشند؛
 - تنظیمات CameraEditor سه tab گفته‌شده و چهار بخش پردازش گفته‌شده را داشته باشد؛
 - همهٔ modelها از catalog سرویس و پوشه‌های مدل، نه از یک input متنی ثابت، بیایند؛
