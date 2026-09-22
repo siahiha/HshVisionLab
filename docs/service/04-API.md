@@ -39,6 +39,8 @@ POST /api/v1/service/validate-configuration
 
 در پیاده‌سازی فعلی `GET /api/v1/service/status` علاوه بر `eventSequence` مقدار `droppedEventCount` را برمی‌گرداند. این مقدار تعداد رخدادهایی است که به‌علت پرشدن صف bounded ذخیره‌سازی کنار گذاشته شده‌اند؛ صفر بودن آن نشانهٔ عقب‌نماندن worker ذخیره‌سازی است.
 
+`GET /api/v1/service/models` نباید برای تولید catalog، session کامل ONNX بسازد؛ پاسخ آن باید بدون warm-up مدل و با input sizeهای catalog-safe برگردد تا بارگذاری UI باعث توقف یا timeout سرویس نشود.
+
 ## 3. تنظیمات عمومی سرویس
 
 ```text

@@ -21,6 +21,20 @@ public static class FaceModelInspector
             .Value;
     }
 
+    /// <summary>
+    /// Returns the known catalog size without opening an ONNX session. YuNet
+    /// models supported by this module use the fixed 640x640 detector input.
+    /// </summary>
+    public static int GetCatalogSquareInputSize(string configuredName)
+    {
+        string name = Path.GetFileName(configuredName);
+        if (!string.IsNullOrWhiteSpace(name) &&
+            Cache.TryGetValue(name, out Lazy<int?>? cached) && cached.IsValueCreated && cached.Value is int inspected && inspected > 0)
+            return inspected;
+
+        return 640;
+    }
+
     private static int? Inspect(string name)
     {
         string? temporaryModel = null;

@@ -29,6 +29,38 @@ public static class PlateModelInspector
             .Value;
     }
 
+    /// <summary>
+    /// Returns catalog-safe choices without synchronously constructing an
+    /// ONNX session. The service model endpoint must stay responsive while
+    /// cameras are running; exact inspection remains available through
+    /// <see cref="GetSquareInputSizes"/> for local/configuration workflows.
+    /// </summary>
+    public static IReadOnlyList<int> GetCatalogSquareInputSizes(string configuredName)
+    {
+        string name = Path.GetFileName(configuredName);
+        if (string.IsNullOrWhiteSpace(name)) name = "best.onnx";
+
+        if (Cache.TryGetValue(name, out Lazy<int[]>? cached) && cached.IsValueCreated)
+        {
+            int[] inspected = cached.Value;
+            if (inspected.Length > 0) return inspected;
+        }
+
+        // Fixed-size exports in the shipped catalog encode the tensor size in
+        // their filename (for example best_416_static...). If no fixed size
+        // is declared, expose the stride-aligned dynamic choices. This is
+        // safe for YOLO dynamic-input exports and avoids opening a large model
+        // session from an HTTP request.
+        string stem = Path.GetFileNameWithoutExtension(name);
+        foreach (string token in stem.Split('_', '-', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!int.TryParse(token, out int size) || size < 32 || size > 2048 || size % 32 != 0) continue;
+            return [size];
+        }
+
+        return DynamicSquareInputSizes;
+    }
+
     private static int[] Inspect(string name)
     {
         string? temporaryModel = null;

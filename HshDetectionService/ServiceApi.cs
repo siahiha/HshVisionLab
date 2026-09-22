@@ -64,11 +64,15 @@ public static class ServiceApi
                     int[] inputSizes;
                     if (item.module == "Plate")
                     {
-                        inputSizes = PlateModelInspector.GetSquareInputSizes(name).ToArray();
+                        // Do not construct an ONNX InferenceSession inside an
+                        // HTTP request. Model catalog metadata is requested by
+                        // the UI during startup and must remain responsive
+                        // while cameras are running.
+                        inputSizes = PlateModelInspector.GetCatalogSquareInputSizes(name).ToArray();
                     }
-                    else if (capability == "FaceDetection" && FaceModelInspector.TryGetSquareInputSize(name) is int faceSize)
+                    else if (capability == "FaceDetection")
                     {
-                        inputSizes = [faceSize];
+                        inputSizes = [FaceModelInspector.GetCatalogSquareInputSize(name)];
                     }
                     else
                     {
