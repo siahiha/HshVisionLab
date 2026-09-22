@@ -397,7 +397,11 @@ public class CameraRuntime : IDisposable
         var cts = new CancellationTokenSource();
         _cts = cts;
         _previewThread = new Thread(() => PreviewLoop(cts.Token)) { IsBackground = true, Name = $"PreviewLoop-{Settings.Name}", Priority = ThreadPriority.BelowNormal };
-        _thread = new Thread(() => ProcessLoop(cts.Token)) { IsBackground = true, Name = $"DetectLoop-{Settings.Name}", Priority = ThreadPriority.Normal };
+        // Keep the web/API thread pool responsive when an ONNX session is
+        // configured with multiple intra-op workers. Native workers are still
+        // controlled by the model's thread setting, but the camera scheduler
+        // itself should yield to interactive/service traffic.
+        _thread = new Thread(() => ProcessLoop(cts.Token)) { IsBackground = true, Name = $"DetectLoop-{Settings.Name}", Priority = ThreadPriority.BelowNormal };
         _running = true;
         _previewThread.Start();
         FrameSource.Start();

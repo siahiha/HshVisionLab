@@ -30,7 +30,86 @@ internal sealed class CameraPipelineCoordinator : IDisposable
     private readonly Action<string, bool> _reportStatus;
     private readonly Action<double> _setInferenceMs;
     private readonly object _gate = new();
-    private readonly Dictionary<string, List<PipelineBinding>> _pipelines = new(StringComparer.OrdinalIgnoreCase);
+    private PipelineGraph _graph = new(new Dictionary<string, List<PipelineBinding>>(StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// An immutable pipeline graph which can be replaced atomically. Inference
+    /// leases the graph while it is running, so a settings rebuild can never
+    /// dispose an ONNX session underneath an active detection pass. The web
+    /// layer only touches the short coordinator lock when it reads the graph;
+    /// it never waits for inference to finish.
+    /// </summary>
+    private sealed class PipelineGraph
+    {
+        private readonly object _gate = new();
+        private readonly ManualResetEventSlim _idle = new(true);
+        private int _activeRuns;
+        private bool _retired;
+        private bool _disposed;
+
+        public PipelineGraph(Dictionary<string, List<PipelineBinding>> pipelines)
+        {
+            Pipelines = pipelines;
+        }
+
+        public Dictionary<string, List<PipelineBinding>> Pipelines { get; }
+
+        public int ActivePipelineCount => Pipelines.Values.Sum(pipelines => pipelines.Count);
+
+        public bool HasConfiguredPipelines => Pipelines.Values.Any(pipelines => pipelines.Count > 0);
+
+        public bool TryAcquire()
+        {
+            lock (_gate)
+            {
+                if (_retired) return false;
+                _activeRuns++;
+                _idle.Reset();
+                return true;
+            }
+        }
+
+        public void Release()
+        {
+            bool dispose;
+            lock (_gate)
+            {
+                if (_activeRuns > 0) _activeRuns--;
+                if (_activeRuns != 0) return;
+                _idle.Set();
+                dispose = _retired;
+            }
+
+            if (dispose) DisposePipelinesOnce();
+        }
+
+        public void RetireAndDispose()
+        {
+            lock (_gate)
+            {
+                _retired = true;
+                if (_activeRuns == 0)
+                {
+                    // No active reader can appear after retirement.
+                }
+            }
+
+            _idle.Wait();
+            DisposePipelinesOnce();
+            _idle.Dispose();
+        }
+
+        private void DisposePipelinesOnce()
+        {
+            lock (_gate)
+            {
+                if (_disposed) return;
+                _disposed = true;
+            }
+
+            DisposePipelines(Pipelines.Values);
+        }
+    }
 
     public CameraPipelineCoordinator(
         CameraSettings settings,
@@ -48,10 +127,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
 
     public int ActivePipelineCount
     {
-        get
-        {
-            lock (_gate) return _pipelines.Values.Sum(pipelines => pipelines.Count);
-        }
+        get { lock (_gate) return _graph.ActivePipelineCount; }
     }
 
     public void Rebuild()
@@ -100,30 +176,38 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             rebuilt[roiKey] = pipelines;
         }
 
+        PipelineGraph replacement = new(rebuilt);
+        PipelineGraph previous;
         lock (_gate)
         {
-            DisposePipelines(_pipelines.Values);
-            _pipelines.Clear();
-            foreach ((string name, List<PipelineBinding> pipelines) in rebuilt)
-                _pipelines[name] = pipelines;
+            previous = _graph;
+            _graph = replacement;
         }
+
+        // Do not hold the coordinator lock while an old inference pass drains.
+        previous.RetireAndDispose();
     }
 
     public bool HasConfiguredPipelines()
     {
-        lock (_gate)
-        {
-            return _pipelines.Values.Any(pipelines => pipelines.Count > 0);
-        }
+        lock (_gate) return _graph.HasConfiguredPipelines;
     }
 
     public PipelineExecutionResult Run(Mat frame, IReadOnlyList<CameraRuntime.RuntimeRoi> rois)
     {
         var execution = new PipelineExecutionResult();
-        lock (_gate)
+        PipelineGraph graph;
+        lock (_gate) graph = _graph;
+        if (!graph.TryAcquire())
+        {
+            _setInferenceMs(0);
+            return execution;
+        }
+
+        try
         {
             double maxPipelineMs = 0;
-            if (_pipelines.Count == 0)
+            if (graph.Pipelines.Count == 0)
             {
                 _setInferenceMs(0);
                 return execution;
@@ -133,8 +217,8 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             {
                 if (roi.Polygon.Length < 3 || roi.Bounds.Width < 32 || roi.Bounds.Height < 32) continue;
                 string roiKey = GetRoiKey(roi);
-                if (!_pipelines.TryGetValue(roiKey, out List<PipelineBinding>? pipelines) &&
-                    !_pipelines.TryGetValue(roi.Name, out pipelines)) continue;
+                if (!graph.Pipelines.TryGetValue(roiKey, out List<PipelineBinding>? pipelines) &&
+                    !graph.Pipelines.TryGetValue(roi.Name, out pipelines)) continue;
                 if (pipelines.Count == 0) continue;
 
                 using var roiMat = new Mat(frame, roi.Bounds);
@@ -206,18 +290,24 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             }
 
             _setInferenceMs(maxPipelineMs);
+            return execution;
         }
-
-        return execution;
+        finally
+        {
+            graph.Release();
+        }
     }
 
     public void Dispose()
     {
+        PipelineGraph previous;
         lock (_gate)
         {
-            DisposePipelines(_pipelines.Values);
-            _pipelines.Clear();
+            previous = _graph;
+            _graph = new PipelineGraph(new Dictionary<string, List<PipelineBinding>>(StringComparer.OrdinalIgnoreCase));
         }
+
+        previous.RetireAndDispose();
     }
 
     private static AnalysisDetection AttachProcessingSettings(

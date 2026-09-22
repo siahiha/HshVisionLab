@@ -22,6 +22,9 @@ YOLO با ONNX Runtime و CPU اجرا می‌شود. ورودی با letterbox 
 - ROI دقیق و Motion Gate فعال، تعداد inferenceهای بی‌فایده را کم می‌کند.
 - `ActiveDetectionFps` و `MaxFps` را متناسب با CPU تنظیم کنید.
 - `InputSize` بزرگ‌تر معمولاً دقت و هزینهٔ CPU را با هم افزایش می‌دهد.
+- `Threads` تعداد threadهای داخلی ONNX (`IntraOpNumThreads`) است، نه تعداد دوربین یا worker مستقل. افزایش آن برای هر ROI یک مصرف CPU سنگین ایجاد می‌کند؛ ابتدا با `1` baseline بگیرید و فقط اگر latency لازم است به `2` یا بیشتر بروید.
+- API و inference در همان سرویس اجرا می‌شوند، اما graph pipeline دیگر قفل طولانی نگه نمی‌دارد؛ status و تنظیمات باید در زمان inference نیز پاسخ‌گو بمانند. صف event نیز bounded است و مقدار `droppedEventCount` در `GET /api/v1/service/status` نشان می‌دهد که ذخیره‌سازی از پردازش عقب افتاده است.
+- اگر با `threads=4` هنوز CPU یا زمان inference بالا می‌رود، راه کنترل فشار کم‌کردن `MaxFps`/`ActiveDetectionFps`، کوچک‌ترکردن ROI و در صورت امکان استفاده از مدل سبک‌تر است؛ افزایش `BufferCount` برای جبران مناسب نیست و latency را بیشتر می‌کند.
 
 ### latency مسیر نمایش
 

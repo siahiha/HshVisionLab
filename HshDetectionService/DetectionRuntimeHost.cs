@@ -29,7 +29,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private readonly object _triggerGate = new();
     private readonly Dictionary<string, DateTime> _triggerLastFiredUtc = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, LatestFrameSlot> _latestFrames = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Channel<DetectionWork> _eventQueue = Channel.CreateUnbounded<DetectionWork>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+    private Channel<DetectionWork> _eventQueue = CreateEventQueue(10_000);
     private readonly object _associationGate = new();
     private readonly List<PendingComponent> _pendingComponents = [];
     private readonly Dictionary<string, DateTime> _emittedAssociationTimes = new(StringComparer.OrdinalIgnoreCase);
@@ -43,6 +43,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private LicenseValidationResult? _license;
     private AppSettings _settings = new();
     private bool _started;
+    private long _droppedEventCount;
 
     public DetectionRuntimeHost(
         ServicePaths paths,
@@ -72,6 +73,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     public ProcessingRegistry ProcessingModules => _registry ?? throw new InvalidOperationException("Processing registry is not ready.");
     public bool IsReady { get; private set; }
     public string? ReadinessError { get; private set; }
+    public long DroppedEventCount => Interlocked.Read(ref _droppedEventCount);
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -86,6 +88,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             _paths.EnsureDirectories();
             _settings = _settingsStore.Detection;
             ServiceSettingsDocument service = _settingsStore.Service;
+            _eventQueue = CreateEventQueue(service.Runtime?.MaxEventQueueLength ?? 10_000);
             _license = LicenseValidator.Load(_paths.LicensePath);
             _faceDatabase = FaceDatabase.Load(_paths.FaceDatabasePath);
             _faceModule = new FaceModule(_faceDatabase, _license);
@@ -96,7 +99,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             _eventWorker = Task.Run(() => ProcessEventQueueAsync(_shutdown.Token), CancellationToken.None);
             _associationTimer.Change(500, 500);
             foreach (CameraSettings cameraSettings in _settings.Cameras.ToArray())
-                AddOrReplaceCamera(cameraSettings, start: service.Runtime.AutoStartCameras);
+                AddOrReplaceCamera(cameraSettings, start: service.Runtime?.AutoStartCameras ?? true);
 
             IsReady = true;
             ReadinessError = null;
@@ -506,7 +509,30 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 _emittedComponentTimes.Remove(oldKey);
         }
 
-        if (duplicate || !_eventQueue.Writer.TryWrite(work)) work.Dispose();
+        if (duplicate)
+        {
+            work.Dispose();
+            return;
+        }
+
+        if (!_eventQueue.Writer.TryWrite(work))
+        {
+            Interlocked.Increment(ref _droppedEventCount);
+            _logger.LogWarning("Detection event queue is full; dropping an event for camera {CameraId}.", work.CameraId);
+            work.Dispose();
+        }
+    }
+
+    private static Channel<DetectionWork> CreateEventQueue(int configuredCapacity)
+    {
+        int capacity = Math.Clamp(configuredCapacity, 100, 100_000);
+        return Channel.CreateBounded<DetectionWork>(new BoundedChannelOptions(capacity)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait,
+            AllowSynchronousContinuations = false
+        });
     }
 
     private int AssociationWindowMs => Math.Clamp(_settingsStore.Service.Association?.MaxWindowMs ?? 1500, 0, 10_000);

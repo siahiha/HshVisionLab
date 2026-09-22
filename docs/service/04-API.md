@@ -37,6 +37,8 @@ POST /api/v1/service/validate-configuration
 
 `ready` فقط وقتی موفق باشد که configuration، license، مدل‌های لازم و Face Database آماده باشند. status باید وضعیت هر camera، task، pipeline، stream و queue را جداگانه نشان دهد.
 
+در پیاده‌سازی فعلی `GET /api/v1/service/status` علاوه بر `eventSequence` مقدار `droppedEventCount` را برمی‌گرداند. این مقدار تعداد رخدادهایی است که به‌علت پرشدن صف bounded ذخیره‌سازی کنار گذاشته شده‌اند؛ صفر بودن آن نشانهٔ عقب‌نماندن worker ذخیره‌سازی است.
+
 ## 3. تنظیمات عمومی سرویس
 
 ```text

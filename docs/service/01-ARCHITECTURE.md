@@ -99,6 +99,8 @@ HshDetectionService
 
 فریم‌ها را با توجه به `MaxFps`، Motion Gate و وضعیت task به pipeline می‌دهد. scheduler نباید فریم‌ها را برای مدت طولانی در صف نگه دارد؛ برای تصویر زنده سیاست اصلی `latest frame wins` است.
 
+`CameraPipelineCoordinator` graph فعال را بدون نگه‌داشتن قفل در طول inference snapshot می‌کند. بنابراین endpointهای وضعیت دوربین برای خواندن تعداد pipeline یا وضعیت runtime منتظر پایان ONNX نمی‌مانند. graph قبلی هنگام تغییر تنظیمات تا پایان leaseهای فعال زنده می‌ماند و سپس sessionهای آن آزاد می‌شوند.
+
 ### `OverlayStateStore`
 
 نتیجهٔ آخرین inference کامل‌شده را به‌شکل immutable نگه می‌دارد. این store شامل ROIهای ثابت، detectionهای پویا، زمان انقضا، sequence فریم مبنا و version وضعیت است.
@@ -110,6 +112,8 @@ HshDetectionService
 ### `EventStore`
 
 event را قبل از broadcast ذخیره می‌کند و cursor ترتیبی می‌سازد. این بخش مستقل از اتصال UI کار می‌کند.
+
+ورودی ذخیره‌سازی یک Channel محدود دارد (`Service.Runtime.MaxEventQueueLength`). اگر مصرف‌کننده عقب بماند، رخداد جدید با آزادسازی artifactهایش حذف می‌شود و تعداد حذف‌شده‌ها در `GET /api/v1/service/status` با نام `droppedEventCount` قابل مشاهده است.
 
 ### `StreamSessionManager`
 

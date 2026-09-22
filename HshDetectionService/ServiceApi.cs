@@ -26,7 +26,8 @@ public static class ServiceApi
             serviceNodeId = store.Service.ServiceNodeId,
             license = new { host.License.IsValid, host.License.Message, features = host.License.Claims?.Features.ToString() },
             cameras = host.GetCameraStatuses(),
-            eventSequence = host.Events.CurrentSequence()
+            eventSequence = host.Events.CurrentSequence(),
+            droppedEventCount = host.DroppedEventCount
         }));
 
         app.MapGet("/api/v1/service/capabilities", (DetectionRuntimeHost host) => Results.Ok(host.ProcessingModules.Modules.Select(module => new
