@@ -19,6 +19,8 @@ public sealed class ServiceSettingsDocument
 public sealed class ServiceHttpSettings
 {
     public string[] ListenUrls { get; set; } = ["http://127.0.0.1:5080"];
+    public bool ServeUi { get; set; }
+    public string[] CorsOrigins { get; set; } = ["http://127.0.0.1:5173", "http://localhost:5173"];
 }
 
 public sealed class ServiceSecuritySettings

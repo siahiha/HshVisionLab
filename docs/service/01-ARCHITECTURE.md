@@ -115,6 +115,15 @@ event را قبل از broadcast ذخیره می‌کند و cursor ترتیبی
 
 ورودی ذخیره‌سازی یک Channel محدود دارد (`Service.Runtime.MaxEventQueueLength`). اگر مصرف‌کننده عقب بماند، رخداد جدید با آزادسازی artifactهایش حذف می‌شود و تعداد حذف‌شده‌ها در `GET /api/v1/service/status` با نام `droppedEventCount` قابل مشاهده است.
 
+### UI مستقل از سرویس
+
+`DetectionManagerUi` یک پروژهٔ مستقل Vite/React است. حالت پیش‌فرض سرویس
+`http.serveUi=false` است؛ در این حالت سرویس فقط API، SignalR، stream و inference
+را ارائه می‌کند و UI با `VITE_HSH_API_BASE_URL` به آن وصل می‌شود. `http.corsOrigins`
+برای fetch، snapshot، WHEP و SignalR originهای UI را کنترل می‌کند. برای سازگاری
+قدیمی، host داخلی حذف نشده است: با `http.serveUi=true` و build با
+`-p:EmbedUi=true` همان سرویس می‌تواند `wwwroot` را نیز سرو کند.
+
 ### `StreamSessionManager`
 
 برای هر دوربین یک منبع تصویری composited دارد و چند کلاینت WebRTC را به همان منبع متصل می‌کند. اتصال یک کلاینت نباید باعث اجرای inference یا compositing جداگانه برای کلاینت‌های دیگر شود.

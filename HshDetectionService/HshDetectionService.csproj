@@ -10,6 +10,7 @@
     <AssemblyName>HshDetectionService</AssemblyName>
     <RootNamespace>HshDetectionService</RootNamespace>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <EmbedUi>false</EmbedUi>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,9 +32,9 @@
              CopyToPublishDirectory="Always" />
   </ItemGroup>
 
-  <!-- Embed the production React manager in the service output when the UI has
-       been built. The service then serves the same UI and API from port 5080. -->
-  <ItemGroup Condition="Exists('..\DetectionManagerUi\dist\index.html')">
+  <!-- Optional compatibility mode. The default is separate UI hosting; use
+       -p:EmbedUi=true and http.serveUi=true to serve the built UI here. -->
+  <ItemGroup Condition="'$(EmbedUi)' == 'true' and Exists('..\DetectionManagerUi\dist\index.html')">
     <Content Include="..\DetectionManagerUi\dist\**\*"
              Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"

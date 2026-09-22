@@ -85,7 +85,7 @@ export interface ServiceSettings {
   schemaVersion: number;
   revision: number;
   serviceNodeId: string;
-  http: { listenUrls: string[] };
+  http: { listenUrls: string[]; serveUi: boolean; corsOrigins: string[] };
   security: { apiKey: string; allowLoopbackWithoutApiKey: boolean };
   runtime: {
     autoStartCameras: boolean;

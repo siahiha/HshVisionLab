@@ -52,6 +52,9 @@
 تنظیمات خاص سرویس را نگه می‌دارد:
 
 - HTTP/HTTPS
+- `http.listenUrls`: آدرس‌های bind سرویس؛ برای دسترسی از ماشین دیگر باید آدرس شبکه یا `0.0.0.0` تنظیم شود.
+- `http.serveUi`: به‌صورت پیش‌فرض `false`؛ در این حالت UI مستقل host می‌شود و سرویس فقط API، SignalR و stream را ارائه می‌کند.
+- `http.corsOrigins`: فهرست دقیق originهای UI مستقل، برای fetch و SignalR.
 - authentication
 - WebRTC/ICE
 - stream profiles
@@ -59,6 +62,10 @@
 - triggerها
 - webhookها
 - logging و metrics
+
+تغییر `serveUi` و `corsOrigins` در زمان start سرویس خوانده می‌شود و پس از ذخیره‌سازی
+نیازمند restart سرویس است. برای حالت embedded علاوه بر `serveUi=true` باید build
+سرویس با `-p:EmbedUi=true` انجام شود.
 
 ### `face-database.db`
 

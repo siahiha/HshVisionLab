@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr'
 import { useEffect, useState } from 'react'
-import { api } from './api'
+import { api, serviceUrl } from './api'
 import type { CameraSettings, ClientSubscription, DetectionEvent, TriggerDefinition } from './types'
 export const keys = { status: ['status'], cameras: ['cameras'], settings: ['settings'], capabilities: ['capabilities'], models: ['models'], people: ['people'], triggers: ['triggers'], events: ['events'] }
 export const clientSubscriptionKey = 'hsh-client-subscription'
@@ -51,7 +51,7 @@ export function useDetectionStream() {
     let last = Number(sessionStorage.getItem(key) ?? '0') || 0
     let pending: DetectionEvent[] = []
     let flushTimer: number | undefined
-    const connection = new HubConnectionBuilder().withUrl('/hubs/detections').withAutomaticReconnect([0, 2000, 5000, 15000]).configureLogging(LogLevel.Warning).build()
+    const connection = new HubConnectionBuilder().withUrl(serviceUrl('/hubs/detections')).withAutomaticReconnect([0, 2000, 5000, 15000]).configureLogging(LogLevel.Warning).build()
     const flush = () => {
       flushTimer = undefined
       if (stopped || pending.length === 0) return

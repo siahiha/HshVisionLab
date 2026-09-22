@@ -33,6 +33,8 @@ public sealed class ServiceSettingsStore
         {
             _service = LoadFile(_paths.ServiceSettingsPath, new ServiceSettingsDocument());
             _service.Http ??= new ServiceHttpSettings();
+            _service.Http.ListenUrls ??= ["http://127.0.0.1:5080"];
+            _service.Http.CorsOrigins ??= ["http://127.0.0.1:5173", "http://localhost:5173"];
             _service.Security ??= new ServiceSecuritySettings();
             _service.Runtime ??= new ServiceRuntimeSettings();
             _service.Association ??= new ServiceAssociationSettings();
@@ -82,6 +84,8 @@ public sealed class ServiceSettingsStore
             settings.ServiceNodeId = string.IsNullOrWhiteSpace(settings.ServiceNodeId) ? _service.ServiceNodeId : settings.ServiceNodeId;
             settings.Security ??= new ServiceSecuritySettings();
             settings.Http ??= new ServiceHttpSettings();
+            settings.Http.ListenUrls ??= ["http://127.0.0.1:5080"];
+            settings.Http.CorsOrigins ??= ["http://127.0.0.1:5173", "http://localhost:5173"];
             settings.Runtime ??= new ServiceRuntimeSettings();
             settings.Retention ??= new ServiceRetentionSettings();
             settings.Triggers ??= [];

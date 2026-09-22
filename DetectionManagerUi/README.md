@@ -9,14 +9,32 @@ npm install
 npm run dev
 ```
 
-سرویس تشخیص باید روی `http://127.0.0.1:5080` در حال اجرا باشد. Vite در حالت توسعه routeهای `/api`، `/health` و `/hubs` را به سرویس proxy می‌کند.
+سرویس تشخیص باید روی `http://127.0.0.1:5080` در حال اجرا باشد. Vite در حالت توسعه routeهای `/api`، `/health` و `/hubs` را به سرویس proxy می‌کند؛ در این حالت UI از داخل سرویس host نمی‌شود.
+
+برای build و host مستقل UI، آدرس سرویس را هنگام build مشخص کنید:
+
+```powershell
+$env:VITE_HSH_API_BASE_URL = 'http://127.0.0.1:5080'
+$env:VITE_HSH_API_KEY = 'service-api-key'
+npm run build
+npm run preview -- --host 0.0.0.0 --port 5173
+```
+
+اگر UI و سرویس روی یک ماشین نیستند، origin UI را در `service-settings.json` داخل
+`http.corsOrigins` اضافه کنید. مسیرهای API، snapshot، WHEP و SignalR همگی از همین
+`VITE_HSH_API_BASE_URL` استفاده می‌کنند.
 
 برای سرویس remote می‌توان کلید API را تنظیم کرد:
 
 ```powershell
+$env:VITE_HSH_DEV_API_URL = 'http://192.168.10.50:5080'
 $env:VITE_HSH_API_KEY = 'service-api-key'
 npm run dev
 ```
+
+`VITE_HSH_DEV_API_URL` فقط مقصد proxy توسعه است. برای build production از
+`VITE_HSH_API_BASE_URL` استفاده کنید؛ این مقدار باید با یکی از originهای مجاز
+سرویس در `http.corsOrigins` هماهنگ باشد.
 
 ## قابلیت‌ها
 
@@ -44,4 +62,6 @@ npm run build
 npm run preview
 ```
 
-خروجی production در پوشهٔ `dist` ایجاد می‌شود. برای deployment سازمانی، بهتر است UI پشت reverse proxy سرویس قرار بگیرد تا origin و سیاست authentication کنترل‌شده باشند.
+خروجی production در پوشهٔ `dist` ایجاد می‌شود و می‌تواند توسط IIS، Nginx یا هر
+static host مستقلی سرو شود. host داخلی سرویس اختیاری است و با `http.serveUi=true`
+فعال می‌شود؛ مقدار پیش‌فرض آن `false` است.
