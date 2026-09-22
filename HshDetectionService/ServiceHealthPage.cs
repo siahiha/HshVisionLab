@@ -37,7 +37,7 @@ internal static class ServiceHealthPage
     .dot.warn, .badge.warn { background: #d59d31; color: #fff0c4; }
     .dot.fail, .badge.fail { background: #d55363; color: #ffe1e5; }
     .panel { border: 1px solid #203a57; border-radius: 13px; background: #0a1a2cdd; padding: 14px; margin-top: 12px; box-shadow: 0 12px 38px #0000001c; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     .card { border: 1px solid #264563; border-radius: 10px; padding: 11px; background: #0d2138; min-height: 91px; }
     .card-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
     .card strong { font-size: 13px; }
@@ -58,7 +58,9 @@ internal static class ServiceHealthPage
     td { color: #d8e5f3; }
     .state { direction: ltr; display: inline-block; }
     .footer { color: #718aa5; font-size: 11px; margin-top: 12px; }
+    @media (max-width: 850px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 650px) { header { display: block; } .overall { margin-top: 14px; } main { width: min(100% - 18px, 1040px); padding-top: 18px; } .panel { padding: 11px; } }
+    @media (max-width: 480px) { .cards { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
