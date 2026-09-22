@@ -4705,21 +4705,6 @@ function SettingsPage() {
               </div>
               <div className="setting-line">
                 <div>
-                  <b>Host embedded UI</b>
-                  <span>در حالت جداگانه خاموش بماند؛ تغییر بعدی نیازمند restart سرویس است.</span>
-                </div>
-                <Toggle
-                  checked={service.http.serveUi}
-                  onChange={(value) =>
-                    setService({
-                      ...service,
-                      http: { ...service.http, serveUi: value },
-                    })
-                  }
-                />
-              </div>
-              <div className="setting-line">
-                <div>
                   <b>CORS origins</b>
                   <span>هر origin UI جداگانه در یک خط؛ برای SignalR هم استفاده می‌شود. تغییر پس از restart سرویس اعمال می‌شود.</span>
                 </div>

@@ -9,7 +9,7 @@ $env:HSH_DETECTION_SERVICE_DATA_ROOT = 'D:\HshVision\DetectionService'
 dotnet run --project .\HshDetectionService\HshDetectionService.csproj
 ```
 
-به‌صورت پیش‌فرض سرویس فقط API، SignalR، stream و inference را ارائه می‌کند و UI را host نمی‌کند. پنل React در پروژهٔ `DetectionManagerUi` جداگانه build/serve می‌شود و با `VITE_HSH_API_BASE_URL` به این سرویس وصل می‌گردد. اگر لازم باشد host داخلی حفظ‌شده با تنظیم `http.serveUi=true` و build با `-p:EmbedUi=true` قابل فعال‌سازی است؛ routeهای `/api` و `/hubs` در هر دو حالت متعلق به سرویس هستند.
+سرویس فقط API، SignalR، stream و inference را ارائه می‌کند و UI در آن host نمی‌شود. پنل React در پروژهٔ `DetectionManagerUi` جداگانه build/serve می‌شود و با `VITE_HSH_API_BASE_URL` به این سرویس وصل می‌گردد؛ routeهای `/api` و `/hubs` متعلق به سرویس هستند.
 
 برای build کامل خروجی سرویس:
 
@@ -18,9 +18,6 @@ Push-Location .\DetectionManagerUi
 npm run build
 Pop-Location
 dotnet build .\HshDetectionService\HshDetectionService.csproj -c Debug
-
-# در حالت host داخلی اختیاری:
-dotnet build .\HshDetectionService\HshDetectionService.csproj -c Debug -p:EmbedUi=true
 ```
 
 اگر سرویس Windows در حال اجراست، قبل از build باید آن را با دسترسی Administrator متوقف کنید تا فایل executable قفل نباشد، سپس بعد از build دوباره start کنید.

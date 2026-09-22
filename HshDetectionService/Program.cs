@@ -1,6 +1,5 @@
 using HshDetectionService;
 using HshDetectionEngin.Capture;
-using Microsoft.Extensions.FileProviders;
 
 ServicePaths paths = new();
 ServiceSettingsStore settingsStore = new(paths);
@@ -58,21 +57,5 @@ app.Use(async (context, next) =>
     }
     await next();
 });
-string webRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-bool serveEmbeddedUi = startupSettings.Http.ServeUi && File.Exists(Path.Combine(webRoot, "index.html"));
-if (serveEmbeddedUi)
-{
-    IFileProvider webFiles = new PhysicalFileProvider(webRoot);
-    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = webFiles });
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = webFiles });
-}
 ServiceApi.Map(app);
-if (serveEmbeddedUi)
-{
-    app.MapFallback(async context =>
-    {
-        context.Response.ContentType = "text/html; charset=utf-8";
-        await context.Response.SendFileAsync(Path.Combine(webRoot, "index.html"));
-    });
-}
 await app.RunAsync();

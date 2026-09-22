@@ -117,12 +117,11 @@ event را قبل از broadcast ذخیره می‌کند و cursor ترتیبی
 
 ### UI مستقل از سرویس
 
-`DetectionManagerUi` یک پروژهٔ مستقل Vite/React است. حالت پیش‌فرض سرویس
-`http.serveUi=false` است؛ در این حالت سرویس فقط API، SignalR، stream و inference
-را ارائه می‌کند و UI با `VITE_HSH_API_BASE_URL` به آن وصل می‌شود. `http.corsOrigins`
-برای fetch، snapshot، WHEP و SignalR originهای UI را کنترل می‌کند. برای سازگاری
-قدیمی، host داخلی حذف نشده است: با `http.serveUi=true` و build با
-`-p:EmbedUi=true` همان سرویس می‌تواند `wwwroot` را نیز سرو کند.
+`DetectionManagerUi` یک پروژهٔ مستقل Vite/React است و سرویس تشخیص هیچ فایل UI
+یا route fallback مربوط به آن را host نمی‌کند. سرویس فقط API، SignalR، stream و
+inference را ارائه می‌کند و UI با `VITE_HSH_API_BASE_URL` به آن وصل می‌شود.
+`http.corsOrigins` برای fetch، snapshot، WHEP و SignalR originهای UI را کنترل
+می‌کند.
 
 ### `StreamSessionManager`
 

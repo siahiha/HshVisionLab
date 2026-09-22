@@ -62,6 +62,5 @@ npm run build
 npm run preview
 ```
 
-خروجی production در پوشهٔ `dist` ایجاد می‌شود و می‌تواند توسط IIS، Nginx یا هر
-static host مستقلی سرو شود. host داخلی سرویس اختیاری است و با `http.serveUi=true`
-فعال می‌شود؛ مقدار پیش‌فرض آن `false` است.
+خروجی production در پوشهٔ `dist` ایجاد می‌شود و باید توسط IIS، Nginx یا هر
+static host مستقلی سرو شود. سرویس تشخیص عمداً UI را host نمی‌کند.
