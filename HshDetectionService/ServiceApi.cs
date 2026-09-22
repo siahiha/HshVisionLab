@@ -14,6 +14,7 @@ public static class ServiceApi
 {
     public static void Map(WebApplication app)
     {
+        app.MapGet("/", () => Results.Content(ServiceHealthPage.Render(), "text/html; charset=utf-8"));
         app.MapGet("/health/live", () => Results.Ok(new { status = "live", utc = DateTime.UtcNow }));
         app.MapGet("/health/ready", (DetectionRuntimeHost host) => host.IsReady && host.License.IsValid
             ? Results.Ok(new { status = "ready", license = host.License.Message })
