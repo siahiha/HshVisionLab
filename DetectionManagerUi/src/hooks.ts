@@ -49,8 +49,28 @@ export function useDetectionStream() {
     let stopped = false
     const key = 'hsh-detection-last-sequence'
     let last = Number(sessionStorage.getItem(key) ?? '0') || 0
+    let pending: DetectionEvent[] = []
+    let flushTimer: number | undefined
     const connection = new HubConnectionBuilder().withUrl('/hubs/detections').withAutomaticReconnect([0, 2000, 5000, 15000]).configureLogging(LogLevel.Warning).build()
-    const apply = (item: DetectionEvent) => { last = Math.max(last, item.sequence); sessionStorage.setItem(key, String(last)); const subscription = readClientSubscription(); client.setQueryData<DetectionEvent[]>([...keys.events, '', 200, JSON.stringify(subscription)], old => [item, ...(old ?? []).filter(existing => existing.eventId !== item.eventId)].slice(0, 200)) }
+    const flush = () => {
+      flushTimer = undefined
+      if (stopped || pending.length === 0) return
+      const batch = pending
+      pending = []
+      const subscriptionKey = JSON.stringify(readClientSubscription())
+      client.setQueryData<DetectionEvent[]>([...keys.events, '', 200, subscriptionKey], old => {
+        const merged = new Map<string, DetectionEvent>()
+        for (const item of old ?? []) merged.set(item.eventId, item)
+        for (const item of batch) merged.set(item.eventId, item)
+        return [...merged.values()].sort((a, b) => b.sequence - a.sequence).slice(0, 200)
+      })
+    }
+    const apply = (item: DetectionEvent) => {
+      last = Math.max(last, item.sequence)
+      sessionStorage.setItem(key, String(last))
+      pending.push(item)
+      if (flushTimer === undefined) flushTimer = window.setTimeout(flush, 50)
+    }
     connection.on('detection', apply)
     connection.on('cursorExpired', () => { last = 0; sessionStorage.setItem(key, '0'); void client.invalidateQueries({ queryKey: keys.events }) })
     connection.on('replayStarted', () => undefined)
@@ -58,10 +78,26 @@ export function useDetectionStream() {
     const subscribe = () => connection.invoke('Subscribe', last, readClientSubscription()).catch(() => undefined)
     const onSubscriptionChanged = () => { void subscribe(); void client.invalidateQueries({ queryKey: keys.events }) }
     window.addEventListener('hsh-client-subscription-changed', onSubscriptionChanged)
-    const connect = async () => { try { await connection.start(); if (!stopped) await subscribe() } catch { /* polling remains the safe fallback */ } }
+    const connect = async () => {
+      try {
+        await connection.start()
+        if (stopped) return
+        // The dashboard already loads a bounded history through REST. On the
+        // first connection do not replay the entire event store through
+        // SignalR; start the live cursor at the current watermark instead.
+        if (last === 0) {
+          try {
+            const status = await api.status()
+            last = status.eventSequence
+            sessionStorage.setItem(key, String(last))
+          } catch { /* subscribe from zero is the safe fallback */ }
+        }
+        await subscribe()
+      } catch { /* polling remains the safe fallback */ }
+    }
     connection.onreconnected(() => { void subscribe() })
     void connect()
-    return () => { stopped = true; window.removeEventListener('hsh-client-subscription-changed', onSubscriptionChanged); connection.off('detection', apply); void connection.stop() }
+    return () => { stopped = true; if (flushTimer !== undefined) window.clearTimeout(flushTimer); pending = []; window.removeEventListener('hsh-client-subscription-changed', onSubscriptionChanged); connection.off('detection', apply); void connection.stop() }
   })
 }
 function useEffectOnce(effect: () => void | (() => void)) { useEffect(effect, []) }
