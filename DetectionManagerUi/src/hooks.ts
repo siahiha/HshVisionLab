@@ -33,9 +33,10 @@ export function useCapabilities() { return useQuery({ queryKey: keys.capabilitie
 export function useModels() { return useQuery({ queryKey: keys.models, queryFn: api.models, staleTime: 60_000 }) }
 export function usePeople() { return useQuery({ queryKey: keys.people, queryFn: api.people }) }
 export function usePersonSamples(id?: string) { return useQuery({ queryKey: ['samples', id], queryFn: () => api.samples(id!), enabled: Boolean(id) }) }
-export function useEvents(query = '') {
+export function useEvents(query = '', limit = 200) {
   const subscription = useClientSubscription()
-  return useQuery({ queryKey: [...keys.events, query, JSON.stringify(subscription)], queryFn: () => api.events(query, subscription), refetchInterval: 5000 })
+  const subscriptionKey = JSON.stringify(subscription)
+  return useQuery({ queryKey: [...keys.events, query, limit, subscriptionKey], queryFn: () => api.events(query, subscription, limit), refetchInterval: 5000 })
 }
 export function useEvent(id?: string) { return useQuery({ queryKey: ['event', id], queryFn: () => api.event(id!), enabled: Boolean(id) }) }
 export function useTriggers() { return useQuery({ queryKey: keys.triggers, queryFn: api.triggers }) }
@@ -49,7 +50,7 @@ export function useDetectionStream() {
     const key = 'hsh-detection-last-sequence'
     let last = Number(sessionStorage.getItem(key) ?? '0') || 0
     const connection = new HubConnectionBuilder().withUrl('/hubs/detections').withAutomaticReconnect([0, 2000, 5000, 15000]).configureLogging(LogLevel.Warning).build()
-    const apply = (item: DetectionEvent) => { last = Math.max(last, item.sequence); sessionStorage.setItem(key, String(last)); const subscription = readClientSubscription(); client.setQueryData<DetectionEvent[]>([...keys.events, '', JSON.stringify(subscription)], old => [item, ...(old ?? []).filter(existing => existing.eventId !== item.eventId)].slice(0, 2000)) }
+    const apply = (item: DetectionEvent) => { last = Math.max(last, item.sequence); sessionStorage.setItem(key, String(last)); const subscription = readClientSubscription(); client.setQueryData<DetectionEvent[]>([...keys.events, '', 200, JSON.stringify(subscription)], old => [item, ...(old ?? []).filter(existing => existing.eventId !== item.eventId)].slice(0, 200)) }
     connection.on('detection', apply)
     connection.on('cursorExpired', () => { last = 0; sessionStorage.setItem(key, '0'); void client.invalidateQueries({ queryKey: keys.events }) })
     connection.on('replayStarted', () => undefined)

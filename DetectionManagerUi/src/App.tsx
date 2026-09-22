@@ -3817,6 +3817,7 @@ function Events() {
   const [scenario, setScenario] = useState("");
   const events = useEvents(
     scenario ? `&scenario=${encodeURIComponent(scenario)}` : "",
+    2000,
   );
   const [selected, setSelected] = useState<string>();
   const list = (events.data ?? [])
