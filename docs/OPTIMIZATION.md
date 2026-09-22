@@ -43,9 +43,16 @@ FFmpeg `nobuffer`، `low_delay` و `max_delay=0` باز می‌شود. در LibV
 
 catalog مدل UI نیز فقط فایل‌های قابل استفاده را از `Models/Plate`، `Models/Face`،
 `Models`، مسیرهای legacy و fallbackهای Debug فهرست می‌کند؛ ComboBox مدل نباید
-به مسیر absolute یا یک model file تایپ‌شده وابسته باشد.
+به مسیر absolute یا یک model file تایپ‌شده وابسته باشد. `inputSizes` نیز از همان
+catalog می‌آید: مدل ثابت فقط سایز ثابت tensor را اعلام می‌کند و مدل YOLO با
+ابعاد پویا، گزینه‌های stride-aligned استاندارد `320`، `416`، `480`، `512` و
+`640` را اعلام می‌کند. این منبع بین فرم WinForms و UI وب مشترک است.
 
 ## اجرای Face
+
+در پیاده‌سازی فعلی `InputSize` از catalog مدل می‌آید: مدل‌های ثابت فقط اندازهٔ واقعی tensor خود را ارائه می‌دهند و مدل‌های YOLO پویا فهرست گزینه‌های stride-aligned را می‌گیرند. مدل‌های YuNet موجود ورودی `640×640` دارند و `FaceModule` نیز هنگام ساخت pipeline metadata مدل را بررسی می‌کند؛ بنابراین مقدار قدیمی 320 دیگر نباید برای این مدل تنظیم شود.
+
+برای جلوگیری از فشار حافظه، metadata مدل با cache process-level خوانده می‌شود و association قبل از ساخت artifact، تشخیص‌های تکراری همان track/component را در بازهٔ cooldown کنار می‌گذارد؛ در نتیجه برای هر inference فریم کامل Bitmap بی‌دلیل کپی نمی‌شود.
 
 YuNet با ورودی مربعی اجرا می‌شود؛ ROI ابتدا به `FaceInputSize` resize و سپس برای package فعلی به ورودی ثابت `640×640` تبدیل می‌شود و bounds به ابعاد اصلی ROI برگردانده می‌شود. بنابراین `FaceInputSize` اندازهٔ میانی preprocessing است، نه اندازهٔ tensor نهایی مدل. مدل `face_yunet_2023mar_int8.hshmodel` گزینهٔ سبک‌تر CPU است و نسخهٔ FP32 برای مقایسه/دقت حفظ می‌شود. SFace پس از تشخیص، پنج landmark را برای similarity alignment به crop `112×112` تبدیل می‌کند و سپس embedding را از tensor RGB با مقادیر پیکسلی خام می‌سازد؛ cosine similarity بردارها را هنگام مقایسه نرمال می‌کند، اما نرمال‌سازی جداگانهٔ ورودی یا embedding در مسیر فعلی وجود ندارد. نیازی به resize یا alignment جداگانه در UI برای مسیر runtime نیست.
 

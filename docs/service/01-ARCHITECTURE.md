@@ -2,6 +2,8 @@
 
 ## 1. مسئولیت سرویس
 
+> **وضعیت فعلی:** `EventStore`، artifact store، SignalR replay و trigger evaluation فعال هستند. نمودارهای دارای `Outbox`/Webhook در این سند معماری تکمیلی‌اند؛ در نسخهٔ فعلی event پس از ثبت در SQLite از طریق SignalR منتشر می‌شود و webhook dispatcher مستقل پیاده‌سازی نشده است.
+
 `HshDetectionService` یک Windows Service برای اجرای دائمی و headless موتور تشخیص است. این پروژه نباید به WinForms یا هیچ UI خاصی وابسته باشد.
 
 سرویس مسئول موارد زیر است:

@@ -1,9 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from './api'
-import type { CameraSettings, DetectionEvent, TriggerDefinition } from './types'
+import type { CameraSettings, ClientSubscription, DetectionEvent, TriggerDefinition } from './types'
 export const keys = { status: ['status'], cameras: ['cameras'], settings: ['settings'], capabilities: ['capabilities'], models: ['models'], people: ['people'], triggers: ['triggers'], events: ['events'] }
+export const clientSubscriptionKey = 'hsh-client-subscription'
+export const defaultClientSubscription = (): ClientSubscription => ({ mode: 'All', cameraIds: [], roiIds: [], faceRequired: false, plateRequired: false, includeFace: true, includePlate: true, includeUnknownFace: true, includeArtifacts: true, windowMs: 1500, cooldownSeconds: 0 })
+export function readClientSubscription(): ClientSubscription {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(clientSubscriptionKey) ?? 'null') as Partial<ClientSubscription> | null
+    return { ...defaultClientSubscription(), ...(value ?? {}) }
+  } catch { return defaultClientSubscription() }
+}
+export function saveClientSubscription(value: ClientSubscription) {
+  sessionStorage.setItem(clientSubscriptionKey, JSON.stringify(value))
+  window.dispatchEvent(new Event('hsh-client-subscription-changed'))
+}
+export function useClientSubscription() {
+  const [value, setValue] = useState<ClientSubscription>(() => readClientSubscription())
+  useEffect(() => {
+    const update = () => setValue(readClientSubscription())
+    window.addEventListener('hsh-client-subscription-changed', update)
+    return () => window.removeEventListener('hsh-client-subscription-changed', update)
+  }, [])
+  return value
+}
 export function useServiceStatus() { return useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: 5000 }) }
 export function useCameras() { return useQuery({ queryKey: keys.cameras, queryFn: api.cameras, refetchInterval: 5000 }) }
 export function useCamera(id?: string) { return useQuery({ queryKey: ['camera', id], queryFn: () => api.camera(id!), enabled: Boolean(id) }) }
@@ -12,7 +33,10 @@ export function useCapabilities() { return useQuery({ queryKey: keys.capabilitie
 export function useModels() { return useQuery({ queryKey: keys.models, queryFn: api.models, staleTime: 60_000 }) }
 export function usePeople() { return useQuery({ queryKey: keys.people, queryFn: api.people }) }
 export function usePersonSamples(id?: string) { return useQuery({ queryKey: ['samples', id], queryFn: () => api.samples(id!), enabled: Boolean(id) }) }
-export function useEvents(query = '') { return useQuery({ queryKey: [...keys.events, query], queryFn: () => api.events(query), refetchInterval: 5000 }) }
+export function useEvents(query = '') {
+  const subscription = useClientSubscription()
+  return useQuery({ queryKey: [...keys.events, query, JSON.stringify(subscription)], queryFn: () => api.events(query, subscription), refetchInterval: 5000 })
+}
 export function useEvent(id?: string) { return useQuery({ queryKey: ['event', id], queryFn: () => api.event(id!), enabled: Boolean(id) }) }
 export function useTriggers() { return useQuery({ queryKey: keys.triggers, queryFn: api.triggers }) }
 export function useCameraMutation() { const client = useQueryClient(); return useMutation({ mutationFn: (camera: CameraSettings) => api.saveCamera(camera), onSuccess: (_, camera) => { void client.invalidateQueries({ queryKey: keys.cameras }); void client.invalidateQueries({ queryKey: ['camera', camera.id] }); void client.invalidateQueries({ queryKey: keys.settings }) } }) }
@@ -25,15 +49,18 @@ export function useDetectionStream() {
     const key = 'hsh-detection-last-sequence'
     let last = Number(sessionStorage.getItem(key) ?? '0') || 0
     const connection = new HubConnectionBuilder().withUrl('/hubs/detections').withAutomaticReconnect([0, 2000, 5000, 15000]).configureLogging(LogLevel.Warning).build()
-    const apply = (item: DetectionEvent) => { last = Math.max(last, item.sequence); sessionStorage.setItem(key, String(last)); client.setQueryData<DetectionEvent[]>([...keys.events, ''], old => [item, ...(old ?? []).filter(existing => existing.eventId !== item.eventId)].slice(0, 2000)) }
+    const apply = (item: DetectionEvent) => { last = Math.max(last, item.sequence); sessionStorage.setItem(key, String(last)); const subscription = readClientSubscription(); client.setQueryData<DetectionEvent[]>([...keys.events, '', JSON.stringify(subscription)], old => [item, ...(old ?? []).filter(existing => existing.eventId !== item.eventId)].slice(0, 2000)) }
     connection.on('detection', apply)
     connection.on('cursorExpired', () => { last = 0; sessionStorage.setItem(key, '0'); void client.invalidateQueries({ queryKey: keys.events }) })
     connection.on('replayStarted', () => undefined)
     connection.on('replayCompleted', (message: { lastSequence?: number }) => { if (message?.lastSequence) { last = Math.max(last, message.lastSequence); sessionStorage.setItem(key, String(last)) } })
-    const connect = async () => { try { await connection.start(); if (!stopped) await connection.invoke('Subscribe', last) } catch { /* polling remains the safe fallback */ } }
-    connection.onreconnected(() => { void connection.invoke('Subscribe', last).catch(() => undefined) })
+    const subscribe = () => connection.invoke('Subscribe', last, readClientSubscription()).catch(() => undefined)
+    const onSubscriptionChanged = () => { void subscribe(); void client.invalidateQueries({ queryKey: keys.events }) }
+    window.addEventListener('hsh-client-subscription-changed', onSubscriptionChanged)
+    const connect = async () => { try { await connection.start(); if (!stopped) await subscribe() } catch { /* polling remains the safe fallback */ } }
+    connection.onreconnected(() => { void subscribe() })
     void connect()
-    return () => { stopped = true; connection.off('detection', apply); void connection.stop() }
+    return () => { stopped = true; window.removeEventListener('hsh-client-subscription-changed', onSubscriptionChanged); connection.off('detection', apply); void connection.stop() }
   })
 }
 function useEffectOnce(effect: () => void | (() => void)) { useEffect(effect, []) }

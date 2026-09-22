@@ -1,7 +1,10 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Collections.Concurrent;
 using System.Drawing;
 using HshDetectionEngin;
 using HshDetectionEngin.Face;
+using HshDetectionEngin.Plate;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.SignalR;
 
@@ -57,12 +60,26 @@ public static class ServiceApi
                             : name.Contains("yunet", StringComparison.OrdinalIgnoreCase)
                                 ? "FaceDetection"
                                 : "Face";
+                    int[] inputSizes;
+                    if (item.module == "Plate")
+                    {
+                        inputSizes = PlateModelInspector.GetSquareInputSizes(name).ToArray();
+                    }
+                    else if (capability == "FaceDetection" && FaceModelInspector.TryGetSquareInputSize(name) is int faceSize)
+                    {
+                        inputSizes = [faceSize];
+                    }
+                    else
+                    {
+                        inputSizes = [];
+                    }
                     return new
                     {
                         name,
                         relativePath = Path.GetRelativePath(AppContext.BaseDirectory, item.path).Replace('\\', '/'),
                         module = item.module,
                         capability,
+                        inputSizes,
                         packaged = true
                     };
                 })
@@ -257,7 +274,7 @@ public static class ServiceApi
             return Results.NoContent();
         });
 
-        app.MapGet("/api/v1/events", (long? afterSequence, int? limit, string? cameraId, string? scenario, DateTime? fromUtc, DateTime? toUtc, DetectionRuntimeHost host) =>
+        app.MapGet("/api/v1/events", (long? afterSequence, int? limit, string? cameraId, string? scenario, DateTime? fromUtc, DateTime? toUtc, string? clientMode, bool? faceRequired, bool? plateRequired, bool? includeUnknownFace, int? windowMs, string? clientCameraIds, string? clientRoiIds, DetectionRuntimeHost host) =>
         {
             IReadOnlyList<DetectionEventEnvelope> events = host.Events.ReadAfter(afterSequence ?? 0, Math.Clamp(limit ?? 200, 1, 2000));
             IEnumerable<DetectionEventEnvelope> filtered = events;
@@ -267,6 +284,20 @@ public static class ServiceApi
                 filtered = filtered.Where(item => string.Equals(item.Scenario, scenario, StringComparison.OrdinalIgnoreCase));
             if (fromUtc is not null) filtered = filtered.Where(item => item.OccurredAtUtc >= fromUtc.Value.ToUniversalTime());
             if (toUtc is not null) filtered = filtered.Where(item => item.OccurredAtUtc <= toUtc.Value.ToUniversalTime());
+            if (!string.IsNullOrWhiteSpace(clientMode))
+            {
+                var subscription = new ClientSubscription
+                {
+                    Mode = clientMode,
+                    FaceRequired = faceRequired ?? false,
+                    PlateRequired = plateRequired ?? false,
+                    IncludeUnknownFace = includeUnknownFace ?? true,
+                    WindowMs = windowMs ?? 1500,
+                    CameraIds = SplitList(clientCameraIds),
+                    RoiIds = SplitList(clientRoiIds)
+                };
+                filtered = filtered.Where(item => DetectionHub.Matches(item, subscription));
+            }
             return Results.Ok(filtered.ToArray());
         });
         app.MapGet("/api/v1/events/{eventId}", (string eventId, DetectionRuntimeHost host) =>
@@ -469,6 +500,10 @@ public static class ServiceApi
             .SelectMany(path => Directory.EnumerateFiles(path, "*.hshmodel", SearchOption.TopDirectoryOnly))
             .Distinct(StringComparer.OrdinalIgnoreCase);
     }
+
+    private static List<string> SplitList(string? value) => string.IsNullOrWhiteSpace(value)
+        ? []
+        : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 }
 
 public sealed record ConfigurationUpdateRequest(long Revision, AppSettings? Detection, ServiceSettingsDocument? Service);
@@ -489,13 +524,29 @@ public sealed class DetectionHub : Hub
 {
     public const string LiveGroup = "detection-live";
     private static readonly SemaphoreSlim ReplayGate = new(1, 1);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ClientSubscription> Subscriptions = new(StringComparer.Ordinal);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentDictionary<string, DateTime>> LastDelivered = new(StringComparer.Ordinal);
     private readonly EventStore _events;
 
     public DetectionHub(EventStore events) => _events = events;
 
-    public async Task Subscribe(long lastSequence = 0)
+    public override Task OnConnectedAsync()
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, LiveGroup);
+        Subscriptions[Context.ConnectionId] = new ClientSubscription();
+        LastDelivered[Context.ConnectionId] = new System.Collections.Concurrent.ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        return base.OnConnectedAsync();
+    }
+
+    public override Task OnDisconnectedAsync(Exception? exception)
+    {
+        Subscriptions.TryRemove(Context.ConnectionId, out _);
+        LastDelivered.TryRemove(Context.ConnectionId, out _);
+        return base.OnDisconnectedAsync(exception);
+    }
+
+    public async Task Subscribe(long lastSequence = 0, ClientSubscription? subscription = null)
+    {
+        Subscriptions[Context.ConnectionId] = (subscription ?? new ClientSubscription()).Normalize();
         await ReplayGate.WaitAsync(Context.ConnectionAborted);
         try
         {
@@ -516,7 +567,8 @@ public sealed class DetectionHub : Hub
                 if (batch.Count == 0) break;
                 foreach (DetectionEventEnvelope item in batch)
                 {
-                    await Clients.Caller.SendAsync("detection", item, Context.ConnectionAborted);
+                    if (Matches(item, Subscriptions[Context.ConnectionId]))
+                        await Clients.Caller.SendAsync("detection", item, Context.ConnectionAborted);
                     cursor = item.Sequence;
                 }
             }
@@ -528,7 +580,80 @@ public sealed class DetectionHub : Hub
     public static async Task PublishAsync(IHubContext<DetectionHub> hub, DetectionEventEnvelope item, CancellationToken cancellationToken)
     {
         await ReplayGate.WaitAsync(cancellationToken);
-        try { await hub.Clients.Group(LiveGroup).SendAsync("detection", item, cancellationToken); }
+        try
+        {
+            foreach ((string connectionId, ClientSubscription subscription) in Subscriptions.ToArray())
+            {
+                if (!Matches(item, subscription) || !PassesCooldown(connectionId, item, subscription)) continue;
+                await hub.Clients.Client(connectionId).SendAsync("detection", item, cancellationToken);
+            }
+        }
         finally { ReplayGate.Release(); }
+    }
+
+    internal static bool Matches(DetectionEventEnvelope item, ClientSubscription subscription)
+    {
+        subscription.Normalize();
+        string? cameraId = item.Source["cameraId"]?.GetValue<string>();
+        string? roiId = item.Source["roiId"]?.GetValue<string>();
+        if (subscription.CameraIds.Count > 0 &&
+            !subscription.CameraIds.Contains(cameraId ?? string.Empty, StringComparer.OrdinalIgnoreCase)) return false;
+        if (subscription.RoiIds.Count > 0 &&
+            !subscription.RoiIds.Contains(roiId ?? string.Empty, StringComparer.OrdinalIgnoreCase)) return false;
+        int associationAgeMs = item.Source["associationAgeMs"]?.GetValue<int>() ?? 0;
+        if (subscription.WindowMs > 0 && associationAgeMs > subscription.WindowMs) return false;
+
+        bool hasPlate = item.Components.ContainsKey("plate");
+        bool hasFace = item.Components.TryGetValue("face", out JsonObject? face);
+        bool knownFace = hasFace && string.Equals(
+            face?["recognitionStatus"]?.GetValue<string>(), "Matched", StringComparison.OrdinalIgnoreCase);
+        if (!subscription.IncludePlate && hasPlate && !hasFace) return false;
+        if (!subscription.IncludeFace && hasFace && !hasPlate) return false;
+        if (subscription.FaceRequired && !hasFace) return false;
+        if (subscription.PlateRequired && !hasPlate) return false;
+
+        if (subscription.Mode.Equals("Plate", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!hasPlate) return false;
+            if (!subscription.IncludeUnknownFace && hasFace && !knownFace) return false;
+            return true;
+        }
+
+        if (subscription.Mode.Equals("KnownFace", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!knownFace) return false;
+            return true;
+        }
+
+        if (!subscription.IncludeUnknownFace && hasFace && !knownFace && !hasPlate) return false;
+        return hasPlate || hasFace;
+    }
+
+    private static bool PassesCooldown(string connectionId, DetectionEventEnvelope item, ClientSubscription subscription)
+    {
+        if (subscription.CooldownSeconds <= 0) return true;
+        ConcurrentDictionary<string, DateTime> delivered = LastDelivered.GetOrAdd(
+            connectionId,
+            _ => new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase));
+        string key = BuildCooldownKey(item);
+        DateTime now = DateTime.UtcNow;
+        if (delivered.TryGetValue(key, out DateTime previous) &&
+            (now - previous).TotalSeconds < subscription.CooldownSeconds) return false;
+        delivered[key] = now;
+        foreach (string oldKey in delivered.Where(pair => (now - pair.Value).TotalHours > 24).Select(pair => pair.Key).ToArray())
+            delivered.TryRemove(oldKey, out _);
+        return true;
+    }
+
+    private static string BuildCooldownKey(DetectionEventEnvelope item)
+    {
+        string plate = item.Components.TryGetValue("plate", out JsonObject? plateComponent)
+            ? plateComponent?["plateText"]?.GetValue<string>() ?? string.Empty
+            : string.Empty;
+        string face = item.Components.TryGetValue("face", out JsonObject? faceComponent)
+            ? faceComponent?["recognition"]?["personId"]?.GetValue<string>() ?? faceComponent?["label"]?.GetValue<string>() ?? string.Empty
+            : string.Empty;
+        string camera = item.Source["cameraId"]?.GetValue<string>() ?? string.Empty;
+        return $"{camera}:{plate}:{face}:{item.EventType}";
     }
 }

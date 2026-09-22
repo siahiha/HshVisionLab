@@ -30,6 +30,11 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private readonly Dictionary<string, DateTime> _triggerLastFiredUtc = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, LatestFrameSlot> _latestFrames = new(StringComparer.OrdinalIgnoreCase);
     private readonly Channel<DetectionWork> _eventQueue = Channel.CreateUnbounded<DetectionWork>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+    private readonly object _associationGate = new();
+    private readonly List<PendingComponent> _pendingComponents = [];
+    private readonly Dictionary<string, DateTime> _emittedAssociationTimes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> _emittedComponentTimes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Timer _associationTimer;
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _eventWorker;
     private FaceDatabase? _faceDatabase;
@@ -55,6 +60,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         _hub = hub;
         _webrtc = webrtc;
         _logger = logger;
+        _associationTimer = new Timer(_ => FlushExpiredAssociations(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     public ServicePaths Paths => _paths;
@@ -88,6 +94,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             _registry.Register(_faceModule.CreateRegistration());
 
             _eventWorker = Task.Run(() => ProcessEventQueueAsync(_shutdown.Token), CancellationToken.None);
+            _associationTimer.Change(500, 500);
             foreach (CameraSettings cameraSettings in _settings.Cameras.ToArray())
                 AddOrReplaceCamera(cameraSettings, start: service.Runtime.AutoStartCameras);
 
@@ -109,6 +116,8 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     {
         if (!_started || _shutdown.IsCancellationRequested) return;
         IsReady = false;
+        _associationTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        FlushExpiredAssociations(force: true);
         _shutdown.Cancel();
         _eventQueue.Writer.TryComplete();
 
@@ -130,6 +139,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         }
         _faceDatabase?.Dispose();
         _eventStore.Dispose();
+        _associationTimer.Dispose();
         try { await MediaMtxRuntime.Shared.StopAsync().WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); } catch { }
     }
 
@@ -224,6 +234,8 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         settings.Cameras ??= [];
         foreach (CameraSettings camera in settings.Cameras) camera.EnsureProcessingDefaults();
 
+        ClearAssociationState();
+
         Camera[] previous;
         lock (_gate) previous = _cameras.Values.ToArray();
         foreach (Camera camera in previous)
@@ -297,8 +309,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     {
         Camera camera = new(settings, processingRegistry: ProcessingModules, license: License);
         camera.FrameReady += Camera_FrameReady;
-        camera.PlateDetected += Camera_PlateDetected;
-        camera.AnalysisDetected += Camera_AnalysisDetected;
+        camera.PipelineResultsReady += Camera_PipelineResultsReady;
         camera.StatusChanged += Camera_StatusChanged;
         return camera;
     }
@@ -306,8 +317,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private void DetachCamera(Camera camera)
     {
         camera.FrameReady -= Camera_FrameReady;
-        camera.PlateDetected -= Camera_PlateDetected;
-        camera.AnalysisDetected -= Camera_AnalysisDetected;
+        camera.PipelineResultsReady -= Camera_PipelineResultsReady;
         camera.StatusChanged -= Camera_StatusChanged;
     }
 
@@ -330,31 +340,226 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             }
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed to store latest frame for {CameraId}.", camera.Settings.Id); }
+        finally
+        {
+            // CameraRuntime creates a fresh preview bitmap for this event.
+            // The service clones what it needs above, so the event payload
+            // must be released here after all subscribers have consumed it.
+            frame.Dispose();
+        }
     }
 
-    private void Camera_PlateDetected(CameraRuntime camera, CameraRuntime.HistoryItem item)
-        => QueueEvent(camera, item.Crop, null, item.Timestamp, AnalysisKind.Plate, item.Text, null);
-
-    private void Camera_AnalysisDetected(CameraRuntime camera, CameraRuntime.AnalysisHistoryItem item)
-        => QueueEvent(camera, item.Crop, item.Detection, item.Timestamp, item.Detection.Kind, item.Detection.Label, item.Detection);
-
-    private void QueueEvent(CameraRuntime camera, Bitmap crop, AnalysisDetection? detection, DateTime timestamp, AnalysisKind kind, string label, AnalysisDetection? sourceDetection)
+    private void Camera_PipelineResultsReady(CameraRuntime camera, IReadOnlyList<AnalysisDetection> detections)
     {
-        Bitmap? full = camera.TryGetLatestRawFrame(out long rawSequence);
+        AnalysisDetection[] accepted = detections
+            .Where(detection => (detection.Kind == AnalysisKind.Plate || detection.Kind == AnalysisKind.Face) && IsAccepted(detection))
+            .ToArray();
+        accepted = FilterRepeatedDetections(camera.Settings.Id, accepted);
+        if (accepted.Length == 0) return;
+
+        using Bitmap? raw = camera.TryGetLatestRawFrame(out long rawSequence);
+        if (raw is null) return;
         long sourceFrameSequence = rawSequence > 0
             ? rawSequence
             : _latestFrames.TryGetValue(camera.Settings.Id, out LatestFrameSlot? slot)
                 ? slot.Sequence
                 : camera.FrameSource.CapturedFrames;
-        _eventQueue.Writer.TryWrite(new DetectionWork(
-            camera.Settings.Id,
-            kind,
-            label,
-            timestamp.ToUniversalTime(),
-            sourceDetection,
-            new Bitmap(crop),
-            full,
-            sourceFrameSequence));
+
+        var current = new List<PendingComponent>(accepted.Length);
+        foreach (AnalysisDetection detection in accepted)
+        {
+            Rectangle bounds = Rectangle.Intersect(detection.Bounds, new Rectangle(Point.Empty, raw.Size));
+            if (bounds.Width <= 0 || bounds.Height <= 0) continue;
+            current.Add(new PendingComponent(
+                camera.Settings.Id,
+                detection,
+                raw.Clone(bounds, PixelFormat.Format24bppRgb),
+                new Bitmap(raw),
+                sourceFrameSequence,
+                DateTime.UtcNow,
+                GetRoiKey(detection),
+                GetComponentKey(detection)));
+        }
+
+        if (current.Count == 0) return;
+        ProcessAssociations(current);
+    }
+
+    private void ProcessAssociations(List<PendingComponent> current)
+    {
+        var ready = new List<DetectionWork>();
+        DateTime now = DateTime.UtcNow;
+        lock (_associationGate)
+        {
+            FlushExpiredAssociationsLocked(now, ready);
+            var remaining = new List<PendingComponent>(current);
+
+            // Prefer an exact same-frame association. It is the strongest
+            // evidence and prevents PlateFirst/FaceFirst duplicate records.
+            foreach (PendingComponent plate in remaining.Where(item => item.Detection.Kind == AnalysisKind.Plate).ToArray())
+            {
+                PendingComponent[] faces = remaining
+                    .Where(item => item.Detection.Kind == AnalysisKind.Face && SameAssociationScope(item, plate))
+                    .ToArray();
+                if (faces.Length != 1) continue;
+                PendingComponent face = faces[0];
+                remaining.Remove(plate);
+                remaining.Remove(face);
+                ready.Add(new DetectionWork(plate.CameraId, [plate, face], "SameFrame"));
+            }
+
+            // A pending component can be completed by the opposite component
+            // in a later processed frame. Ambiguous multi-person/multi-plate
+            // cases are deliberately left unpaired to avoid false matches.
+            foreach (PendingComponent item in remaining.ToArray())
+            {
+                PendingComponent[] opposite = _pendingComponents
+                    .Where(previous => previous.CameraId.Equals(item.CameraId, StringComparison.OrdinalIgnoreCase) &&
+                        SameAssociationScope(previous, item) &&
+                        previous.Detection.Kind != item.Detection.Kind &&
+                        (now - previous.Timestamp).TotalMilliseconds <= AssociationWindowMs)
+                    .ToArray();
+                if (opposite.Length != 1) continue;
+                PendingComponent previous = opposite[0];
+                _pendingComponents.Remove(previous);
+                remaining.Remove(item);
+                ready.Add(new DetectionWork(item.CameraId, [previous, item], "TemporalAssociation"));
+            }
+
+            foreach (PendingComponent item in remaining)
+            {
+                PendingComponent? duplicate = _pendingComponents.FirstOrDefault(previous =>
+                    previous.CameraId.Equals(item.CameraId, StringComparison.OrdinalIgnoreCase) &&
+                    previous.RoiKey.Equals(item.RoiKey, StringComparison.OrdinalIgnoreCase) &&
+                    previous.ComponentKey.Equals(item.ComponentKey, StringComparison.OrdinalIgnoreCase));
+                if (duplicate is not null)
+                {
+                    _pendingComponents.Remove(duplicate);
+                    item.PreserveStartTime(duplicate.Timestamp);
+                }
+                duplicate?.Dispose();
+                _pendingComponents.Add(item);
+            }
+        }
+
+        foreach (DetectionWork work in ready) EnqueueEvent(work);
+    }
+
+    private void FlushExpiredAssociations()
+    {
+        var ready = new List<DetectionWork>();
+        lock (_associationGate) FlushExpiredAssociationsLocked(DateTime.UtcNow, ready);
+        foreach (DetectionWork work in ready) EnqueueEvent(work);
+    }
+
+    private void FlushExpiredAssociations(bool force)
+    {
+        if (force) FlushExpiredAssociations();
+    }
+
+    private void ClearAssociationState()
+    {
+        lock (_associationGate)
+        {
+            foreach (PendingComponent item in _pendingComponents) item.Dispose();
+            _pendingComponents.Clear();
+            _emittedAssociationTimes.Clear();
+            _emittedComponentTimes.Clear();
+        }
+    }
+
+    private void FlushExpiredAssociationsLocked(DateTime now, List<DetectionWork> ready)
+    {
+        foreach (PendingComponent item in _pendingComponents
+            .Where(item => (now - item.Timestamp).TotalMilliseconds > AssociationWindowMs)
+            .ToArray())
+        {
+            _pendingComponents.Remove(item);
+            ready.Add(new DetectionWork(item.CameraId, [item], "Standalone"));
+        }
+    }
+
+    private void EnqueueEvent(DetectionWork work)
+    {
+        bool duplicate;
+        lock (_associationGate)
+        {
+            DateTime now = DateTime.UtcNow;
+            string key = string.Join("|", work.Components
+                .Select(item => $"{item.CameraId}:{item.RoiKey}:{item.ComponentKey}")
+                .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+            duplicate = _emittedAssociationTimes.TryGetValue(key, out DateTime previous) &&
+                (now - previous).TotalSeconds < 5;
+            if (!duplicate)
+            {
+                _emittedAssociationTimes[key] = now;
+                foreach (PendingComponent component in work.Components)
+                    _emittedComponentTimes[string.Concat(component.CameraId, ":", component.RoiKey, ":", component.ComponentKey)] = now;
+            }
+            foreach (string oldKey in _emittedAssociationTimes
+                .Where(item => (now - item.Value).TotalHours > 1)
+                .Select(item => item.Key).ToArray())
+                _emittedAssociationTimes.Remove(oldKey);
+            foreach (string oldKey in _emittedComponentTimes
+                .Where(item => (now - item.Value).TotalMinutes > 1)
+                .Select(item => item.Key).ToArray())
+                _emittedComponentTimes.Remove(oldKey);
+        }
+
+        if (duplicate || !_eventQueue.Writer.TryWrite(work)) work.Dispose();
+    }
+
+    private int AssociationWindowMs => Math.Clamp(_settingsStore.Service.Association?.MaxWindowMs ?? 1500, 0, 10_000);
+    private bool RequireSameRoi => _settingsStore.Service.Association?.RequireSameRoi ?? true;
+
+    private bool SameAssociationScope(PendingComponent left, PendingComponent right) =>
+        !RequireSameRoi || left.RoiKey.Equals(right.RoiKey, StringComparison.OrdinalIgnoreCase);
+
+    private bool SameAssociationScope(string leftRoiKey, string rightRoiKey) =>
+        !RequireSameRoi || leftRoiKey.Equals(rightRoiKey, StringComparison.OrdinalIgnoreCase);
+
+    private AnalysisDetection[] FilterRepeatedDetections(string cameraId, AnalysisDetection[] detections)
+    {
+        if (detections.Length == 0) return detections;
+
+        DateTime now = DateTime.UtcNow;
+        lock (_associationGate)
+        {
+            // Do not allocate a full 2560x1920 Bitmap for every face on every
+            // inference tick. Keep the first component in the association
+            // window and only capture again when it can form a new pair.
+            return detections.Where(detection =>
+            {
+                string roiKey = GetRoiKey(detection);
+                string componentKey = GetComponentKey(detection);
+                bool hasOppositeInBatch = detections.Any(other =>
+                    other.Kind != detection.Kind &&
+                    SameAssociationScope(roiKey, GetRoiKey(other)));
+                bool pendingSame = _pendingComponents.Any(previous =>
+                    previous.CameraId.Equals(cameraId, StringComparison.OrdinalIgnoreCase) &&
+                    previous.RoiKey.Equals(roiKey, StringComparison.OrdinalIgnoreCase) &&
+                    previous.ComponentKey.Equals(componentKey, StringComparison.OrdinalIgnoreCase));
+                string emittedKey = string.Concat(cameraId, ":", roiKey, ":", componentKey);
+                bool emittedRecently = _emittedComponentTimes.TryGetValue(emittedKey, out DateTime emittedAt) &&
+                    (now - emittedAt).TotalSeconds < 5;
+
+                return hasOppositeInBatch || (!pendingSame && !emittedRecently);
+            }).ToArray();
+        }
+    }
+
+    private static string GetRoiKey(AnalysisDetection detection) =>
+        GetMetadataString(detection, "RoiId") ?? GetMetadataString(detection, "RoiName") ?? string.Empty;
+
+    private static string GetComponentKey(AnalysisDetection detection)
+    {
+        string kind = detection.Kind.ToString();
+        string track = detection.TrackId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+        string identity = GetMetadataString(detection, "IdentityId") ?? string.Empty;
+        string plate = GetMetadataString(detection, "PlateText") ?? detection.Label;
+        return kind == nameof(AnalysisKind.Plate)
+            ? $"{kind}:{track}:{plate}"
+            : $"{kind}:{track}:{identity}:{detection.Label}";
     }
 
     private void Camera_StatusChanged(CameraRuntime camera, string message, bool isError)
@@ -381,25 +586,37 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         DateTime retention = DateTime.UtcNow.AddDays(Math.Max(1, service.Retention.ArtifactDays));
         DetectionEventEnvelope envelope = BuildEvent(work, eventId, service);
 
-        if (work.FullFrame is not null)
-            envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "FullFrameRaw", work.FullFrame, work.SourceFrameSequence, retention));
-        envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, work.Kind == AnalysisKind.Face ? "DetectionCrop" : "PlateCrop", work.Crop, work.SourceFrameSequence, retention));
-
-        if (work.FullFrame is not null)
+        var savedFullFrames = new HashSet<long>();
+        bool firstFrame = true;
+        foreach (PendingComponent component in work.Components)
         {
+            if (savedFullFrames.Add(component.SourceFrameSequence))
+            {
+                envelope.Artifacts.Add(_artifactStore.SaveBitmap(
+                    eventId,
+                    firstFrame ? "FullFrameRaw" : "AssociatedFrameRaw",
+                    component.FullFrame,
+                    component.SourceFrameSequence,
+                    retention));
+                firstFrame = false;
+            }
+
+            string cropType = component.Detection.Kind == AnalysisKind.Face ? "DetectionCrop" : "PlateCrop";
+            envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, cropType, component.Crop, component.SourceFrameSequence, retention));
+
             CameraSettings camera = _settings.Cameras.FirstOrDefault(item => item.Id.Equals(work.CameraId, StringComparison.OrdinalIgnoreCase))
                 ?? new CameraSettings { Id = work.CameraId };
-            using Bitmap? roi = CropForDetection(work.FullFrame, work.SourceDetection, camera);
+            using Bitmap? roi = CropForDetection(component.FullFrame, component.Detection, camera);
             if (roi is not null)
-                envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "RoiRaw", roi, work.SourceFrameSequence, retention));
-        }
+                envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "RoiRaw", roi, component.SourceFrameSequence, retention));
 
-        if (TryGetMetadataBytes(work.SourceDetection, "AlignedFaceJpeg", out byte[]? alignedFace) && alignedFace is not null)
-        {
-            using var stream = new MemoryStream(alignedFace, writable: false);
-            using var decoded = new Bitmap(stream);
-            using var aligned = new Bitmap(decoded);
-            envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "FaceAlignedCrop", aligned, work.SourceFrameSequence, retention));
+            if (TryGetMetadataBytes(component.Detection, "AlignedFaceJpeg", out byte[]? alignedFace) && alignedFace is not null)
+            {
+                using var stream = new MemoryStream(alignedFace, writable: false);
+                using var decoded = new Bitmap(stream);
+                using var aligned = new Bitmap(decoded);
+                envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "FaceAlignedCrop", aligned, component.SourceFrameSequence, retention));
+            }
         }
 
         DetectionEventEnvelope stored = _eventStore.Append(envelope);
@@ -409,21 +626,26 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private DetectionEventEnvelope BuildEvent(DetectionWork work, string eventId, ServiceSettingsDocument service)
     {
         CameraSettings camera = _settings.Cameras.FirstOrDefault(item => item.Id.Equals(work.CameraId, StringComparison.OrdinalIgnoreCase)) ?? new CameraSettings { Id = work.CameraId };
-        string taskId = GetMetadataString(work.SourceDetection, "ProcessingItemId") ?? string.Empty;
-        string taskName = GetMetadataString(work.SourceDetection, "ProcessingItemName") ?? string.Empty;
-        string roiName = GetMetadataString(work.SourceDetection, "RoiName") ?? string.Empty;
-        string roiId = GetMetadataString(work.SourceDetection, "RoiId") ?? string.Empty;
-        float confidence = work.SourceDetection?.Confidence ?? 0;
-        string kind = work.Kind.ToString();
-        TriggerEvaluation triggerEvaluation = EvaluateTriggers(service.Triggers, camera.Id, taskId, kind, work.Label, confidence, work.SourceDetection);
+        PendingComponent primary = work.Components[0];
+        string taskId = GetMetadataString(primary.Detection, "ProcessingItemId") ?? string.Empty;
+        string taskName = GetMetadataString(primary.Detection, "ProcessingItemName") ?? string.Empty;
+        string roiName = GetMetadataString(primary.Detection, "RoiName") ?? string.Empty;
+        string roiId = GetMetadataString(primary.Detection, "RoiId") ?? string.Empty;
+        bool hasPlate = work.Components.Any(item => item.Detection.Kind == AnalysisKind.Plate);
+        bool hasFace = work.Components.Any(item => item.Detection.Kind == AnalysisKind.Face);
+        TriggerEvaluation triggerEvaluation = EvaluateTriggers(service.Triggers, camera.Id, work.Components);
 
         var envelope = new DetectionEventEnvelope
         {
             EventId = eventId,
-            EventType = work.Kind == AnalysisKind.Face
-                ? (IsUnknown(work.SourceDetection) ? "FaceUnknown" : "FaceRecognized")
-                : "PlateDetected",
-            Scenario = work.Kind == AnalysisKind.Face ? "FaceRecognition" : "PlateOnly",
+            EventType = hasPlate && hasFace
+                ? "PlateFaceMatched"
+                : hasFace
+                    ? (IsUnknown(primary.Detection) ? "FaceUnknown" : "FaceRecognized")
+                    : "PlateDetected",
+            Scenario = hasPlate && hasFace
+                ? "PlateFaceAssociation"
+                : hasFace ? "FaceRecognition" : "PlateOnly",
             OccurredAtUtc = work.Timestamp,
             ReceivedAtUtc = DateTime.UtcNow,
             Source = new JsonObject
@@ -433,11 +655,16 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 ["cameraName"] = camera.Name,
                 ["taskId"] = taskId,
                 ["taskName"] = taskName,
+                ["taskIds"] = new JsonArray(work.Components.Select(item => GetMetadataString(item.Detection, "ProcessingItemId")).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Select(value => JsonValue.Create(value)).ToArray()),
                 ["roiId"] = roiId,
                 ["roiName"] = roiName,
-                ["sourceFrameSequence"] = work.SourceFrameSequence,
-                ["frameWidth"] = work.FullFrame?.Width ?? 0,
-                ["frameHeight"] = work.FullFrame?.Height ?? 0
+                ["roiIds"] = new JsonArray(work.Components.Select(item => GetMetadataString(item.Detection, "RoiId")).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Select(value => JsonValue.Create(value)).ToArray()),
+                ["sourceFrameSequence"] = primary.SourceFrameSequence,
+                ["sourceFrameSequences"] = new JsonArray(work.Components.Select(item => JsonValue.Create(item.SourceFrameSequence)).Distinct().ToArray()),
+                ["associationType"] = work.AssociationType,
+                ["associationAgeMs"] = (int)Math.Max(0, Math.Round((work.Components.Max(item => item.Timestamp) - work.Components.Min(item => item.Timestamp)).TotalMilliseconds)),
+                ["frameWidth"] = primary.FullFrame.Width,
+                ["frameHeight"] = primary.FullFrame.Height
             },
             Trigger = new JsonObject
             {
@@ -448,19 +675,10 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             }
         };
 
-        if (work.SourceDetection is AnalysisDetection detection)
+        foreach (PendingComponent component in work.Components)
         {
-            JsonObject component = BuildDetectionComponent(detection, work.FullFrame?.Size ?? Size.Empty);
-            envelope.Components[kind.Equals("Face", StringComparison.OrdinalIgnoreCase) ? "face" : "plate"] = component;
-        }
-        else
-        {
-            envelope.Components["plate"] = new JsonObject
-            {
-                ["kind"] = "Plate",
-                ["status"] = "Accepted",
-                ["label"] = work.Label
-            };
+            string key = component.Detection.Kind == AnalysisKind.Face ? "face" : "plate";
+            envelope.Components[key] = BuildDetectionComponent(component.Detection, component.FullFrame.Size);
         }
 
         return envelope;
@@ -486,16 +704,17 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             float similarity = GetMetadataFloat(detection, "Similarity");
             bool recognized = GetMetadataBool(detection, "Recognized");
             bool unknown = string.IsNullOrWhiteSpace(identityId) || detection.Label.StartsWith("Unknown", StringComparison.OrdinalIgnoreCase);
+            component["label"] = !recognized ? "Face" : unknown ? "Unknown" : detection.Label;
             component["recognitionStatus"] = !recognized ? "NotAttempted" : unknown ? "Unknown" : "Matched";
             component["recognition"] = new JsonObject
             {
-                ["personId"] = identityId,
-                ["name"] = detection.Label,
-                ["personNumber"] = GetMetadataInt(detection, "PersonNumber"),
+                ["personId"] = unknown || !recognized ? null : identityId,
+                ["name"] = unknown || !recognized ? null : detection.Label,
+                ["personNumber"] = unknown || !recognized ? 0 : GetMetadataInt(detection, "PersonNumber"),
                 ["isUnknown"] = GetMetadataBool(detection, "IsUnknown") || unknown,
-                ["similarity"] = similarity,
+                ["similarity"] = recognized && !unknown ? similarity : null,
                 ["minimumSimilarity"] = GetMetadataFloat(detection, "FaceRecordConfidence"),
-                ["matchedSampleId"] = GetMetadataString(detection, "MatchedSampleId")
+                ["matchedSampleId"] = unknown || !recognized ? null : GetMetadataString(detection, "MatchedSampleId")
             };
         }
         else if (detection.Kind == AnalysisKind.Plate)
@@ -549,11 +768,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private TriggerEvaluation EvaluateTriggers(
         IReadOnlyList<TriggerDefinition> triggers,
         string cameraId,
-        string taskId,
-        string kind,
-        string label,
-        float confidence,
-        AnalysisDetection? detection)
+        IReadOnlyList<PendingComponent> components)
     {
         var matched = new List<TriggerDefinition>();
         var suppressed = new List<TriggerDefinition>();
@@ -562,7 +777,21 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         {
             foreach (TriggerDefinition trigger in triggers)
             {
-                if (!MatchesTrigger(trigger, cameraId, taskId, kind, label, confidence, detection)) continue;
+                bool combined = components.Any(item => item.Detection.Kind == AnalysisKind.Plate) &&
+                    components.Any(item => item.Detection.Kind == AnalysisKind.Face);
+                bool triggerMatches = combined && trigger.Kinds.Any(kind =>
+                    kind.Equals("PlateFaceMatch", StringComparison.OrdinalIgnoreCase) ||
+                    kind.Equals("PlateFaceAssociation", StringComparison.OrdinalIgnoreCase));
+                if (!triggerMatches)
+                {
+                    triggerMatches = components.Any(item =>
+                    {
+                        AnalysisDetection detection = item.Detection;
+                        string taskId = GetMetadataString(detection, "ProcessingItemId") ?? string.Empty;
+                        return MatchesTrigger(trigger, cameraId, taskId, detection.Kind.ToString(), detection.Label, detection.Confidence, detection);
+                    });
+                }
+                if (!triggerMatches) continue;
                 if (trigger.CooldownSeconds > 0 && _triggerLastFiredUtc.TryGetValue(trigger.Id, out DateTime previous) &&
                     (now - previous).TotalSeconds < trigger.CooldownSeconds)
                 {
@@ -618,21 +847,56 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
 
     public ValueTask DisposeAsync() => new(StopAsync(CancellationToken.None));
 
-    private sealed class DetectionWork : IDisposable
+    private sealed class PendingComponent : IDisposable
     {
-        public DetectionWork(string cameraId, AnalysisKind kind, string label, DateTime timestamp, AnalysisDetection? sourceDetection, Bitmap crop, Bitmap? fullFrame, long sourceFrameSequence)
+        public PendingComponent(
+            string cameraId,
+            AnalysisDetection detection,
+            Bitmap crop,
+            Bitmap fullFrame,
+            long sourceFrameSequence,
+            DateTime timestamp,
+            string roiKey,
+            string componentKey)
         {
-            CameraId = cameraId; Kind = kind; Label = label; Timestamp = timestamp; SourceDetection = sourceDetection; Crop = crop; FullFrame = fullFrame; SourceFrameSequence = sourceFrameSequence;
+            CameraId = cameraId;
+            Detection = detection;
+            Crop = crop;
+            FullFrame = fullFrame;
+            SourceFrameSequence = sourceFrameSequence;
+            Timestamp = timestamp;
+            RoiKey = roiKey;
+            ComponentKey = componentKey;
         }
         public string CameraId { get; }
-        public AnalysisKind Kind { get; }
-        public string Label { get; }
-        public DateTime Timestamp { get; }
-        public AnalysisDetection? SourceDetection { get; }
+        public AnalysisDetection Detection { get; }
         public Bitmap Crop { get; }
-        public Bitmap? FullFrame { get; }
+        public Bitmap FullFrame { get; }
         public long SourceFrameSequence { get; }
-        public void Dispose() { Crop.Dispose(); FullFrame?.Dispose(); }
+        public DateTime Timestamp { get; private set; }
+        public string RoiKey { get; }
+        public string ComponentKey { get; }
+        public void PreserveStartTime(DateTime timestamp) => Timestamp = timestamp;
+        public void Dispose() { Crop.Dispose(); FullFrame.Dispose(); }
+    }
+
+    private sealed class DetectionWork : IDisposable
+    {
+        public DetectionWork(string cameraId, IReadOnlyList<PendingComponent> components, string associationType)
+        {
+            CameraId = cameraId;
+            Components = components;
+            AssociationType = associationType;
+            Timestamp = components.Min(item => item.Timestamp);
+        }
+        public string CameraId { get; }
+        public IReadOnlyList<PendingComponent> Components { get; }
+        public string AssociationType { get; }
+        public DateTime Timestamp { get; }
+        public void Dispose()
+        {
+            foreach (PendingComponent component in Components) component.Dispose();
+        }
     }
 
     private sealed record TriggerEvaluation(IReadOnlyList<TriggerDefinition> Matched, IReadOnlyList<TriggerDefinition> Suppressed)

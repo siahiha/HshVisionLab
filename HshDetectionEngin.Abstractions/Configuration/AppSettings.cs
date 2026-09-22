@@ -59,7 +59,7 @@ public class CameraSettings
     public List<CameraProcessingSettings> Processing { get; set; } = [];
     public string FaceModelFile { get; set; } = "face_yunet_2023mar.onnx";
     public bool FaceEnabled { get; set; }
-    public int FaceInputSize { get; set; } = 320;
+    public int FaceInputSize { get; set; } = 640;
     public float FaceConfidence { get; set; } = 0.8f;
     public float FaceRecordConfidence { get; set; } = 0.8f;
     public bool FaceRecognitionEnabled { get; set; } = true;
@@ -507,7 +507,7 @@ public sealed class AppSettings
                     {
                         c.Id = string.IsNullOrWhiteSpace(c.Id) ? Guid.NewGuid().ToString("N") : c.Id;
                         c.FaceModelFile ??= "face_yunet_2023mar.onnx";
-                        c.FaceInputSize = c.FaceInputSize <= 0 ? 320 : c.FaceInputSize;
+                        c.FaceInputSize = c.FaceInputSize <= 0 ? 640 : c.FaceInputSize;
                         c.FaceConfidence = c.FaceConfidence <= 0 ? 0.8f : c.FaceConfidence;
                         c.FaceRecordConfidence = c.FaceRecordConfidence <= 0 ? 0.8f : c.FaceRecordConfidence;
                         c.FaceRecognitionModelFile ??= "face_recognition_sface_2021dec.onnx";

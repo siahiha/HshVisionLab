@@ -128,9 +128,10 @@ public sealed class FacePipeline : IProcessingPipeline
             _nextProcessTicks = now + Math.Max(1, Stopwatch.Frequency / _options.MaxFps);
         }
 
-        // Keep the configured FaceInputSize semantics before feeding the fixed
-        // 640x640 YuNet graph. The package models are exported at 640x640;
-        // detections are mapped back to this configured intermediate image.
+        // FaceModule resolves InputWidth/InputHeight from the model metadata.
+        // The current YuNet packages declare 640x640, so this resize preserves
+        // the detector's native resolution instead of downscaling and then
+        // enlarging the same image again.
         using var preparedImage = FacePreprocessor.Apply(context.Image, _options.Preprocessing);
         int inputWidth = Math.Max(32, _options.InputWidth);
         int inputHeight = Math.Max(32, _options.InputHeight);

@@ -1,3 +1,4 @@
+using HshDetectionEngin.Face;
 using HshDetectionEngin.Plate;
 
 namespace HshVisionLab;
@@ -894,19 +895,19 @@ public sealed class CameraSettingsForm : Form
     private static PerformancePreset CreateWeakPreset() => new(
         "Weak / virtual 6-core", "best_416_int8_qdq_experimental.onnx", "face_yunet_2023mar_int8.onnx",
         Threads: 1, BufferCount: 0,
-        PlateInputSize: 416, FaceInputSize: 320, ProcessingFps: 5,
+        PlateInputSize: 416, FaceInputSize: 640, ProcessingFps: 5,
         ActiveFps: 5, IdleFps: 2, MotionFps: 5, FaceTopK: 2000, MotionHoldMs: 1500);
 
     private static PerformancePreset CreateBalancedPreset() => new(
         "Balanced / normal system", "best.onnx", "face_yunet_2023mar.onnx", Threads: 2, BufferCount: 0,
-        PlateInputSize: 416, FaceInputSize: 320, ProcessingFps: 8,
+        PlateInputSize: 416, FaceInputSize: 640, ProcessingFps: 8,
         ActiveFps: 8, IdleFps: 0, MotionFps: 8, FaceTopK: 5000, MotionHoldMs: 1200);
 
     private PerformancePreset CreateHighPerformancePreset()
     {
         return new(
             "High performance / realtime", "best.onnx", "face_yunet_2023mar.onnx", Threads: 4, BufferCount: 0,
-            PlateInputSize: 640, FaceInputSize: 480, ProcessingFps: 15,
+            PlateInputSize: 640, FaceInputSize: 640, ProcessingFps: 15,
             ActiveFps: 15, IdleFps: 5, MotionFps: 15, FaceTopK: 10000, MotionHoldMs: 700);
     }
 
@@ -1095,9 +1096,18 @@ public sealed class CameraSettingsForm : Form
 
     private void RefreshFaceInputSizes()
     {
+        string? modelFile = _cmbFaceModel.SelectedItem?.ToString();
+        int? detectedSize = string.IsNullOrWhiteSpace(modelFile)
+            ? null
+            : FaceModelInspector.TryGetSquareInputSize(modelFile);
+        var sizes = new HashSet<int>();
+        if (detectedSize is > 0) sizes.Add(detectedSize.Value);
+        // YuNet models supported by FacePipeline use a fixed 640x640 tensor.
+        if (sizes.Count == 0) sizes.Add(640);
+
         string? previous = _cmbFaceInputSize.SelectedItem?.ToString();
         _cmbFaceInputSize.Items.Clear();
-        foreach (int size in new[] { 320, 416, 480, 512, 640 }) _cmbFaceInputSize.Items.Add(size.ToString());
+        foreach (int size in sizes.OrderBy(size => size)) _cmbFaceInputSize.Items.Add(size.ToString());
         if (previous is not null && _cmbFaceInputSize.Items.Contains(previous)) _cmbFaceInputSize.SelectedItem = previous;
         else if (_cmbFaceInputSize.Items.Count > 0) _cmbFaceInputSize.SelectedIndex = 0;
     }
@@ -1107,18 +1117,12 @@ public sealed class CameraSettingsForm : Form
         string? modelFile = _cmbModel.SelectedItem?.ToString();
         if (string.IsNullOrWhiteSpace(modelFile)) return;
 
-        var sizes = new HashSet<int>();
-        int? detectedSize = PlateModelInspector.TryGetSquareInputSize(modelFile);
-        if (detectedSize is > 0) sizes.Add(detectedSize.Value);
-
-        if (sizes.Count == 0)
-        {
-            foreach (int size in new[] { 320, 416, 480, 512, 640 }) sizes.Add(size);
-        }
+        IReadOnlyList<int> sizes = PlateModelInspector.GetSquareInputSizes(modelFile);
+        if (sizes.Count == 0) sizes = [320, 416, 480, 512, 640];
 
         string? previous = _cmbInputSize.SelectedItem?.ToString();
         _cmbInputSize.Items.Clear();
-        foreach (int size in sizes.OrderBy(size => size)) _cmbInputSize.Items.Add(size.ToString());
+        foreach (int size in sizes.OrderBy(size => size).Distinct()) _cmbInputSize.Items.Add(size.ToString());
         if (previous is not null && _cmbInputSize.Items.Contains(previous))
             _cmbInputSize.SelectedItem = previous;
         else if (_cmbInputSize.Items.Count > 0)

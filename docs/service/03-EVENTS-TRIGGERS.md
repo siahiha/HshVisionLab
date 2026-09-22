@@ -2,6 +2,10 @@
 
 ## 1. اصل طراحی
 
+> **مرز implementation فعلی:** `EventStore` و replay ترتیبی SignalR فعال هستند و event قبل از broadcast در SQLite ثبت می‌شود. outbox مستقل، dispatcher webhook و API gap جداگانه در نسخهٔ فعلی وجود ندارند و بخش‌های مربوط به آن‌ها در این سند roadmap محسوب می‌شوند.
+
+هر connection در Hub subscription مستقل دارد. `Subscribe(lastSequence, ClientSubscription)` فیلترهای `All`، `Plate` و `KnownFace`، اجباری‌بودن componentها، unknown face، scope دوربین/ROI، پنجرهٔ association و cooldown را برای همان کلاینت اعمال می‌کند.
+
 ارسال live به UI به‌تنهایی قابل‌اعتماد نیست. UI ممکن است خاموش، قطع شبکه یا در حال restart باشد. بنابراین سرویس باید مستقل از وضعیت UI تشخیص بدهد، event را ذخیره کند و بعداً امکان replay بدهد.
 
 ```text

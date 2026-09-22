@@ -18,7 +18,7 @@ public sealed class PlateProcessingOptions
 public sealed class FaceProcessingOptions
 {
     public string ModelFile { get; set; } = "face_yunet_2023mar.onnx";
-    public int InputSize { get; set; } = 320;
+    public int InputSize { get; set; } = 640;
     public string Preprocessing { get; set; } = "None";
     public float Confidence { get; set; } = 0.80f;
     public float RecordConfidence { get; set; } = 0.80f;
@@ -104,7 +104,7 @@ public sealed partial class CameraProcessingSettings
             FaceProcessingOptions value = new()
             {
                 ModelFile = Legacy("FaceModelFile", "face_yunet_2023mar.onnx"),
-                InputSize = Legacy("FaceInputSize", 320),
+                InputSize = Legacy("FaceInputSize", 640),
                 Preprocessing = Legacy("FacePreprocessing", "None"),
                 Confidence = Legacy("FaceConfidence", 0.80f),
                 RecordConfidence = Legacy("FaceRecordConfidence", 0.80f),

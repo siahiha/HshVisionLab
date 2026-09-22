@@ -35,6 +35,7 @@ public sealed class ServiceSettingsStore
             _service.Http ??= new ServiceHttpSettings();
             _service.Security ??= new ServiceSecuritySettings();
             _service.Runtime ??= new ServiceRuntimeSettings();
+            _service.Association ??= new ServiceAssociationSettings();
             _service.Retention ??= new ServiceRetentionSettings();
             _service.Triggers ??= [];
             if (string.IsNullOrWhiteSpace(_service.ServiceNodeId)) _service.ServiceNodeId = Guid.NewGuid().ToString("N");

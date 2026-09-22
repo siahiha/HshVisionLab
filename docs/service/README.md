@@ -40,6 +40,6 @@
   دوربین MediaMTX از WHEP خام استفاده می‌کند و SVG Overlay را جداگانه می‌گیرد.
 - WHEP proxy برای دوربین‌های MediaMTX فعال است؛ UI وب ویدئوی خام را از WHEP می‌گیرد و `/api/v1/streams/{cameraId}/overlay` را جداگانه مصرف می‌کند.
 - SignalR قبل از broadcast، event را در SQLite ثبت می‌کند و reconnect با sequence replay انجام می‌شود.
-- سناریوی association پلاک/چهره در قرارداد داده پیش‌بینی شده، اما policy تطبیق تاریخی آن مرحلهٔ بعدی توسعه است.
+- association پلاک/چهره در runtime فعال است: componentهای Plate و Face در همان فریم یا پنجرهٔ زمانی محدود به هم متصل می‌شوند و event مستقل با `associationType`های `SameFrame`، `TemporalAssociation` یا `Standalone` ساخته می‌شود. policy هر اتصال نیز از طریق `ClientSubscription` جداگانه فیلتر می‌شود.
 
 برای راه‌اندازی و API واقعی به [راهنمای پروژهٔ سرویس](../../HshDetectionService/README.md) مراجعه کنید.

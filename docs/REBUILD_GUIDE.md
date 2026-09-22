@@ -108,7 +108,7 @@ ROI معتبر حداقل سه نقطه و bounding box حداقل `32×32` دا
 `FaceModule` تنظیمات typed را دریافت می‌کند، مسیر مدل‌ها را resolve می‌کند و `FacePipeline` را با feature لایسنس `Face` می‌سازد؛ enrollment نیز از همین ماژول استفاده می‌کند و factory جداگانه‌ای در `CameraRuntime` ندارد. ترتیب اجرا:
 
 1. اجرای `FacePreprocessor` اختیاری پیش از YuNet با `None`، `Standard` یا `Advanced`؛ مقدار پیش‌فرض `None` است.
-2. resize تصویر ROI به مربع `FaceInputSize` و سپس تبدیل آن به ورودی ثابت `640×640` package فعلی.
+2. تشخیص اندازهٔ مربع ورودی مدل از metadata و resize تصویر ROI به همان اندازه؛ مدل‌های فعلی YuNet ورودی ثابت `640×640` دارند.
 3. inference YuNet روی CPU.
 4. بازگرداندن bounds و landmarkها به مقیاس ROI اصلی.
 5. tracker مبتنی بر IoU.
@@ -116,7 +116,7 @@ ROI معتبر حداقل سه نقطه و bounding box حداقل `32×32` دا
 7. تبدیل crop به RGB و ارسال tensor float با مقادیر پیکسلی خام به SFace، دریافت embedding و مقایسهٔ cosine similarity. مقایسهٔ cosine نرمال‌سازی ریاضیِ دو بردار را انجام می‌دهد، اما در مسیر فعلی نرمال‌سازی جداگانهٔ ورودی یا L2-normalize کردن embedding انجام نمی‌شود.
 8. انتخاب هویت نام‌دار در صورت عبور از `FaceRecognitionThreshold`؛ در غیر این صورت تطبیق با افراد ناشناس ذخیره‌شده با `FaceUnknownMatchThreshold` انجام می‌شود. اگر تطبیق پیدا نشود، یک شخص با نام اولیهٔ `Unknown #NNNN` در database ساخته و crop/embedding آن ذخیره می‌شود. برای جلوگیری از ثبت یک فریم در هر بار inference، از یک شخص ناشناس حداکثر هر 10 ثانیه یک نمونهٔ جدید و تا سقف 10 نمونه ذخیره می‌شود.
 
-UI اندازه‌های 320، 416، 480، 512 و 640 را برای `FaceInputSize` عرضه می‌کند. این مقدار اندازهٔ میانی preprocessing و مختصات detector است؛ package فعلی YuNet در نهایت تصویر را به گراف ثابت `640×640` می‌دهد. `Threads` در `SessionOptions.IntraOpNumThreads` برای sessionهای YuNet و SFace تنظیم می‌شود و دیگر به `CvInvoke.NumThreads` سراسری وابسته نیست.
+UI مقدار `InputSize` را از catalog مدل می‌گیرد و فقط اندازه‌های اعلام‌شدهٔ همان مدل را در ComboBox نشان می‌دهد؛ مدل‌های فعلی YuNet مقدار `640` را اعلام می‌کنند. `Threads` در `SessionOptions.IntraOpNumThreads` برای sessionهای YuNet و SFace تنظیم می‌شود و دیگر به `CvInvoke.NumThreads` سراسری وابسته نیست.
 
 `FacePreprocessing` یک گزینهٔ عمومی برای آماده‌سازی تصویر detector است و پیش‌پردازش اختصاصی SFace محسوب نمی‌شود. حالت `Advanced` تصویر را grayscale و equalize می‌کند و در پیاده‌سازی فعلی همان تصویر آماده‌شده به مسیر alignment/embedding نیز می‌رسد؛ به همین دلیل هنگام فعال‌بودن recognition مقدار `None` توصیه می‌شود. پیش‌فرض‌های شناسایی SFace عبارت‌اند از: `FaceRecognitionThreshold = 0.40`، `FaceUnknownMatchThreshold = 0.35` و `FaceEventCooldownSeconds = 60`.
 

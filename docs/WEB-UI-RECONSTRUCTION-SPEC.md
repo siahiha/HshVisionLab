@@ -133,10 +133,11 @@ commandbar عنوان `مرکز کنترل دوربین‌ها` و زیرعنو�
 ### ۳.۲ دیوار دوربین و پنل تشخیص
 
 `dashboard-live-layout` در دسکتاپ `grid-template-columns:
-minmax(0, 1fr) 335px` دارد؛ ستون دوربین در سمت چپ و پنل تشخیص در سمت راست
-است. در عرض 1100px ستون تشخیص 300px می‌شود و در عرض 820px دو ستون زیر هم
-قرار می‌گیرند. بنابراین پنل تشخیص نباید با یک کارت متنی ساده یا پنل تاریخچهٔ
-جداگانه جایگزین شود.
+minmax(0, 1fr) minmax(0, 250px)` دارد؛ ستون دوربین در سمت چپ و پنل تشخیص در
+سمت راست است. `DetectionHistoryPanel` نیز `max-width: 250px` دارد تا فضای
+اصلی برای دیوار دوربین باقی بماند. در عرض 820px یا کمتر، دو بخش زیر هم قرار
+می‌گیرند و پنل تشخیص عرض کامل می‌گیرد. بنابراین پنل تشخیص نباید با یک کارت
+متنی ساده یا پنل تاریخچهٔ جداگانه جایگزین شود.
 
 سمت چپ `dashboard-workspace` است:
 
@@ -162,7 +163,8 @@ detected-event-card
 ```
 
 crop از اولین artifactای انتخاب می‌شود که type آن شامل یکی از این عبارت‌ها
-باشد: `platecrop`، `detectioncrop`، `facealignedcrop` یا `roiannotated`.
+باشد: `platecrop`، `detectioncrop`، `facealignedcrop`، `roiraw` یا
+`roiannotated`. در مسیر فعلی آرشیو، `RoiRaw` برای crop خام استفاده می‌شود.
 اگر چنین artifactای نباشد، به‌جای تصویر آیکون Database نمایش داده می‌شود.
 کلیک روی کارت به `/events/<eventId>` می‌رود.
 
@@ -272,7 +274,7 @@ border-top سبز و در حالت متوقف border-top زرد دارد. تصو
 
 در تب preview، دو ستون وجود دارد: live panel و `وضعیت لحظه‌ای`. برای
 MediaMTX عنوان تصویر `پخش کم‌تاخیر MediaMTX` و زیرعنوان
-`WebRTC · استریم پردازش‌شده با ROI، کادرها و نتایج تشخیص` است. برای backend
+`WHEP خام MediaMTX + Overlay سبک سمت کلاینت` است؛ تصویر دوباره encode یا با Drawing پردازش نمی‌شود. برای backend
 دیگر عنوان `آخرین فریم کامپوزیت‌شده` و زیرعنوان
 `ROI و Drawing روی آخرین تصویر سرویس رسم می‌شوند.` است. همین تب دکمهٔ
 `ROI جدید` و `حذف ROI` را دارد.
@@ -414,9 +416,15 @@ people`، نتایج جفت تصویر، similarity، `ادغام در اولی`
 تمام artifactها شامل frame/crop در یک ردیف افقی قرار می‌گیرند و در صورت زیاد
 بودن تعدادشان همان ردیف اسکرول افقی دارد. payload کامل تریگر و components به‌صورت
 پیش‌فرض بسته است و با دکمهٔ `نمایش payload` باز و با `بستن payload` بسته می‌شود.
+فریم کامل و cropهای آرشیوی از snapshot خام قبل از رسم ROI و detection می‌آیند؛
+Drawingهای زندهٔ SVG نباید داخل فایل artifact ذخیره‌شده burn-in شوند.
 `/events/:eventId` همین preview را با PageHead مستقل `جزئیات رخداد` نشان می‌دهد.
 
 ## ۱۰. تریگرها `/triggers`
+
+در ابتدای همین صفحه، `ClientSubscriptionTester` برای تست policy همان اتصال وب قرار دارد. این بخش تنظیمات دوربین یا trigger سرویس را تغییر نمی‌دهد و فقط با `sessionStorage` ذخیره می‌شود و هنگام اعمال، subscription SignalR و query تاریخچهٔ همان صفحه را به‌روزرسانی می‌کند.
+
+گزینه‌های تست شامل `All`، `Plate` و `KnownFace`، پنجرهٔ association، اجباری‌بودن Face/Plate، ارسال چهرهٔ ناشناس و محدودکردن به دوربین‌های انتخابی است. این تست برای شبیه‌سازی سه client مستقل استفاده می‌شود؛ هر client واقعی باید subscription خودش را هنگام `Subscribe` ارسال کند.
 
 عنوان صفحه `تریگرها و کلاینت‌ها` و دکمهٔ `تریگر جدید` است. ستون چپ فهرست
 تعریف‌های سرویس و cooldown را نشان می‌دهد؛ ستون راست فرم انتخاب‌شده را دارد.
@@ -429,6 +437,8 @@ confidence، Face identity، scope دوربین‌ها و کانال اعلان 
 `حذف تریگر` و `ذخیره تریگر` هستند.
 
 ## ۱۱. تنظیمات سرویس `/settings`
+
+در tab `Runtime و retention` فیلدهای association نیز وجود دارند: `Max association window (ms)` برای پنجرهٔ زمانی اتصال پلاک/چهره و `Association فقط داخل همان ROI` برای الزام تطابق ROI.
 
 PageHead عنوان `تنظیمات سرویس` و دو اکشن `Reload runtime` و
 `ذخیره همهٔ تنظیمات` دارد. tabهای دقیق:
@@ -482,10 +492,12 @@ GET /api/v1/streams/{cameraId}/overlay?ts=<Date.now()>
 ```
 
 `LiveOverlaySvg` روی video یک SVG هم‌اندازهٔ فریم می‌گذارد و این موارد را رسم
-می‌کند: polygon و نام ROI، primitiveهای Rectangle/Circle/Points/Polyline/Polygon
-با رنگ و ضخامت، و detection box با رنگ سبز برای accepted و قرمز برای rejected،
-label/text، track id و confidence. پس در مسیر MediaMTX، تصویر raw است و Drawing
-به‌صورت burn-in داخل ویدئو encode نمی‌شود.
+می‌کند: `rois` معمولی، `motionRois`، primitiveهای
+Rectangle/Circle/Points/Polyline/Polygon با رنگ و ضخامت، و detection box با
+رنگ سبز برای accepted و قرمز برای rejected، label/text، track id و confidence.
+ROI معمولی خط نارنجی solid و نام ROI دارد؛ motion ROI با هندسهٔ مقیاس‌شده حول
+مرکز و خط زرد dashed نمایش داده می‌شود. پس در مسیر MediaMTX، تصویر raw است و
+Drawing به‌صورت burn-in داخل ویدئو encode نمی‌شود.
 
 ### ۱۲.۲ مسیر غیر MediaMTX
 
@@ -569,6 +581,7 @@ layoutهای camera/faces/events/triggers تک‌ستونه، formها تک‌س
 - backendهای دیگر snapshot باشند؛
 - تنظیمات CameraEditor سه tab گفته‌شده و چهار بخش پردازش گفته‌شده را داشته باشد؛
 - همهٔ modelها از catalog سرویس و پوشه‌های مدل، نه از یک input متنی ثابت، بیایند؛
-- صفحات Faces، Events، Triggers و Settings با layout دو ستونه و editor سمت مقابل
-  فهرست پیاده شوند؛
+- صفحات Faces و Triggers با layout دو ستونه و editor سمت مقابل فهرست پیاده
+  شوند؛ Events باید preview را بالای history تمام‌عرض نشان دهد و Settings
+  باید grid تنظیمات و tabهای واقعی خود را داشته باشد؛
 - در موبایل breakpointهای 1100، 820 و 500 رفتار ذکرشده را رعایت کنند.

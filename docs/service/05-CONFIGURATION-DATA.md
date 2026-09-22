@@ -47,6 +47,8 @@
 
 ### `service-settings.json`
 
+در implementation فعلی علاوه بر موارد بالا، بخش `association` شامل `maxWindowMs` و `requireSameRoi` است. این دو مقدار policy مشترک ارتباط پلاک/چهره را تعیین می‌کنند؛ فیلترهای client در `ClientSubscription` نگه‌داری می‌شوند و داخل تنظیمات دوربین ذخیره نمی‌شوند.
+
 تنظیمات خاص سرویس را نگه می‌دارد:
 
 - HTTP/HTTPS

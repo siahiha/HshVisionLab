@@ -68,10 +68,13 @@ import {
   useSettings,
   useTriggerMutation,
   useTriggers,
+  readClientSubscription,
+  saveClientSubscription,
 } from "./hooks";
 import type {
   CameraSettings,
   CameraStatus,
+  ClientSubscription,
   DetectionEvent,
   FaceIdentity,
   FaceSample,
@@ -2062,8 +2065,11 @@ function RawMediaMtxStream({
       connection.addTransceiver("video", { direction: "recvonly" });
       connection.ontrack = (event) => {
         const video = videoRef.current;
-        if (disposed || activeSession !== session || !video || !event.streams[0]) return;
-        session.stream = event.streams[0];
+        if (disposed || activeSession !== session || !video || event.track.kind !== "video") return;
+        // MediaMTX can deliver a valid video track without populating
+        // RTCTrackEvent.streams. Build the stream from the track in that
+        // case; otherwise the peer is connected but the video stays black.
+        session.stream = event.streams[0] ?? new MediaStream([event.track]);
         video.srcObject = session.stream;
         video.defaultPlaybackRate = 1;
         video.playbackRate = 1;
@@ -2189,8 +2195,8 @@ function CompositeWebRtcStream({
       connectionRef.current = connection;
       connection.addTransceiver("video", { direction: "recvonly" });
       connection.ontrack = (event) => {
-        if (!disposed && videoRef.current && event.streams[0])
-          videoRef.current.srcObject = event.streams[0];
+        if (!disposed && videoRef.current && event.track.kind === "video")
+          videoRef.current.srcObject = event.streams[0] ?? new MediaStream([event.track]);
       };
       try {
         const offer = await connection.createOffer();
@@ -2784,6 +2790,62 @@ function ModelSelect({
   );
 }
 
+function modelFamilyModels(
+  models: ModelInfo[],
+  capability: "plate" | "faceDetection" | "faceRecognition",
+) {
+  const familyModels = models.filter((model) => {
+    const advertised = model.capability?.toLowerCase();
+    if (advertised) return advertised === capability.toLowerCase();
+    const text = `${model.module} ${model.name} ${model.relativePath}`.toLowerCase();
+    if (capability === "plate") return text.includes("plate");
+    if (capability === "faceRecognition") return text.includes("face") && text.includes("sface");
+    return text.includes("face") && text.includes("yunet");
+  });
+  return familyModels.length ? familyModels : models;
+}
+
+function InputSizeSelect({
+  task,
+  models,
+  capability,
+  fallback,
+  onChange,
+}: {
+  task: ProcessingTask;
+  models: ModelInfo[];
+  capability: "plate" | "faceDetection";
+  fallback: number;
+  onChange: (value: number) => void;
+}) {
+  const value = n(option(task, "inputSize", fallback), fallback);
+  const modelValue = s(option(task, "modelFile", ""));
+  const selected = modelFamilyModels(models, capability).find(
+    (model) => model.name === modelValue || model.relativePath === modelValue,
+  );
+  const declaredSizes = (selected?.inputSizes ?? []).filter(
+    (size): size is number => Number.isInteger(size) && size > 0,
+  );
+  const sizes = declaredSizes.length ? declaredSizes : [value];
+  const options = sizes.includes(value) ? sizes : [value, ...sizes];
+
+  return (
+    <Field label="Input size">
+      <select
+        dir="ltr"
+        value={String(value)}
+        onChange={(e) => onChange(Number(e.target.value))}
+      >
+        {options.sort((a, b) => a - b).map((size) => (
+          <option key={size} value={size}>
+            {size}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
 function TaskEditor({
   task,
   onChange,
@@ -2802,6 +2864,17 @@ function TaskEditor({
   const face = task.type.toLocaleLowerCase() === "face";
   const set = (key: string, value: unknown) =>
     onChange(setOption(task, key, value));
+  const setModel = (value: string, capability: "plate" | "faceDetection") => {
+    let next = setOption(task, "modelFile", value);
+    const selected = modelFamilyModels(models, capability).find(
+      (model) => model.name === value || model.relativePath === value,
+    );
+    const declaredSize = selected?.inputSizes?.find(
+      (size) => Number.isInteger(size) && size > 0,
+    );
+    if (declaredSize) next = setOption(next, "inputSize", declaredSize);
+    onChange(next);
+  };
   return (
     <div className="task-card detailed">
       <div className="task-card-top">
@@ -2844,20 +2917,18 @@ function TaskEditor({
             <ModelSelect
               label="Model"
               value={s(option(task, "modelFile", "best.hshmodel"))}
-              onChange={(value) => set("modelFile", value)}
+              onChange={(value) => setModel(value, "plate")}
               models={models}
               capability="plate"
               wide
             />
-            <Field label="Input size">
-              <input
-                type="number"
-                min="160"
-                max="1024"
-                value={n(option(task, "inputSize", 416))}
-                onChange={(e) => set("inputSize", Number(e.target.value))}
-              />
-            </Field>
+            <InputSizeSelect
+              task={task}
+              models={models}
+              capability="plate"
+              fallback={416}
+              onChange={(value) => set("inputSize", value)}
+            />
             <Field label="Preprocessing">
               <select
                 value={s(option(task, "preprocessing", "Standard"))}
@@ -2950,20 +3021,18 @@ function TaskEditor({
                 value={s(
                   option(task, "modelFile", "face_yunet_2023mar.hshmodel"),
                 )}
-                onChange={(value) => set("modelFile", value)}
+                onChange={(value) => setModel(value, "faceDetection")}
                 models={models}
                 capability="faceDetection"
                 wide
               />
-              <Field label="Input size">
-                <input
-                  type="number"
-                  min="160"
-                  max="1024"
-                  value={n(option(task, "inputSize", 320))}
-                  onChange={(e) => set("inputSize", Number(e.target.value))}
-                />
-              </Field>
+              <InputSizeSelect
+                task={task}
+                models={models}
+                capability="faceDetection"
+                fallback={640}
+                onChange={(value) => set("inputSize", value)}
+              />
               <Field label="Preprocessing">
                 <select
                   value={s(option(task, "preprocessing", "None"))}
@@ -3167,8 +3236,8 @@ function LivePreview({ camera }: { camera?: CameraStatus }) {
       pc.current = connection;
       connection.addTransceiver("video", { direction: "recvonly" });
       connection.ontrack = (e) => {
-        if (videoRef.current && e.streams[0])
-          videoRef.current.srcObject = e.streams[0];
+        if (videoRef.current && e.track.kind === "video")
+          videoRef.current.srcObject = e.streams[0] ?? new MediaStream([e.track]);
       };
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
@@ -3996,6 +4065,7 @@ function Triggers() {
           </Button>
         }
       />
+      <ClientSubscriptionTester cameras={cameras.data ?? []} />
       <div className="triggers-layout">
         <section className="panel trigger-list">
           <div className="panel-head compact">
@@ -4065,6 +4135,66 @@ function Triggers() {
         </section>
       </div>
     </>
+  );
+}
+
+function ClientSubscriptionTester({ cameras }: { cameras: CameraStatus[] }) {
+  const [draft, setDraft] = useState<ClientSubscription>(() => readClientSubscription());
+  const update = <K extends keyof ClientSubscription>(key: K, value: ClientSubscription[K]) =>
+    setDraft((current) => ({ ...current, [key]: value }));
+  const toggleCamera = (id: string) =>
+    update(
+      "cameraIds",
+      draft.cameraIds.includes(id)
+        ? draft.cameraIds.filter((item) => item !== id)
+        : [...draft.cameraIds, id],
+    );
+  const apply = () => saveClientSubscription(draft);
+  return (
+    <section className="panel client-subscription-panel">
+      <div className="panel-head compact">
+        <div>
+          <h3>آزمایش subscription کلاینت</h3>
+          <span>
+            این تنظیم فقط eventهای همین اتصال UI را فیلتر می‌کند و تنظیمات دوربین را تغییر نمی‌دهد.
+          </span>
+        </div>
+        <Button icon={Radio} onClick={apply}>اعمال برای اتصال جاری</Button>
+      </div>
+      <div className="form-grid">
+        <Field label="رخداد پایه">
+          <select value={draft.mode} onChange={(e) => update("mode", e.target.value as ClientSubscription["mode"])}>
+            <option value="All">همهٔ رخدادها</option>
+            <option value="Plate">پلاک‌محور</option>
+            <option value="KnownFace">چهرهٔ شناخته‌شده</option>
+          </select>
+        </Field>
+        <Field label="پنجرهٔ association (ms)">
+          <input type="number" min="0" max="10000" step="100" value={draft.windowMs} onChange={(e) => update("windowMs", Number(e.target.value))} />
+        </Field>
+        <Field label="چهره الزامی باشد">
+          <Toggle checked={draft.faceRequired} onChange={(value) => update("faceRequired", value)} />
+        </Field>
+        <Field label="پلاک الزامی باشد">
+          <Toggle checked={draft.plateRequired} onChange={(value) => update("plateRequired", value)} />
+        </Field>
+        <Field label="چهرهٔ ناشناس هم ارسال شود">
+          <Toggle checked={draft.includeUnknownFace} onChange={(value) => update("includeUnknownFace", value)} />
+        </Field>
+      </div>
+      <div className="trigger-scope">
+        <b>محدودکردن subscription به دوربین‌ها</b>
+        <div>
+          {cameras.map((camera) => (
+            <label key={camera.id} className="scope-chip">
+              <input type="checkbox" checked={draft.cameraIds.includes(camera.id)} onChange={() => toggleCamera(camera.id)} />
+              <span>{camera.name}</span>
+            </label>
+          ))}
+        </div>
+        <small>خالی‌بودن یعنی همهٔ دوربین‌ها. تغییرات بعد از اعمال، روی SignalR همین صفحه فعال می‌شود.</small>
+      </div>
+    </section>
   );
 }
 function TriggerEditor({
@@ -4419,6 +4549,46 @@ function SettingsPage() {
                         runtime: {
                           ...service.runtime,
                           maxEventQueueLength: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                }
+              />
+              <SettingLine
+                label="Max association window (ms)"
+                text="حداکثر بازهٔ اتصال پلاک و چهره در event مشترک."
+                control={
+                  <input
+                    className="small-input"
+                    type="number"
+                    min="0"
+                    max="10000"
+                    value={service.association.maxWindowMs}
+                    onChange={(e) =>
+                      setService({
+                        ...service,
+                        association: {
+                          ...service.association,
+                          maxWindowMs: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                }
+              />
+              <SettingLine
+                label="Association فقط داخل همان ROI"
+                text="از اتصال پلاک و چهرهٔ دو ROI متفاوت جلوگیری شود."
+                control={
+                  <Toggle
+                    checked={service.association.requireSameRoi}
+                    onChange={(value) =>
+                      setService({
+                        ...service,
+                        association: {
+                          ...service.association,
+                          requireSameRoi: value,
                         },
                       })
                     }

@@ -201,11 +201,12 @@ GET /api/v1/events/{eventId}/artifacts/{artifactId}
 - `minimumConfidence`
 - `pageSize`
 
-برای مصرف زنده، Hub جداگانه داشته باشیم:
+برای مصرف زنده، Hub فعال رخداد:
+
+در implementation فعلی endpointهای `/api/v1/events/{eventId}/image`، `/api/v1/events/gaps` و `/api/v1/events/export` وجود ندارند. Queryهای واقعی شامل `afterSequence`، `limit`، `cameraId`، `scenario`، `fromUtc`، `toUtc` و فیلترهای subscription شامل `clientMode`، `faceRequired`، `plateRequired`، `includeUnknownFace`، `windowMs`، `clientCameraIds` و `clientRoiIds` هستند.
 
 ```text
 /hubs/detections
-/hubs/webrtc-signaling
 ```
 
 قرارداد کامل event، اطلاعات characterهای پلاک، وضعیت ناشناس/شناخته‌شدهٔ چهره، artifactهای فریم و ROI و association پلاک/چهره در [07-DETECTION-EVENT-CONTRACT.md](07-DETECTION-EVENT-CONTRACT.md) آمده است.
@@ -213,8 +214,6 @@ GET /api/v1/events/{eventId}/artifacts/{artifactId}
 ## 10. Stream و WebRTC
 
 ```text
-GET  /api/v1/streams
-GET  /api/v1/streams/{cameraId}/status
 GET  /api/v1/streams/{cameraId}/snapshot
 GET  /api/v1/streams/{cameraId}/overlay
 POST /api/v1/streams/{cameraId}/webrtc/offer
@@ -256,20 +255,14 @@ offer/answer اختصاصی و `WebRtcGateway` برای clientهای legacy که
 کامپوزیت‌شده می‌خواهند باقی می‌ماند؛ endpoint POST برای clientهای ساده و تست
 نیز حفظ شده است. برای client فعلی MediaMTX، نباید به `/webrtc/offer` متصل شد.
 
-## 11. ارتباط پلاک و چهره
+## 11. ارتباط پلاک و چهره و subscription کلاینت
 
-برای سناریوی تطبیق پلاک و چهره، domain جداگانهٔ association لازم است:
+ارتباط پلاک و چهره در همان event canonical انجام می‌شود و در نسخهٔ فعلی endpoint جداگانهٔ association وجود ندارد. پنجرهٔ اتصال از `service.Association.MaxWindowMs` (پیش‌فرض 1500ms) و `RequireSameRoi` کنترل می‌شود.
 
-```text
-GET    /api/v1/associations
-POST   /api/v1/associations
-GET    /api/v1/associations/{associationId}
-PATCH  /api/v1/associations/{associationId}
-DELETE /api/v1/associations/{associationId}
-GET    /api/v1/associations/{associationId}/evidence
-```
 
-این رکورد نباید با `People` یا `FaceSamples` ادغام شود. event باید نتیجهٔ جاری، reference رکورد قبلی، وضعیت تطبیق و eventهای evidence را هم‌زمان گزارش کند.
+در نسخهٔ فعلی، policy هر اتصال با متد SignalR به نام `Subscribe(lastSequence, subscription)` تعیین می‌شود و تنظیمات inference دوربین را تغییر نمی‌دهد. فیلدهای اصلی subscription عبارت‌اند از `mode` (`All`، `Plate`، `KnownFace`)، `cameraIds`، `roiIds`، `faceRequired`، `plateRequired`، `includeFace`، `includePlate`، `includeUnknownFace`، `includeArtifacts`، `windowMs` و `cooldownSeconds`. اگر `faceRequired` یا `plateRequired` برابر false باشد، component اختیاری است و در صورت شناسایی به همان client ارسال می‌شود.
+
+endpointهای `/api/v1/associations` در نسخهٔ فعلی پیاده‌سازی نشده‌اند و نباید توسط client فراخوانی شوند؛ client باید eventهای `PlateOnly`، `FaceRecognition` یا `PlateFaceAssociation` را از Event API/SignalR مصرف کند.
 
 ## 12. امنیت
 

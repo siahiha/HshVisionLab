@@ -92,6 +92,10 @@ export interface ServiceSettings {
     previewFps: number;
     maxEventQueueLength: number;
   };
+  association: {
+    maxWindowMs: number;
+    requireSameRoi: boolean;
+  };
   retention: {
     eventDays: number;
     artifactDays: number;
@@ -113,6 +117,7 @@ export interface ModelInfo {
   relativePath: string;
   module: string;
   capability?: string;
+  inputSizes?: number[];
   packaged: boolean;
 }
 export interface TriggerAction {
@@ -133,6 +138,19 @@ export interface TriggerDefinition {
   minimumConfidence?: number;
   cooldownSeconds: number;
   actions: TriggerAction[];
+}
+export interface ClientSubscription {
+  mode: "All" | "Plate" | "KnownFace";
+  cameraIds: string[];
+  roiIds: string[];
+  faceRequired: boolean;
+  plateRequired: boolean;
+  includeFace: boolean;
+  includePlate: boolean;
+  includeUnknownFace: boolean;
+  includeArtifacts: boolean;
+  windowMs: number;
+  cooldownSeconds: number;
 }
 export interface Artifact {
   artifactId: Id;

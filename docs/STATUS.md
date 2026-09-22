@@ -18,9 +18,13 @@
 - UI اصلی با دکمهٔ `Cameras` و فرم جداگانهٔ مدیریت دوربین‌ها، کنترل‌های Start/Stop/Edit/Delete بالای هر tile در نمای چنددوربینه، نمای بزرگ دوربین و پنل ROI زیر `Detected events`؛ ROI در حالت عادی مخفی است و روی تصویر overlay نمی‌شود.
 - پنل وب `DetectionManagerUi` با نوار اکشن بالایی، tileهای دوربین، پنل تشخیص شامل crop و مشخصات متنی، نمای کامل دوربین و کنترل‌های ROI مستقل برای view/edit/new/delete/save/cancel/back.
 - تنظیمات پردازش وب با دسته‌بندی Plate detection، Face detection، Face identification و Tracking/recording؛ انتخاب مدل‌ها از ComboBox و catalog مدل سرویس، بدون ورود متنی model file.
+- `InputSize` مدل‌محور است: مدل ثابت اندازهٔ tensor خودش را اعلام می‌کند و مدل YOLO پویا گزینه‌های stride-aligned استاندارد `320/416/480/512/640` را در catalog سرویس اعلام می‌کند؛ WinForms و UI وب همین منبع مشترک را مصرف می‌کنند. YuNetهای فعلی `640×640` هستند.
 - سه backend دریافت `FFmpeg`، `LibVLC` و `MediaMTX`؛ مدل‌ها از `Models/Plate`، `Models/Face`، `Models` و مسیرهای legacy/Debug fallback فهرست می‌شوند.
-- مسیر کم‌تاخیر MediaMTX در وب با WHEP خام و Overlay جداگانه: ویدئو مستقیماً از MediaMTX به مرورگر می‌رود و ROI، کادر تشخیص، label، confidence و primitiveهای پردازشی سمت کلاینت رسم می‌شوند؛ ویدئو برای Drawing دوباره encode نمی‌شود.
+- مسیر کم‌تاخیر MediaMTX در وب با WHEP خام و Overlay جداگانه: ویدئو مستقیماً از MediaMTX به مرورگر می‌رود و ROI ثابت، motion ROI، کادر تشخیص، label، confidence و primitiveهای پردازشی سمت کلاینت رسم می‌شوند؛ ویدئو برای Drawing دوباره encode نمی‌شود.
 - endpoint سبک `GET /api/v1/streams/{cameraId}/overlay` برای هماهنگ‌کردن Overlay با WHEP و endpointهای WHEP خام برای path MediaMTX؛ مسیر `WebRtcGateway` کامپوزیت‌شده برای legacy حفظ شده است.
+- association پلاک/چهره در runtime فعال است و از همان فریم یا پنجرهٔ زمانی حداکثر `Association.MaxWindowMs` (پیش‌فرض 1500ms) استفاده می‌کند؛ خروجی با `SameFrame`، `TemporalAssociation` یا `Standalone` مشخص می‌شود.
+- subscription هر کلاینت مستقل است و از طریق `ClientSubscription`/SignalR یا پارامترهای Event API فیلتر می‌شود؛ `faceRequired=false` و `plateRequired=false` component اختیاری را حذف نمی‌کنند.
+- برای کنترل مصرف حافظه، بررسی metadata مدل‌ها cache می‌شود و association از کپی تکراری فریم کامل برای تشخیص‌های تکراری جلوگیری می‌کند.
 - UI اصلی دو زبانهٔ فارسی/انگلیسی است؛ دکمهٔ زبان در نوار بالا انتخاب را در `ui-language.txt` ذخیره می‌کند و برای اعمال کامل زبان، برنامه را restart می‌کند. متن فارسی نام چهره روی preview با رسم Unicode/GDI+ نمایش داده می‌شود.
 - مرجع مستندات یکپارچه برای بازسازی و اسناد تخصصی کوتاه‌تر.
 

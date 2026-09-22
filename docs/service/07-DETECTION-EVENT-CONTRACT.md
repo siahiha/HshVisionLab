@@ -2,6 +2,12 @@
 
 ## 1. هدف قرارداد
 
+> **وضعیت implementation فعلی:** این سند هم قرارداد موجود و هم بخش‌هایی از طراحی تکمیلی را نگه می‌دارد. در کد فعلی association تاریخی خودرو/شخص و endpointهای `/api/v1/associations` وجود ندارد. ارتباط فعلی با دو component `plate` و `face`، و فیلدهای `source.associationType` و `source.associationAgeMs` ثبت می‌شود.
+
+رخدادهای فعلی از این نوع‌ها استفاده می‌کنند: `PlateDetected`، `FaceRecognized`، `FaceUnknown` و `PlateFaceMatched`. سناریوها به‌ترتیب `PlateOnly`، `FaceRecognition` و `PlateFaceAssociation` هستند. association می‌تواند `SameFrame`، `TemporalAssociation` یا `Standalone` باشد.
+
+رخداد فعلی در `DetectionRuntimeHost.BuildEvent` این فیلدهای source را تولید می‌کند: `serviceNodeId`، `cameraId`، `cameraName`، `taskId`، `taskName`، `taskIds`، `roiId`، `roiName`، `roiIds`، `sourceFrameSequence`، `sourceFrameSequences`، `associationType`، `associationAgeMs`، `frameWidth` و `frameHeight`. بخش trigger شامل `matched`، `cooldownApplied`، `matchingTriggerIds` و `suppressedTriggerIds` است.
+
 رخداد Trigger باید یک بستهٔ کامل از نتیجه و شواهد تشخیص باشد؛ نه فقط یک `label` و `confidence`.
 
 برای هر رخداد باید بتوانیم بدون دسترسی به state لحظه‌ای runtime بفهمیم:
@@ -228,6 +234,8 @@ RecognitionStatus:
 
 ## 7. سناریوی `PlateFaceAssociation`
 
+در implementation فعلی association داخل `components.association` به‌صورت رکورد مستقل تولید نمی‌شود. وجود هم‌زمان کلیدهای `components.plate` و `components.face`، به‌همراه `source.associationType` و `source.associationAgeMs` نتیجهٔ ارتباط را نشان می‌دهد. نمونهٔ زیر قرارداد طراحی تکمیلی است و برای مصرف client فعلی باید با این قاعده تفسیر شود.
+
 این سناریو دو detection مستقل و یک نتیجهٔ ارتباطی دارد:
 
 ```json
@@ -320,7 +328,7 @@ VehiclePersonAssociation
 ```json
 {
   "artifactId": "artifact-guid",
-  "type": "RoiAnnotated",
+  "type": "RoiRaw",
   "contentType": "image/jpeg",
   "width": 640,
   "height": 360,
@@ -334,6 +342,11 @@ VehiclePersonAssociation
 
 تصاویر باید قبل از broadcast پایدار شوند یا حداقل در یک outbox قابل‌بازیابی قرار گیرند. در غیر این صورت replay metadata انجام می‌شود ولی تصویر event قطع‌شده ممکن است وجود نداشته باشد.
 
+`FullFrameAnnotated` و `RoiAnnotated` بخشی از قرارداد قابل پشتیبانی هستند، اما
+در مسیر فعلی `DetectionRuntimeHost` برای آرشیو اصلی تولید نمی‌شوند؛ این مسیر
+از `FullFrameRaw`، crop تشخیص (`PlateCrop` یا `DetectionCrop`) و `RoiRaw`
+استفاده می‌کند.
+
 ## 10. Payload live، replay و Webhook
 
 هر سه کانال باید همین event contract را استفاده کنند:
@@ -346,18 +359,18 @@ VehiclePersonAssociation
 
 ## 11. API artifact و association
 
-```text
-GET   /api/v1/events/{eventId}
-GET   /api/v1/events/{eventId}/artifacts
-GET   /api/v1/events/{eventId}/artifacts/{artifactId}
+APIهای فعال event عبارت‌اند از:
 
-GET   /api/v1/associations
-POST  /api/v1/associations
-GET   /api/v1/associations/{associationId}
-PATCH /api/v1/associations/{associationId}
-DELETE /api/v1/associations/{associationId}
-GET   /api/v1/associations/{associationId}/evidence
+```text
+GET /api/v1/events
+GET /api/v1/events/{eventId}
+GET /api/v1/events/{eventId}/artifacts
+GET /api/v1/events/{eventId}/artifacts/{artifactId}
+SignalR: /hubs/detections
 ```
+
+پارامترهای `clientMode`، `faceRequired`، `plateRequired`، `includeUnknownFace`، `windowMs`، `clientCameraIds` و `clientRoiIds` برای فیلتر connection-specific در `GET /api/v1/events` پشتیبانی می‌شوند. association تاریخی خودرو/شخص و API مستقل آن هنوز roadmap است.
+
 
 ## 12. معیار پذیرش قرارداد
 

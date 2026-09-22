@@ -11,6 +11,7 @@ public sealed class ServiceSettingsDocument
     public ServiceHttpSettings Http { get; set; } = new();
     public ServiceSecuritySettings Security { get; set; } = new();
     public ServiceRuntimeSettings Runtime { get; set; } = new();
+    public ServiceAssociationSettings Association { get; set; } = new();
     public ServiceRetentionSettings Retention { get; set; } = new();
     public List<TriggerDefinition> Triggers { get; set; } = [];
 }
@@ -31,6 +32,13 @@ public sealed class ServiceRuntimeSettings
     public bool AutoStartCameras { get; set; } = true;
     public int PreviewFps { get; set; } = 15;
     public int MaxEventQueueLength { get; set; } = 10000;
+}
+
+public sealed class ServiceAssociationSettings
+{
+    /// <summary>Upper bound for temporal Plate/Face correlation.</summary>
+    public int MaxWindowMs { get; set; } = 1500;
+    public bool RequireSameRoi { get; set; } = true;
 }
 
 public sealed class ServiceRetentionSettings
@@ -61,6 +69,41 @@ public sealed class TriggerActionDefinition
     public string Type { get; set; } = "LiveEvent";
     public string? Target { get; set; }
     public bool Enabled { get; set; } = true;
+}
+
+/// <summary>
+/// Per-connection event policy. It never changes camera inference settings;
+/// it only controls which canonical events a client receives.
+/// </summary>
+public sealed class ClientSubscription
+{
+    /// <summary>All, Plate, or KnownFace.</summary>
+    public string Mode { get; set; } = "All";
+    public List<string> CameraIds { get; set; } = [];
+    public List<string> RoiIds { get; set; } = [];
+    public bool FaceRequired { get; set; }
+    public bool PlateRequired { get; set; }
+    public bool IncludeFace { get; set; } = true;
+    public bool IncludePlate { get; set; } = true;
+    public bool IncludeUnknownFace { get; set; } = true;
+    public bool IncludeArtifacts { get; set; } = true;
+    public int WindowMs { get; set; } = 1500;
+    public int CooldownSeconds { get; set; }
+
+    public ClientSubscription Normalize()
+    {
+        Mode = Mode.Trim();
+        if (!Mode.Equals("All", StringComparison.OrdinalIgnoreCase) &&
+            !Mode.Equals("Plate", StringComparison.OrdinalIgnoreCase) &&
+            !Mode.Equals("KnownFace", StringComparison.OrdinalIgnoreCase))
+            Mode = "All";
+
+        CameraIds ??= [];
+        RoiIds ??= [];
+        WindowMs = Math.Clamp(WindowMs, 0, 10_000);
+        CooldownSeconds = Math.Clamp(CooldownSeconds, 0, 3600);
+        return this;
+    }
 }
 
 public sealed class DetectionEventEnvelope

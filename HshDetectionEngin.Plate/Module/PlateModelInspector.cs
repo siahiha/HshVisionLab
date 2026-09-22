@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.ML.OnnxRuntime;
 
 namespace HshDetectionEngin.Plate;
@@ -5,11 +6,31 @@ namespace HshDetectionEngin.Plate;
 /// <summary>Reads metadata from the configured Plate model without exposing model-loading details to the UI.</summary>
 public static class PlateModelInspector
 {
+    // Dynamic YOLO exports do not publish an enum of accepted image sizes. The
+    // model publishes its stride instead, so these are the supported UI choices
+    // shared by the desktop and service model catalogs.
+    private static readonly int[] DynamicSquareInputSizes = [320, 416, 480, 512, 640];
+    private static readonly ConcurrentDictionary<string, Lazy<int[]>> Cache = new(StringComparer.OrdinalIgnoreCase);
+
     public static int? TryGetSquareInputSize(string configuredName)
+    {
+        int first = GetSquareInputSizes(configuredName).FirstOrDefault();
+        return first > 0 ? first : null;
+    }
+
+    public static IReadOnlyList<int> GetSquareInputSizes(string configuredName)
     {
         string name = Path.GetFileName(configuredName);
         if (string.IsNullOrWhiteSpace(name)) name = "best.onnx";
 
+        return Cache.GetOrAdd(
+            name,
+            static key => new Lazy<int[]>(() => Inspect(key), LazyThreadSafetyMode.ExecutionAndPublication))
+            .Value;
+    }
+
+    private static int[] Inspect(string name)
+    {
         string? temporaryModel = null;
 
         try
@@ -18,7 +39,7 @@ public static class PlateModelInspector
             string? resolvedPath = PlateModelPaths.Find(name);
             if (resolvedPath is null)
             {
-                return null;
+                return [];
             }
 
             if (resolvedPath.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase))
@@ -34,16 +55,24 @@ public static class PlateModelInspector
             using var session = new InferenceSession(modelPath);
             var input = session.InputMetadata.Values.FirstOrDefault();
             if (input is null || input.Dimensions.Length < 4)
-                return null;
+                return [];
 
             var dimensions = input.Dimensions;
-            return dimensions[2] > 0 && dimensions[3] > 0 && dimensions[2] == dimensions[3]
-                ? (int)dimensions[2]
-                : null;
+            int height = dimensions[^2];
+            int width = dimensions[^1];
+            if (height > 0 && width > 0 && height == width)
+                return [height];
+
+            // A dynamic YOLO tensor accepts stride-aligned square sizes. ONNX
+            // does not contain a finite list, so expose the same safe choices
+            // that the desktop form has historically offered, filtered by the
+            // model's declared stride when available.
+            int stride = ReadStride(session);
+            return DynamicSquareInputSizes.Where(size => size % stride == 0).ToArray();
         }
         catch
         {
-            return null;
+            return [];
         }
         finally
         {
@@ -52,5 +81,14 @@ public static class PlateModelInspector
                 try { File.Delete(temporaryModel); } catch { }
             }
         }
+    }
+
+    private static int ReadStride(InferenceSession session)
+    {
+        if (session.ModelMetadata.CustomMetadataMap.TryGetValue("stride", out string? raw) &&
+            int.TryParse(raw, out int stride) && stride > 0)
+            return stride;
+
+        return 32;
     }
 }

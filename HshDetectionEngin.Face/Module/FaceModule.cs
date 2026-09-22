@@ -65,13 +65,19 @@ public sealed class FaceModule
             return null;
         if (!options.RecognitionEnabled || recognitionPath is null) recognitionPath = string.Empty;
 
+        // YuNet packages currently shipped with this module declare a fixed
+        // 640x640 tensor. Older settings used 320 as an intermediate resize,
+        // which reduced small-face detail before the image was enlarged back
+        // to 640. Always honor the model's declared input at runtime.
+        int modelInputSize = FaceModelInspector.TryGetSquareInputSize(options.ModelFile) ?? 640;
+
         return new FacePipeline(
             modelPath,
             options.Confidence,
             new FacePipelineOptions
             {
-                InputWidth = options.InputSize,
-                InputHeight = options.InputSize,
+                InputWidth = modelInputSize,
+                InputHeight = modelInputSize,
                 ConfidenceThreshold = options.Confidence,
                 MatchIouThreshold = options.MatchIou,
                 MaxMisses = options.TrackMaxMisses,
