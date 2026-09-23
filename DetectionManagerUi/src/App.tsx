@@ -1450,7 +1450,7 @@ function CameraEditor({ id }: { id: string }) {
     setActiveRoi(next.id);
   };
   const removeRoi = () => {
-    if (!roi) return;
+    if (!roi || !window.confirm(`ROI «${roi.name}» حذف شود؟`)) return;
     const rois = draft.rois.filter((item) => item.id !== roi.id);
     setDraft({ ...draft, rois });
     setActiveRoi(rois[0]?.id);
@@ -1713,6 +1713,8 @@ function CameraEditor({ id }: { id: string }) {
           update={update}
           models={models.data ?? []}
           addTask={addTask}
+          addRoi={addRoi}
+          removeRoi={removeRoi}
         />
       )}
     </div>
@@ -2679,6 +2681,8 @@ function ProcessingSettings({
   update,
   models,
   addTask,
+  addRoi,
+  removeRoi,
 }: {
   draft: CameraSettings;
   roi?: NamedRoi;
@@ -2687,6 +2691,8 @@ function ProcessingSettings({
   update: (key: string, value: unknown) => void;
   models: ModelInfo[];
   addTask: (type?: string) => void;
+  addRoi: () => void;
+  removeRoi: () => void;
 }) {
   return (
     <section className="panel processing-panel">
@@ -2719,6 +2725,19 @@ function ProcessingSettings({
       </div>
       <div className="processing-body">
         <aside className="roi-tree">
+          <div className="roi-tree-actions">
+            <Button variant="soft" icon={Plus} onClick={addRoi}>
+              ROI جدید
+            </Button>
+            <Button
+              variant="danger"
+              icon={Trash2}
+              disabled={!roi}
+              onClick={removeRoi}
+            >
+              حذف ROI
+            </Button>
+          </div>
           {draft.rois.map((item) => (
             <button
               key={item.id}

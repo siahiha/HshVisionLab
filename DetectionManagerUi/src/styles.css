@@ -668,3 +668,5 @@ button { -webkit-tap-highlight-color: transparent; }
   .camera-wall.count-5, .camera-wall.count-6 { grid-template-columns: 1fr; }
   .camera-pagination > span { font-size: 8px; }
 }
+.roi-tree-actions { display: flex; gap: 6px; margin-bottom: 10px; }
+.roi-tree-actions .button { flex: 1; padding: 8px 6px; font-size: 10px; }
