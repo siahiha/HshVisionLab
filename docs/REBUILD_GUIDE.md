@@ -93,6 +93,16 @@ FrameSource (به‌صورت پیش‌فرض فقط جدیدترین Mat؛ با 
 
 ROI معتبر حداقل سه نقطه و bounding box حداقل `32×32` دارد. Motion روی تصویر خاکستری `320×180` اجرا می‌شود و بیرون polygon را mask می‌کند. پس از تشخیص حرکت، وضعیت active تا `MotionHoldMs` می‌ماند؛ در حالت idle، `IdleDetectionFps = 0` یعنی inference متوقف است. نرخ فراخوانی runtime با نرخ Active/Idle کنترل می‌شود و هر Plate/Face نیز سقف `MaxFps` مستقل خودش را روی همان آیتم اعمال می‌کند؛ `CameraSettings.MaxFps` فقط default سازگاری برای ساخت آیتم جدید است و سقف پنهان آیتم‌های موجود نیست. با خاموش‌بودن Motion Gate، وضعیت همیشه active است.
 
+`CameraSettings.DuplicateEventCooldownSeconds` زمان جلوگیری از رخداد canonical
+تکراری است و مقدار پیش‌فرض آن `60` ثانیه است؛ مقدار `0` این policy را خاموش
+می‌کند. Runtime قبل از ساختن artifact، ذخیره در Event Store، انتشار SignalR و
+ارزیابی trigger، کلید رخداد را از camera، ROI، `PlateText` و `IdentityId`
+می‌سازد. برای `PlateFaceAssociation` هر دو مقدار پلاک و هویت در کلید هستند؛
+بنابراین همان پلاک با همان چهره تکراری محسوب می‌شود، اما تغییر هرکدام رخداد
+مستقل ایجاد می‌کند. `TrackId` عمداً در کلید نیست، چون ممکن است در ادامهٔ همان
+حضور تغییر کند. این policy با cooldown هر trigger و با `FaceEventCooldownSeconds`
+که برای history چهره است، مستقل است.
+
 `MotionRoiScalePercent` polygon Motion را حول مرکز ROI در بازهٔ `25..300` درصد scale می‌کند. در پیاده‌سازی فعلی با پایان حرکت، Plate tracker به‌صورت صریح پاک نمی‌شود؛ اگر `IdleDetectionFps = 0` باشد inference متوقف می‌شود و tracker تا reset/dispose شدن pipeline باقی می‌ماند.
 
 ## 5. قابلیت Plate
@@ -134,7 +144,7 @@ UI مقدار `InputSize` را از catalog مدل می‌گیرد و فقط ا�
 | قابلیت‌ها و schema | `ProcessingSchemaVersion`، `PlateEnabled`، `FaceEnabled`، `Processing` legacy |
 | Plate | `Options: PlateProcessingOptions` در `Rois[].Processing[]` به‌همراه `MaxFps` و `Threads` |
 | Face | `Options: FaceProcessingOptions` در `Rois[].Processing[]` به‌همراه `MaxFps` و `Threads` |
-| Motion و UI | `DrawBoxes`، `DetectionOverlayHoldMs`، `MotionGateEnabled`، `MotionFps`، `MotionThreshold`، `MotionChangedPercent`، `MotionRoiScalePercent`، `MotionHoldMs`، `ActiveDetectionFps`، `IdleDetectionFps` |
+| Motion و UI | `DrawBoxes`، `DetectionOverlayHoldMs`، `DuplicateEventCooldownSeconds`، `MotionGateEnabled`، `MotionFps`، `MotionThreshold`، `MotionChangedPercent`، `MotionRoiScalePercent`، `MotionHoldMs`، `ActiveDetectionFps`، `IdleDetectionFps` |
 | ROI و پردازش | `Rois[].Name`، `Rois[].Enabled`، `Rois[].Points`، `Rois[].Processing[]` و `RoiEnabled` |
 
 در schema فعلی، `ProcessingSchemaVersion = 3` است و هر پردازش باید داخل `Rois[].Processing[]` قرار بگیرد. هر `CameraProcessingSettings` علاوه بر `Id`، `Type`، `Name`، `Enabled` و تنظیمات مشترک `MaxFps`/`Threads`، فقط `Options` متعلق به همان ماژول را نگه می‌دارد. `CameraSettings.Processing` فقط فیلد legacy برای migration است و در فایل جدید باید خالی باشد. هنگام ساخت آیتم جدید، مقدارهای camera-level به‌عنوان default clone می‌شوند؛ پس از ایجاد، آیتم مرجع مستقل runtime است و تغییرات camera-level یا آیتم‌های دیگر آن را overwrite نمی‌کنند. فایل‌های flat قدیمی هنگام Load به options typed مهاجرت می‌شوند.

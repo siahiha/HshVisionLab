@@ -34,6 +34,7 @@
       "Threads": 1,
       "DrawBoxes": true,
       "DetectionOverlayHoldMs": 2500,
+      "DuplicateEventCooldownSeconds": 60,
       "MotionGateEnabled": true,
       "MotionFps": 8,
       "MotionThreshold": 20,

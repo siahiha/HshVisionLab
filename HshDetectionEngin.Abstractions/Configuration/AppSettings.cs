@@ -87,6 +87,8 @@ public class CameraSettings
     public bool DrawBoxes { get; set; } = true;
     /// <summary>How long the latest detection overlay remains visible, in milliseconds.</summary>
     public int DetectionOverlayHoldMs { get; set; } = 2500;
+    /// <summary>Suppresses the same canonical event for this many seconds. 0 disables event deduplication.</summary>
+    public int DuplicateEventCooldownSeconds { get; set; } = 60;
     public bool MotionGateEnabled { get; set; } = true;
     public int MotionFps { get; set; } = 8;
     public double MotionThreshold { get; set; } = 20;
@@ -115,6 +117,7 @@ public class CameraSettings
 
     public void EnsureProcessingDefaults()
     {
+        DuplicateEventCooldownSeconds = Math.Clamp(DuplicateEventCooldownSeconds, 0, 3600);
         Processing ??= [];
         Rois ??= [];
         RoiPolygon ??= [];

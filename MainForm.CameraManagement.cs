@@ -302,6 +302,7 @@ public sealed partial class MainForm
         target.Threads = clone.Threads;
         target.DrawBoxes = clone.DrawBoxes;
         target.DetectionOverlayHoldMs = clone.DetectionOverlayHoldMs;
+        target.DuplicateEventCooldownSeconds = clone.DuplicateEventCooldownSeconds;
         target.MotionGateEnabled = clone.MotionGateEnabled;
         target.MotionFps = clone.MotionFps;
         target.MotionThreshold = clone.MotionThreshold;

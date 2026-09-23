@@ -34,6 +34,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private readonly List<PendingComponent> _pendingComponents = [];
     private readonly Dictionary<string, DateTime> _emittedAssociationTimes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTime> _emittedComponentTimes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> _emittedEventTimes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _associationTimer;
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _eventWorker;
@@ -468,6 +469,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             _pendingComponents.Clear();
             _emittedAssociationTimes.Clear();
             _emittedComponentTimes.Clear();
+            _emittedEventTimes.Clear();
         }
     }
 
@@ -488,14 +490,25 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         lock (_associationGate)
         {
             DateTime now = DateTime.UtcNow;
-            string key = string.Join("|", work.Components
+            string associationKey = string.Join("|", work.Components
                 .Select(item => $"{item.CameraId}:{item.RoiKey}:{item.ComponentKey}")
                 .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
-            duplicate = _emittedAssociationTimes.TryGetValue(key, out DateTime previous) &&
+            bool associationDuplicate = _emittedAssociationTimes.TryGetValue(associationKey, out DateTime previous) &&
                 (now - previous).TotalSeconds < 5;
+            bool eventDuplicate = false;
+            string eventKey = BuildEventDeduplicationKey(work);
+            int cooldownSeconds = GetDuplicateEventCooldownSeconds(work.CameraId);
+            if (!associationDuplicate && cooldownSeconds > 0)
+            {
+                eventDuplicate = _emittedEventTimes.TryGetValue(eventKey, out DateTime eventPrevious) &&
+                    (now - eventPrevious).TotalSeconds < cooldownSeconds;
+            }
+
+            duplicate = associationDuplicate || eventDuplicate;
             if (!duplicate)
             {
-                _emittedAssociationTimes[key] = now;
+                _emittedAssociationTimes[associationKey] = now;
+                if (cooldownSeconds > 0) _emittedEventTimes[eventKey] = now;
                 foreach (PendingComponent component in work.Components)
                     _emittedComponentTimes[string.Concat(component.CameraId, ":", component.RoiKey, ":", component.ComponentKey)] = now;
             }
@@ -507,6 +520,10 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 .Where(item => (now - item.Value).TotalMinutes > 1)
                 .Select(item => item.Key).ToArray())
                 _emittedComponentTimes.Remove(oldKey);
+            foreach (string oldKey in _emittedEventTimes
+                .Where(item => (now - item.Value).TotalHours > 24)
+                .Select(item => item.Key).ToArray())
+                _emittedEventTimes.Remove(oldKey);
         }
 
         if (duplicate)
@@ -522,6 +539,41 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             work.Dispose();
         }
     }
+
+    private int GetDuplicateEventCooldownSeconds(string cameraId)
+    {
+        CameraSettings? camera = _settings.Cameras.FirstOrDefault(item =>
+            item.Id.Equals(cameraId, StringComparison.OrdinalIgnoreCase));
+        return Math.Clamp(camera?.DuplicateEventCooldownSeconds ?? 60, 0, 3600);
+    }
+
+    private static string BuildEventDeduplicationKey(DetectionWork work)
+    {
+        string camera = NormalizeEventKeyPart(work.CameraId);
+        string roi = string.Join(",", work.Components
+            .Select(item => NormalizeEventKeyPart(item.RoiKey))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        string plates = string.Join(",", work.Components
+            .Where(item => item.Detection.Kind == AnalysisKind.Plate)
+            .Select(item => NormalizeEventKeyPart(
+                GetMetadataString(item.Detection, "PlateText") ?? item.Detection.Label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        string faces = string.Join(",", work.Components
+            .Where(item => item.Detection.Kind == AnalysisKind.Face)
+            .Select(item => NormalizeEventKeyPart(
+                GetMetadataString(item.Detection, "IdentityId") ?? item.Detection.Label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+
+        // Do not include TrackId: tracking IDs can change while the same
+        // plate/person remains in view. The pair itself is the stable key.
+        return string.Join("\u001f", camera, roi, plates, faces);
+    }
+
+    private static string NormalizeEventKeyPart(string? value) =>
+        (value ?? string.Empty).Trim().ToUpperInvariant();
 
     private static Channel<DetectionWork> CreateEventQueue(int configuredCapacity)
     {
