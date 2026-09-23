@@ -12,6 +12,7 @@ public sealed class PlateProcessingOptions
     public float Confidence { get; set; } = 0.35f;
     public float NmsIoU { get; set; } = 0.45f;
     public int TrackMaxMisses { get; set; } = 6;
+    public int EventCooldownSeconds { get; set; } = 60;
 }
 
 /// <summary>Settings owned by the face processing module.</summary>
@@ -129,7 +130,8 @@ public sealed partial class CameraProcessingSettings
                 Preprocessing = Legacy("Preprocessing", "Standard"),
                 Confidence = Legacy("Confidence", 0.35f),
                 NmsIoU = Legacy("NmsIoU", 0.45f),
-                TrackMaxMisses = Legacy("TrackMaxMisses", 6)
+                TrackMaxMisses = Legacy("TrackMaxMisses", 6),
+                EventCooldownSeconds = Legacy("PlateEventCooldownSeconds", 60)
             };
             SetOptions(value);
         }

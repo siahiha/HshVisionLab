@@ -36,16 +36,20 @@
 | هویت و اتصال | `Id`، `Name`، `SourceUrl`، `Transport`، `CaptureBackend`، `ReconnectDelaySec` | source عددی Webcam/DShow است؛ منبع غیرعددی با backend انتخاب‌شده دریافت می‌شود. `CaptureBackend` یکی از `FFmpeg`، `LibVLC` یا `MediaMTX` است؛ مقدار پیش‌فرض `FFmpeg` است. MediaMTX برای دریافت داخلی از local RTSP و برای مرورگر از WHEP استفاده می‌کند. |
 | فریم | `BufferCount` | مقدار `0` فقط جدیدترین فریم را نگه می‌دارد؛ مقدار مثبت ظرفیت صف محدود فریم را برای هر دو pipeline همان دوربین تعیین می‌کند. |
 | مسیرهای پردازش | `Rois[].Processing[]`، `PlateEnabled`، `FaceEnabled`، `ProcessingSchemaVersion` | فقط ROIهایی که زیرمجموعهٔ Processing فعال دارند تحلیل می‌شوند؛ Booleanها برای سازگاری و خلاصهٔ فعال‌بودن نگه داشته می‌شوند. `CameraSettings.Processing` فقط legacy است. |
-| Plate | `Options: PlateProcessingOptions` به‌همراه `MaxFps` و `Threads` | شامل `ModelFile`، `InputSize`، `Preprocessing`، `Confidence`، `NmsIoU` و `TrackMaxMisses` است. در UI مدل به‌صورت ComboBox از catalog سرویس انتخاب می‌شود، نه text input. پس از انتخاب مدل، ComboBox سایز از `inputSizes` همان مدل پر می‌شود: مدل ثابت فقط اندازهٔ tensor خودش را دارد؛ مدل YOLO پویا با توجه به stride مدل، گزینه‌های امن `320/416/480/512/640` را ارائه می‌کند. `ModelFile` نام منطقی ONNX است؛ runtime ابتدا مدل package شدهٔ هم‌نام را در `Models/Plate` و سپس در `Models` کنار executable جست‌وجو می‌کند و مسیر قدیمی `Modules/Plate/Models` را نیز برای سازگاری می‌پذیرد. در Debug، `HshDetectionEngin.Plate/Models` نیز fallback است. |
+| Plate | `Options: PlateProcessingOptions` به‌همراه `MaxFps` و `Threads` | شامل `ModelFile`، `InputSize`، `Preprocessing`، `Confidence`، `NmsIoU`، `TrackMaxMisses` و `EventCooldownSeconds` (`History event cooldown (sec)`) است. در UI مدل به‌صورت ComboBox از catalog سرویس انتخاب می‌شود، نه text input. پس از انتخاب مدل، ComboBox سایز از `inputSizes` همان مدل پر می‌شود: مدل ثابت فقط اندازهٔ tensor خودش را دارد؛ مدل YOLO پویا با توجه به stride مدل، گزینه‌های امن `320/416/480/512/640` را ارائه می‌کند. `ModelFile` نام منطقی ONNX است؛ runtime ابتدا مدل package شدهٔ هم‌نام را در `Models/Plate` و سپس در `Models` کنار executable جست‌وجو می‌کند و مسیر قدیمی `Modules/Plate/Models` را نیز برای سازگاری می‌پذیرد. در Debug، `HshDetectionEngin.Plate/Models` نیز fallback است. |
 | Face | `Options: FaceProcessingOptions` به‌همراه `MaxFps` و `Threads` | شامل مدل YuNet، preprocessing، confidence، recognition، NMS، TopK، tracking، record confidence و cooldown است و در UI در گروه‌های جداگانهٔ Face detection، Face identification و Tracking/recording نمایش داده می‌شود. `FacePreprocessing` در مدل typed با نام `Preprocessing` نگه‌داری می‌شود. Face به‌صورت pipeline ساخته می‌شود؛ هنگام فعال‌بودن SFace مقدار `None` توصیه می‌شود. SFace به‌صورت مستقل landmark alignment و ورودی `112×112` خود را دارد. `Threads` در تنظیمات همان آیتم پردازش ذخیره می‌شود و به `IntraOpNumThreads` sessionهای ONNX Runtime وصل می‌شود؛ `MaxFps` فقط سقف همان آیتم Face است. مدل‌ها ابتدا از `Models/Face`، سپس `Models` و در نهایت مسیر قدیمی `Modules/Face/Models` خوانده می‌شوند؛ در Debug، `HshDetectionEngin.Face/Models` نیز fallback است. |
 | Motion و نمایش | `DrawBoxes`، `DetectionOverlayHoldMs`، `MotionGateEnabled`، `MotionFps`، `MotionThreshold`، `MotionChangedPercent`، `MotionRoiScalePercent`، `MotionHoldMs`، `ActiveDetectionFps`، `IdleDetectionFps` | `DetectionOverlayHoldMs` مدت نمایش آخرین کادر/نتیجهٔ تشخیص برحسب میلی‌ثانیه است و مقدار پیش‌فرض آن `2500` است؛ برای هر نوع تشخیص مستقل اعمال می‌شود. در idle با مقدار `0` برای `IdleDetectionFps` inference متوقف می‌شود. |
 | ROI و هدف پردازش | `Rois[]`، `Rois[].Points`، `Rois[].Processing[]` و `RoiEnabled` | بدون ROI هیچ inferenceای انجام نمی‌شود. هر ROI می‌تواند صفر، یک یا چند آیتم Plate/Face با مدل و ورودی مستقل داشته باشد. |
 
-## cooldown تاریخچهٔ تریگرها
+## سه سطح cooldown تاریخچه
 
-`TriggerDefinition.CooldownSeconds` با برچسب `History event cooldown (sec)` روی خود هر تریگر تنظیم می‌شود؛ مقدار `0` یعنی بدون محدودیت تاریخچه. هنگام ارزیابی تریگر، runtime در Event Store جست‌وجو می‌کند و فقط اگر برای همان `triggerId` و همان کلید هویتی در بازهٔ cooldown رکورد موفق قبلی وجود نداشته باشد، تریگر را match می‌کند. رخداد canonical همچنان برای تاریخچه ذخیره می‌شود، اما تریگر تکراری در `suppressedTriggerIds` قرار می‌گیرد و match/action مجدد دریافت نمی‌کند.
+این فیلد در سه محل مستقل وجود دارد و هر محل policy خودش را کنترل می‌کند:
 
-کلید بر اساس سناریوی تریگر ساخته می‌شود: `PlateRecognition` فقط دوربین، ROI و پلاک را در نظر می‌گیرد؛ `FaceRecognition` فقط دوربین، ROI و هویت چهره را؛ و `PlateFaceMatch` یا `PlateFaceAssociation` هر دو مقدار پلاک و چهره را لازم دارد. بنابراین برای پلاک+چهره، تغییر پلاک یا چهره یک رخداد جدید است و cooldown تریگرهای دیگر مستقل باقی می‌ماند.
+- در `Cameras[].Rois[].Processing[].Options` برای هر آیتم Plate یا Face، `EventCooldownSeconds` cooldown ثبت canonical در تاریخچه است. وقتی هیچ تریگری برای تشخیص match نشده باشد، runtime برای کلید همان دوربین، ROI و مقدار تشخیص (`plate`، `face` یا هر دو) در جدول indexed تاریخچه جست‌وجو می‌کند؛ رکورد تکراری در این بازه اصلاً در `DetectionEvents` ثبت نمی‌شود. مقدار `0` یعنی بدون محدودیت.
+- در `ClientSubscription.CooldownSeconds` (فیلد UI بخش «آزمایش subscription کلاینت») cooldown فقط برای همان اتصال/گرید تاریخچه اعمال می‌شود. این مقدار database مشترک را تغییر نمی‌دهد و روی تریگرها اثر ندارد؛ replay و eventهای live همان client برای plate-only، face-only و plate+face با یک کلید مستقل فیلتر می‌شوند.
+- در `TriggerDefinition.CooldownSeconds` cooldown اجرای همان تریگر است. هنگام ارزیابی هر تریگر، runtime در `TriggerHistory` جست‌وجو می‌کند و فقط اگر برای همان `triggerId` و همان کلید هویتی در بازهٔ cooldown رکورد موفق قبلی وجود نداشته باشد، تریگر را match و ثبت می‌کند. اگر فقط تریگرهای موجود suppressed باشند، رخداد تکراری جدید ساخته نمی‌شود.
+
+کلیدهای trigger بر اساس سناریو ساخته می‌شوند: `PlateRecognition` فقط دوربین، ROI و پلاک را در نظر می‌گیرد؛ `FaceRecognition` فقط دوربین، ROI و هویت چهره را؛ و `PlateFaceMatch` یا `PlateFaceAssociation` هر دو مقدار پلاک و چهره را لازم دارد. برای cooldown پردازش و client نیز کلید canonical شامل دوربین، ROI و componentهای موجود است؛ بنابراین plate-only، face-only و plate+face مستقل‌اند و cooldown تریگرهای دیگر با هم تداخل ندارند.
 
 ## مقادیر پیش‌فرض مهم
 
@@ -58,7 +62,8 @@
 | Face preprocessing | `None` |
 | Face recognition / unknown threshold | `0.40` / `0.35` |
 | Face match IoU / max misses | `0.25` / `10` |
-| Face event cooldown | `60` ثانیه |
+| Plate / Face history event cooldown | `60` / `60` ثانیه برای هر processing item |
+| Client subscription history cooldown | `0` ثانیه |
 | Motion FPS / threshold / changed percent | `8` / `20` / `0.7` |
 | Motion hold / ROI scale | `1200` ms / `85%` |
 | Active / idle detection FPS | `8` / `0` |
@@ -74,7 +79,7 @@
 را تغییر ندهید؛ `ActiveDetectionFps` دوربین و `MaxFps` آیتم Face باید هر دو به
 مقدار هدف برسند. `IdleDetectionFps = 0` در حالت بدون حرکت inference را متوقف
 می‌کند. شناسایی SFace برای هر چهرهٔ پذیرفته‌شده در هر اجرای Face انجام می‌شود؛
-`FaceEventCooldownSeconds` فقط ثبت رخداد را محدود می‌کند و جایگزین کاهش نرخ
+`EventCooldownSeconds` فقط ثبت/ارسال history را محدود می‌کند و جایگزین کاهش نرخ
 inference نیست. برای رسیدن به near-real-time با فشار کنترل‌شده، ابتدا مدل
 `face_yunet_2023mar_int8`، نرخ 8 FPS، `Threads = 1`، Motion Gate فعال و
 `BufferCount = 0` را انتخاب کنید؛ سپس فقط در صورت وجود ظرفیت CPU نرخ 10 FPS یا

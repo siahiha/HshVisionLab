@@ -93,16 +93,17 @@ FrameSource (به‌صورت پیش‌فرض فقط جدیدترین Mat؛ با 
 
 ROI معتبر حداقل سه نقطه و bounding box حداقل `32×32` دارد. Motion روی تصویر خاکستری `320×180` اجرا می‌شود و بیرون polygon را mask می‌کند. پس از تشخیص حرکت، وضعیت active تا `MotionHoldMs` می‌ماند؛ در حالت idle، `IdleDetectionFps = 0` یعنی inference متوقف است. نرخ فراخوانی runtime با نرخ Active/Idle کنترل می‌شود و هر Plate/Face نیز سقف `MaxFps` مستقل خودش را روی همان آیتم اعمال می‌کند؛ `CameraSettings.MaxFps` فقط default سازگاری برای ساخت آیتم جدید است و سقف پنهان آیتم‌های موجود نیست. با خاموش‌بودن Motion Gate، وضعیت همیشه active است.
 
-`TriggerDefinition.CooldownSeconds` با عنوان `History event cooldown (sec)` روی هر
-تریگر اعمال می‌شود و مقدار پیش‌فرض آن `0` است. Runtime قبل از match کردن تریگر،
-Event Store را برای همان trigger، دوربین، ROI و هویت‌های لازم بررسی می‌کند. برای
-تریگر `PlateRecognition` کلید شامل پلاک است و چهرهٔ اختیاری در کلید وارد نمی‌شود؛
-برای `PlateFaceMatch` یا `PlateFaceAssociation` کلید شامل هر دو پلاک و چهره است.
-اگر رکورد موفق همان تریگر و همان کلید در بازهٔ cooldown وجود داشته باشد، تریگر
-در `suppressedTriggerIds` ثبت می‌شود و action تکراری اجرا/اعلام نمی‌شود. رکورد
-canonical برای تاریخچه باقی می‌ماند تا نتیجهٔ ارزیابی قابل مشاهده باشد. این
-سازوکار با `FaceEventCooldownSeconds` که محدودیت ثبت history داخلی Face است،
-مستقل است.
+`History event cooldown (sec)` سه کاربرد مستقل دارد. در هر task Plate/Face زیر ROI
+با `EventCooldownSeconds` ثبت canonical history برای همان دوربین، ROI و مقدار
+تشخیص کنترل می‌شود؛ اگر تریگری match نشده باشد، رکورد تکراری در `DetectionHistory`
+باعث insert دوبارهٔ `DetectionEvents` نمی‌شود. در `ClientSubscription` همین فیلد
+با `CooldownSeconds` فقط replay/live و گرید تاریخچهٔ همان اتصال را فیلتر می‌کند.
+در `TriggerDefinition` با `CooldownSeconds`، Runtime قبل از match کردن تریگر، Event
+Store را برای همان trigger و هویت‌های لازم بررسی می‌کند. برای `PlateRecognition`
+کلید شامل پلاک است و چهرهٔ اختیاری وارد آن نمی‌شود؛ برای `PlateFaceMatch` یا
+`PlateFaceAssociation` کلید شامل هر دو پلاک و چهره است. اگر رکورد موفق همان تریگر
+در بازه وجود داشته باشد، تریگر در `suppressedTriggerIds` قرار می‌گیرد و اگر تنها
+نتیجهٔ ارزیابی suppression باشد، رخداد تکراری جدید نیز ساخته نمی‌شود.
 
 `MotionRoiScalePercent` polygon Motion را حول مرکز ROI در بازهٔ `25..300` درصد scale می‌کند. در پیاده‌سازی فعلی با پایان حرکت، Plate tracker به‌صورت صریح پاک نمی‌شود؛ اگر `IdleDetectionFps = 0` باشد inference متوقف می‌شود و tracker تا reset/dispose شدن pipeline باقی می‌ماند.
 
@@ -129,7 +130,7 @@ canonical برای تاریخچه باقی می‌ماند تا نتیجهٔ ا�
 
 UI مقدار `InputSize` را از catalog مدل می‌گیرد و فقط اندازه‌های اعلام‌شدهٔ همان مدل را در ComboBox نشان می‌دهد؛ مدل‌های فعلی YuNet مقدار `640` را اعلام می‌کنند. `Threads` در `SessionOptions.IntraOpNumThreads` برای sessionهای YuNet و SFace تنظیم می‌شود و دیگر به `CvInvoke.NumThreads` سراسری وابسته نیست.
 
-`FacePreprocessing` یک گزینهٔ عمومی برای آماده‌سازی تصویر detector است و پیش‌پردازش اختصاصی SFace محسوب نمی‌شود. حالت `Advanced` تصویر را grayscale و equalize می‌کند و در پیاده‌سازی فعلی همان تصویر آماده‌شده به مسیر alignment/embedding نیز می‌رسد؛ به همین دلیل هنگام فعال‌بودن recognition مقدار `None` توصیه می‌شود. پیش‌فرض‌های شناسایی SFace عبارت‌اند از: `FaceRecognitionThreshold = 0.40`، `FaceUnknownMatchThreshold = 0.35` و `FaceEventCooldownSeconds = 60`.
+`FacePreprocessing` یک گزینهٔ عمومی برای آماده‌سازی تصویر detector است و پیش‌پردازش اختصاصی SFace محسوب نمی‌شود. حالت `Advanced` تصویر را grayscale و equalize می‌کند و در پیاده‌سازی فعلی همان تصویر آماده‌شده به مسیر alignment/embedding نیز می‌رسد؛ به همین دلیل هنگام فعال‌بودن recognition مقدار `None` توصیه می‌شود. پیش‌فرض‌های شناسایی SFace عبارت‌اند از: `FaceRecognitionThreshold = 0.40`، `FaceUnknownMatchThreshold = 0.35` و `FaceProcessingOptions.EventCooldownSeconds = 60`؛ فیلد قدیمی `FaceEventCooldownSeconds` فقط برای سازگاری و migration نگه‌داری می‌شود.
 
 `FaceConfidence` threshold پذیرش detector و `FaceRecordConfidence` threshold ثبت رخداد/رنگ overlay است. Face فقط وقتی وارد tracking، recognition و history می‌شود که هم از `FaceConfidence` عبور کرده باشد و هم `FaceRecordConfidence` را پاس کند؛ بنابراین confidence پایین‌تر از threshold تشخیص، حتی اگر از record threshold بیشتر باشد، در لیست ثبت نمی‌شود. پیش‌فرض هر دو مقدار `0.80` است. تنظیمات موجود در `settings.json` برای حفظ انتخاب کاربر خودکار overwrite نمی‌شوند و در صورت نیاز باید Detection confidence از UI تنظیم شود. Face پایین‌تر از threshold پذیرش، در بازهٔ تصویری مجاز قرمز و Face قابل ثبت سبز نمایش داده می‌شود. متن شامل نام یا Unknown، TrackId و confidence است و زیر کادر قرار می‌گیرد؛ فقط در نزدیکی لبهٔ پایین به بالای آن منتقل می‌شود. برچسب Face با رسم Unicode/GDI+ و فونت `Segoe UI` روی bitmap preview نوشته می‌شود تا نام‌های فارسی به `????` تبدیل نشوند. overlayهای Face پس از حدود 2.5 ثانیه حذف می‌شوند.
 

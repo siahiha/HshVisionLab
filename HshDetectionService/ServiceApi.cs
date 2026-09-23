@@ -280,7 +280,7 @@ public static class ServiceApi
             return Results.NoContent();
         });
 
-        app.MapGet("/api/v1/events", (long? afterSequence, int? limit, string? cameraId, string? scenario, DateTime? fromUtc, DateTime? toUtc, string? clientMode, bool? faceRequired, bool? plateRequired, bool? includeUnknownFace, int? windowMs, string? clientCameraIds, string? clientRoiIds, DetectionRuntimeHost host) =>
+        app.MapGet("/api/v1/events", (long? afterSequence, int? limit, string? cameraId, string? scenario, DateTime? fromUtc, DateTime? toUtc, string? clientMode, bool? faceRequired, bool? plateRequired, bool? includeFace, bool? includePlate, bool? includeUnknownFace, int? windowMs, int? clientCooldownSeconds, string? clientCameraIds, string? clientRoiIds, DetectionRuntimeHost host) =>
         {
             int requestedLimit = Math.Clamp(limit ?? 200, 1, 2000);
             ClientSubscription? subscription = null;
@@ -291,8 +291,11 @@ public static class ServiceApi
                     Mode = clientMode,
                     FaceRequired = faceRequired ?? false,
                     PlateRequired = plateRequired ?? false,
+                    IncludeFace = includeFace ?? true,
+                    IncludePlate = includePlate ?? true,
                     IncludeUnknownFace = includeUnknownFace ?? true,
                     WindowMs = windowMs ?? 1500,
+                    CooldownSeconds = clientCooldownSeconds ?? 0,
                     CameraIds = SplitList(clientCameraIds),
                     RoiIds = SplitList(clientRoiIds)
                 };
@@ -309,6 +312,7 @@ public static class ServiceApi
             DateTime from = fromUtc?.ToUniversalTime() ?? DateTime.MinValue;
             DateTime to = toUtc?.ToUniversalTime() ?? DateTime.MaxValue;
             var matched = new List<DetectionEventEnvelope>(requestedLimit);
+            var clientHistory = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
             long cursor = afterSequence ?? 0;
             const int pageSize = 2000;
             while (matched.Count < requestedLimit)
@@ -321,7 +325,7 @@ public static class ServiceApi
                     if (!string.IsNullOrWhiteSpace(cameraId) && !string.Equals(item.Source["cameraId"]?.GetValue<string>(), cameraId, StringComparison.OrdinalIgnoreCase)) continue;
                     if (!string.IsNullOrWhiteSpace(scenario) && !string.Equals(item.Scenario, scenario, StringComparison.OrdinalIgnoreCase)) continue;
                     if (item.OccurredAtUtc < from || item.OccurredAtUtc > to) continue;
-                    if (subscription is not null && !DetectionHub.Matches(item, subscription)) continue;
+                    if (subscription is not null && (!DetectionHub.Matches(item, subscription) || !DetectionHub.PassesHistoryCooldown(clientHistory, item, subscription))) continue;
                     matched.Add(item);
                     if (matched.Count >= requestedLimit) break;
                 }
@@ -617,7 +621,8 @@ public sealed class DetectionHub : Hub
                 if (batch.Count == 0) break;
                 foreach (DetectionEventEnvelope item in batch)
                 {
-                    if (Matches(item, Subscriptions[Context.ConnectionId]))
+                    if (Matches(item, Subscriptions[Context.ConnectionId]) &&
+                        PassesCooldown(Context.ConnectionId, item, Subscriptions[Context.ConnectionId]))
                         await Clients.Caller.SendAsync("detection", item, Context.ConnectionAborted);
                     cursor = item.Sequence;
                 }
@@ -685,13 +690,29 @@ public sealed class DetectionHub : Hub
         ConcurrentDictionary<string, DateTime> delivered = LastDelivered.GetOrAdd(
             connectionId,
             _ => new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase));
+        bool allowed = PassesCooldown(delivered, item, subscription);
+        DateTime now = DateTime.UtcNow;
+        foreach (string oldKey in delivered.Where(pair => (now - pair.Value).TotalHours > 24).Select(pair => pair.Key).ToArray())
+            delivered.TryRemove(oldKey, out _);
+        return allowed;
+    }
+
+    internal static bool PassesHistoryCooldown(
+        IDictionary<string, DateTime> delivered,
+        DetectionEventEnvelope item,
+        ClientSubscription subscription) => PassesCooldown(delivered, item, subscription);
+
+    private static bool PassesCooldown(
+        IDictionary<string, DateTime> delivered,
+        DetectionEventEnvelope item,
+        ClientSubscription subscription)
+    {
+        if (subscription.CooldownSeconds <= 0) return true;
         string key = BuildCooldownKey(item);
         DateTime now = DateTime.UtcNow;
         if (delivered.TryGetValue(key, out DateTime previous) &&
             (now - previous).TotalSeconds < subscription.CooldownSeconds) return false;
         delivered[key] = now;
-        foreach (string oldKey in delivered.Where(pair => (now - pair.Value).TotalHours > 24).Select(pair => pair.Key).ToArray())
-            delivered.TryRemove(oldKey, out _);
         return true;
     }
 

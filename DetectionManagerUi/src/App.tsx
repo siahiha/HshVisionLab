@@ -3088,6 +3088,15 @@ function TaskEditor({
                 onChange={(e) => set("trackMaxMisses", Number(e.target.value))}
               />
             </Field>
+            <Field label="History event cooldown (sec)">
+              <input
+                type="number"
+                min="0"
+                max="3600"
+                value={n(option(task, "eventCooldownSeconds", 60))}
+                onChange={(e) => set("eventCooldownSeconds", Number(e.target.value))}
+              />
+            </Field>
           </div>
         </div>
       )}
@@ -3266,10 +3275,7 @@ function TaskEditor({
                   }
                 />
               </Field>
-              <Field
-                label="Face sample record cooldown (sec)"
-                hint="محدودیت داخلی ثبت نمونهٔ چهره است و به cooldown تریگرها مربوط نیست"
-              >
+              <Field label="History event cooldown (sec)">
                 <input
                   type="number"
                   min="0"
@@ -4355,6 +4361,18 @@ function ClientSubscriptionTester({ cameras }: { cameras: CameraStatus[] }) {
         </Field>
         <Field label="پنجرهٔ association (ms)">
           <input type="number" min="0" max="10000" step="100" value={draft.windowMs} onChange={(e) => update("windowMs", Number(e.target.value))} />
+        </Field>
+        <Field
+          label="History event cooldown (sec)"
+          hint="فقط برای history همین اتصال UI؛ روی دیتابیس مرکزی و تریگرها اثر ندارد"
+        >
+          <input
+            type="number"
+            min="0"
+            max="3600"
+            value={draft.cooldownSeconds}
+            onChange={(e) => update("cooldownSeconds", Number(e.target.value))}
+          />
         </Field>
         <Field label="چهره الزامی باشد">
           <Toggle checked={draft.faceRequired} onChange={(value) => update("faceRequired", value)} />

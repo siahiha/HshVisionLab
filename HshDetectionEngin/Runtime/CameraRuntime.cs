@@ -608,8 +608,8 @@ public class CameraRuntime : IDisposable
     private int GetFaceEventCooldownSeconds(AnalysisDetection detection)
     {
         return detection.Metadata?.TryGetValue("FaceEventCooldownSeconds", out object? value) == true
-            ? Math.Clamp(Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture), 1, 3600)
-            : Math.Clamp(Settings.FaceEventCooldownSeconds, 1, 3600);
+            ? Math.Clamp(Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture), 0, 3600)
+            : Math.Clamp(Settings.FaceEventCooldownSeconds, 0, 3600);
     }
 
     private void PublishPreview(Mat frame)

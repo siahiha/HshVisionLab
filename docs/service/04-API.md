@@ -208,7 +208,7 @@ DELETE /api/v1/events?fromUtc=...&toUtc=...
 
 برای مصرف زنده، Hub فعال رخداد:
 
-در implementation فعلی endpointهای `/api/v1/events/{eventId}/image`، `/api/v1/events/gaps` و `/api/v1/events/export` وجود ندارند. Queryهای واقعی شامل `afterSequence`، `limit`، `cameraId`، `scenario`، `fromUtc`، `toUtc` و فیلترهای subscription شامل `clientMode`، `faceRequired`، `plateRequired`، `includeUnknownFace`، `windowMs`، `clientCameraIds` و `clientRoiIds` هستند.
+در implementation فعلی endpointهای `/api/v1/events/{eventId}/image`، `/api/v1/events/gaps` و `/api/v1/events/export` وجود ندارند. Queryهای واقعی شامل `afterSequence`، `limit`، `cameraId`، `scenario`، `fromUtc`، `toUtc` و فیلترهای subscription شامل `clientMode`، `faceRequired`، `plateRequired`، `includeFace`، `includePlate`، `includeUnknownFace`، `windowMs`، `clientCooldownSeconds`، `clientCameraIds` و `clientRoiIds` هستند.
 
 `DELETE /api/v1/events` تاریخچه را حذف می‌کند. اگر هر دو پارامتر `fromUtc` و `toUtc` خالی باشند، همهٔ رخدادها حذف می‌شوند؛ در غیر این صورت بازهٔ زمانی انتخاب‌شده حذف می‌شود. `fromUtc` و `toUtc` باید timestamp معتبر ISO-8601 باشند. پوشهٔ artifact هر رخداد نیز پس از حذف رکورد پاک می‌شود و پاسخ شامل `deletedCount` است.
 
@@ -267,7 +267,7 @@ offer/answer اختصاصی و `WebRtcGateway` برای clientهای legacy که
 ارتباط پلاک و چهره در همان event canonical انجام می‌شود و در نسخهٔ فعلی endpoint جداگانهٔ association وجود ندارد. پنجرهٔ اتصال از `service.Association.MaxWindowMs` (پیش‌فرض 1500ms) و `RequireSameRoi` کنترل می‌شود.
 
 
-در نسخهٔ فعلی، policy هر اتصال با متد SignalR به نام `Subscribe(lastSequence, subscription)` تعیین می‌شود و تنظیمات inference دوربین را تغییر نمی‌دهد. فیلدهای اصلی subscription عبارت‌اند از `mode` (`All`، `Plate`، `KnownFace`)، `cameraIds`، `roiIds`، `faceRequired`، `plateRequired`، `includeFace`، `includePlate`، `includeUnknownFace`، `includeArtifacts`، `windowMs` و `cooldownSeconds`. اگر `faceRequired` یا `plateRequired` برابر false باشد، component اختیاری است و در صورت شناسایی به همان client ارسال می‌شود.
+در نسخهٔ فعلی، policy هر اتصال با متد SignalR به نام `Subscribe(lastSequence, subscription)` تعیین می‌شود و تنظیمات inference دوربین را تغییر نمی‌دهد. فیلدهای اصلی subscription عبارت‌اند از `mode` (`All`، `Plate`، `KnownFace`)، `cameraIds`، `roiIds`، `faceRequired`، `plateRequired`، `includeFace`، `includePlate`، `includeUnknownFace`، `includeArtifacts`، `windowMs` و `cooldownSeconds`. `cooldownSeconds` فقط برای همان اتصال اعمال می‌شود و replay، live و query تاریخچهٔ UI را با کلید plate/face مستقل فیلتر می‌کند؛ برای REST history نام query آن `clientCooldownSeconds` است. اگر `faceRequired` یا `plateRequired` برابر false باشد، component اختیاری است و در صورت شناسایی به همان client ارسال می‌شود.
 
 endpointهای `/api/v1/associations` در نسخهٔ فعلی پیاده‌سازی نشده‌اند و نباید توسط client فراخوانی شوند؛ client باید eventهای `PlateOnly`، `FaceRecognition` یا `PlateFaceAssociation` را از Event API/SignalR مصرف کند.
 

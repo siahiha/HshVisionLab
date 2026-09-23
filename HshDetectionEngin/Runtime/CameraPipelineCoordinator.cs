@@ -328,6 +328,12 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         metadata["ProcessingItemType"] = binding.Settings.Type;
         metadata["RoiId"] = roiId;
         metadata["RoiName"] = roiName;
+        int historyCooldownSeconds = binding.Settings.Kind == ProcessingType.Face
+            ? binding.Settings.GetOptions<FaceProcessingOptions>().EventCooldownSeconds
+            : binding.Settings.Kind == ProcessingType.Plate
+                ? binding.Settings.GetOptions<PlateProcessingOptions>().EventCooldownSeconds
+                : 0;
+        metadata["HistoryEventCooldownSeconds"] = Math.Clamp(historyCooldownSeconds, 0, 3600);
         foreach ((string key, object? value) in binding.DetectionMetadata)
             metadata[key] = value;
 

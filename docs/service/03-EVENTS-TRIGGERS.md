@@ -4,7 +4,7 @@
 
 > **مرز implementation فعلی:** `EventStore` و replay ترتیبی SignalR فعال هستند و event قبل از broadcast در SQLite ثبت می‌شود. outbox مستقل، dispatcher webhook و API gap جداگانه در نسخهٔ فعلی وجود ندارند و بخش‌های مربوط به آن‌ها در این سند roadmap محسوب می‌شوند.
 
-هر connection در Hub subscription مستقل دارد. `Subscribe(lastSequence, ClientSubscription)` فیلترهای `All`، `Plate` و `KnownFace`، اجباری‌بودن componentها، unknown face، scope دوربین/ROI، پنجرهٔ association و cooldown را برای همان کلاینت اعمال می‌کند.
+هر connection در Hub subscription مستقل دارد. `Subscribe(lastSequence, ClientSubscription)` فیلترهای `All`، `Plate` و `KnownFace`، اجباری‌بودن componentها، unknown face، scope دوربین/ROI، پنجرهٔ association و `CooldownSeconds` را برای همان کلاینت اعمال می‌کند. این cooldown فقط replay/live همان connection است و با cooldown ثبت canonical یا cooldown تریگر قاطی نمی‌شود.
 
 ارسال live به UI به‌تنهایی قابل‌اعتماد نیست. UI ممکن است خاموش، قطع شبکه یا در حال restart باشد. بنابراین سرویس باید مستقل از وضعیت UI تشخیص بدهد، event را ذخیره کند و بعداً امکان replay بدهد.
 
@@ -70,7 +70,7 @@ DetectionEvent
 CameraId + TaskId + RoiId + Kind + IdentityId/PlateText/TrackId
 ```
 
-Cooldown فعلی Face حفظ می‌شود، اما در سرویس باید نتیجهٔ نهایی event policy در Event Store نیز قابل مشاهده باشد.
+Cooldown ثبت history در سرویس با `EventCooldownSeconds` هر processing item انجام می‌شود. اگر تریگری match نشده باشد، قبل از insert در `DetectionHistory` با کلید canonical بررسی می‌شود؛ در صورت وجود رکورد در بازه، event جدید ثبت نمی‌شود. `TriggerDefinition.CooldownSeconds` بعد از آن برای کلید همان تریگر در `TriggerHistory` بررسی می‌شود؛ اگر تنها نتیجهٔ ارزیابی suppression باشد، event تکراری جدید نیز ساخته نمی‌شود.
 
 ## 4. ثبت اتمیک
 
@@ -79,6 +79,8 @@ Cooldown فعلی Face حفظ می‌شود، اما در سرویس باید ن
 ```text
 BEGIN TRANSACTION
   INSERT DetectionEvents
+  INSERT DetectionHistory (when canonical history is enabled)
+  INSERT TriggerHistory (for matched triggers)
   INSERT EventOutbox rows for enabled actions
 COMMIT
 ```

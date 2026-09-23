@@ -69,6 +69,8 @@ npm run dev
 - Face Database کامل: افراد نام‌دار/Unknown، rename، حذف sample/person، enrollment چندتصویری، انتقال sample و Similarity/Merge
 - مشاهدهٔ eventهای پایدار، فریم کامل، ROI/Plate/Face crop، metadata جزئی و payload کامل trigger
 - اتصال SignalR با نگهداری sequence و replay پس از reconnect؛ polling فقط fallback است
+- تنظیم `History event cooldown (sec)` مستقل برای هر آیتم Plate/Face زیر ROI؛ در نبود trigger، ثبت تکراری canonical history برای همان دوربین/ROI/component را محدود می‌کند
+- فیلد `History event cooldown (sec)` در «آزمایش subscription کلاینت»؛ فقط history و replay/live همان اتصال وب را فیلتر می‌کند و database مشترک یا triggerها را تغییر نمی‌دهد
 - triggerهای سناریویی Plate، Face و Plate+Face با camera scope، identity، confidence و `History event cooldown (sec)`؛ cooldown هر تریگر از Event Store بررسی می‌شود و برای کلید همان سناریو اعمال می‌شود
 - مدیریت سرویس، listener، API key، retention، runtime reload، capability registry و inventory مدل‌ها
 

@@ -346,8 +346,8 @@ TopK را به draft اعمال می‌کند و thresholdها را تغییر �
 4. `ردیابی و ثبت سابقه` — `Tracking and recording`.
 
 بخش Plate شامل ComboBox `Model`، `Input size`، `Preprocessing`، `Confidence`,
-`NMS IoU`، `Max processing FPS`، `Threads`، `Buffer count` و
-`Track max misses` است.
+`NMS IoU`، `Max processing FPS`، `Threads`، `Buffer count`،
+`History event cooldown (sec)` و `Track max misses` است.
 
 بخش Face detection شامل ComboBox `Detection model`، `Input size`,
 `Preprocessing`، `Detection confidence`، `NMS IoU` و `Max candidate faces` است.
@@ -430,7 +430,12 @@ Drawingهای زندهٔ SVG نباید داخل فایل artifact ذخیره‌
 
 در ابتدای همین صفحه، `ClientSubscriptionTester` برای تست policy همان اتصال وب قرار دارد. این بخش تنظیمات دوربین یا trigger سرویس را تغییر نمی‌دهد و فقط با `sessionStorage` ذخیره می‌شود و هنگام اعمال، subscription SignalR و query تاریخچهٔ همان صفحه را به‌روزرسانی می‌کند.
 
-گزینه‌های تست شامل `All`، `Plate` و `KnownFace`، پنجرهٔ association، اجباری‌بودن Face/Plate، ارسال چهرهٔ ناشناس و محدودکردن به دوربین‌های انتخابی است. این تست برای شبیه‌سازی سه client مستقل استفاده می‌شود؛ هر client واقعی باید subscription خودش را هنگام `Subscribe` ارسال کند.
+گزینه‌های تست شامل `All`، `Plate` و `KnownFace`، پنجرهٔ association،
+`History event cooldown (sec)`، اجباری‌بودن Face/Plate، ارسال چهرهٔ ناشناس و
+محدودکردن به دوربین‌های انتخابی است. cooldown این بخش فقط تاریخچهٔ همان client را
+فیلتر می‌کند و روی database مشترک، تنظیمات ROI یا triggerها اثر ندارد. این تست
+برای شبیه‌سازی clientهای مستقل استفاده می‌شود؛ هر client واقعی باید subscription
+خودش را هنگام `Subscribe` ارسال کند.
 
 عنوان صفحه `تریگرها و کلاینت‌ها` و دکمهٔ `تریگر جدید` است. ستون چپ فهرست
 تعریف‌های سرویس و cooldown را نشان می‌دهد؛ ستون راست فرم انتخاب‌شده را دارد.

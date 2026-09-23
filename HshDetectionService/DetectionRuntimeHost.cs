@@ -610,7 +610,19 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         ServiceSettingsDocument service = _settingsStore.Service;
         string eventId = Guid.NewGuid().ToString("N");
         DateTime retention = DateTime.UtcNow.AddDays(Math.Max(1, service.Retention.ArtifactDays));
-        DetectionEventEnvelope envelope = BuildEvent(work, eventId, service);
+        CameraSettings camera = _settings.Cameras.FirstOrDefault(item => item.Id.Equals(work.CameraId, StringComparison.OrdinalIgnoreCase))
+            ?? new CameraSettings { Id = work.CameraId };
+        TriggerEvaluation triggerEvaluation = EvaluateTriggers(service.Triggers, camera.Id, work.Components);
+        if (triggerEvaluation.Matched.Count == 0 && triggerEvaluation.Suppressed.Count > 0)
+            return;
+
+        int detectionCooldownSeconds = GetDetectionHistoryCooldownSeconds(work.Components);
+        string historyKey = BuildCanonicalHistoryKey(work);
+        if (triggerEvaluation.Matched.Count == 0 && detectionCooldownSeconds > 0 &&
+            _eventStore.HasRecentDetectionEvent(historyKey, DateTime.UtcNow.AddSeconds(-detectionCooldownSeconds)))
+            return;
+
+        DetectionEventEnvelope envelope = BuildEvent(work, eventId, service, triggerEvaluation);
 
         var savedFullFrames = new HashSet<long>();
         bool firstFrame = true;
@@ -630,9 +642,9 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             string cropType = component.Detection.Kind == AnalysisKind.Face ? "DetectionCrop" : "PlateCrop";
             envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, cropType, component.Crop, component.SourceFrameSequence, retention));
 
-            CameraSettings camera = _settings.Cameras.FirstOrDefault(item => item.Id.Equals(work.CameraId, StringComparison.OrdinalIgnoreCase))
+            CameraSettings artifactCamera = _settings.Cameras.FirstOrDefault(item => item.Id.Equals(work.CameraId, StringComparison.OrdinalIgnoreCase))
                 ?? new CameraSettings { Id = work.CameraId };
-            using Bitmap? roi = CropForDetection(component.FullFrame, component.Detection, camera);
+            using Bitmap? roi = CropForDetection(component.FullFrame, component.Detection, artifactCamera);
             if (roi is not null)
                 envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "RoiRaw", roi, component.SourceFrameSequence, retention));
 
@@ -645,11 +657,15 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             }
         }
 
-        DetectionEventEnvelope stored = _eventStore.Append(envelope);
+        DetectionEventEnvelope stored = _eventStore.Append(envelope, historyKey);
         await DetectionHub.PublishAsync(_hub, stored, cancellationToken);
     }
 
-    private DetectionEventEnvelope BuildEvent(DetectionWork work, string eventId, ServiceSettingsDocument service)
+    private DetectionEventEnvelope BuildEvent(
+        DetectionWork work,
+        string eventId,
+        ServiceSettingsDocument service,
+        TriggerEvaluation triggerEvaluation)
     {
         CameraSettings camera = _settings.Cameras.FirstOrDefault(item => item.Id.Equals(work.CameraId, StringComparison.OrdinalIgnoreCase)) ?? new CameraSettings { Id = work.CameraId };
         PendingComponent primary = work.Components[0];
@@ -659,7 +675,6 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         string roiId = GetMetadataString(primary.Detection, "RoiId") ?? string.Empty;
         bool hasPlate = work.Components.Any(item => item.Detection.Kind == AnalysisKind.Plate);
         bool hasFace = work.Components.Any(item => item.Detection.Kind == AnalysisKind.Face);
-        TriggerEvaluation triggerEvaluation = EvaluateTriggers(service.Triggers, camera.Id, work.Components);
 
         var envelope = new DetectionEventEnvelope
         {
@@ -883,6 +898,30 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     }
 
     private static string NormalizeTriggerKeyPart(string? value) => (value ?? string.Empty).Trim().ToUpperInvariant();
+
+    private static int GetDetectionHistoryCooldownSeconds(IReadOnlyList<PendingComponent> components) =>
+        components.Select(item => GetMetadataInt(item.Detection, "HistoryEventCooldownSeconds"))
+            .DefaultIfEmpty(0)
+            .Max(value => Math.Clamp(value, 0, 3600));
+
+    private static string BuildCanonicalHistoryKey(DetectionWork work)
+    {
+        string roi = string.Join(",", work.Components
+            .Select(item => NormalizeTriggerKeyPart(item.RoiKey))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        string plates = string.Join(",", work.Components
+            .Where(item => item.Detection.Kind == AnalysisKind.Plate)
+            .Select(item => NormalizeTriggerKeyPart(GetMetadataString(item.Detection, "PlateText") ?? item.Detection.Label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        string faces = string.Join(",", work.Components
+            .Where(item => item.Detection.Kind == AnalysisKind.Face)
+            .Select(item => NormalizeTriggerKeyPart(GetMetadataString(item.Detection, "IdentityId") ?? item.Detection.Label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        return string.Join("\u001f", NormalizeTriggerKeyPart(work.CameraId), roi, plates, faces);
+    }
 
     private static JsonObject TriggerKeysJson(IReadOnlyDictionary<string, string> keys)
     {

@@ -29,7 +29,7 @@ public sealed class EventStore : IDisposable
 
     public string DatabasePath { get; }
 
-    public DetectionEventEnvelope Append(DetectionEventEnvelope envelope)
+    public DetectionEventEnvelope Append(DetectionEventEnvelope envelope, string? historyKey = null)
     {
         lock (_gate)
         {
@@ -52,6 +52,17 @@ public sealed class EventStore : IDisposable
             Add(update, "$payload", JsonSerializer.Serialize(envelope, ServiceJson.Options));
             Add(update, "$sequence", sequence);
             update.ExecuteNonQuery();
+
+            if (!string.IsNullOrWhiteSpace(historyKey))
+            {
+                using SqliteCommand detectionHistory = _connection.CreateCommand();
+                detectionHistory.Transaction = transaction;
+                detectionHistory.CommandText = "INSERT INTO DetectionHistory(EventSequence, HistoryKey, OccurredAtUtc) VALUES ($sequence, $key, $occurred);";
+                Add(detectionHistory, "$sequence", sequence);
+                Add(detectionHistory, "$key", historyKey);
+                Add(detectionHistory, "$occurred", envelope.OccurredAtUtc.ToUniversalTime().ToString("O"));
+                detectionHistory.ExecuteNonQuery();
+            }
 
             if (envelope.Trigger["matchingTriggerKeys"] is JsonObject triggerKeys)
             {
@@ -128,6 +139,19 @@ public sealed class EventStore : IDisposable
         }
     }
 
+    public bool HasRecentDetectionEvent(string historyKey, DateTime sinceUtc)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM DetectionHistory WHERE HistoryKey = $key AND OccurredAtUtc >= $since LIMIT 1);";
+            Add(command, "$key", historyKey);
+            Add(command, "$since", sinceUtc.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            return Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) != 0;
+        }
+    }
+
     public IReadOnlyList<string> Delete(DateTime? fromUtc, DateTime? toUtc)
     {
         lock (_gate)
@@ -163,7 +187,7 @@ public sealed class EventStore : IDisposable
                 {
                     using SqliteCommand deleteHistory = _connection.CreateCommand();
                     deleteHistory.Transaction = transaction;
-                    deleteHistory.CommandText = "DELETE FROM TriggerHistory WHERE EventSequence = $sequence;";
+                    deleteHistory.CommandText = "DELETE FROM DetectionHistory WHERE EventSequence = $sequence; DELETE FROM TriggerHistory WHERE EventSequence = $sequence;";
                     Add(deleteHistory, "$sequence", eventSequence);
                     deleteHistory.ExecuteNonQuery();
                 }
@@ -216,6 +240,13 @@ public sealed class EventStore : IDisposable
             );
             CREATE INDEX IF NOT EXISTS IX_DetectionEvents_EventId ON DetectionEvents(EventId);
             CREATE INDEX IF NOT EXISTS IX_DetectionEvents_OccurredAtUtc ON DetectionEvents(OccurredAtUtc);
+            CREATE TABLE IF NOT EXISTS DetectionHistory(
+                EventSequence INTEGER PRIMARY KEY,
+                HistoryKey TEXT NOT NULL,
+                OccurredAtUtc TEXT NOT NULL,
+                FOREIGN KEY(EventSequence) REFERENCES DetectionEvents(Sequence) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS IX_DetectionHistory_Lookup ON DetectionHistory(HistoryKey, OccurredAtUtc);
             CREATE TABLE IF NOT EXISTS TriggerHistory(
                 EventSequence INTEGER NOT NULL,
                 TriggerId TEXT NOT NULL,

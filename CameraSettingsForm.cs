@@ -30,6 +30,7 @@ public sealed class CameraSettingsForm : Form
     private readonly NumericUpDown _numFaceTopK = new();
     private readonly NumericUpDown _numFaceUnknownMatch = new();
     private readonly NumericUpDown _numFaceEventCooldown = new();
+    private readonly NumericUpDown _numPlateEventCooldown = new();
     private readonly CheckBox _chkPlateEnabled = new();
     private readonly CheckBox _chkFaceEnabled = new();
     private readonly CheckBox _chkFaceRecognition = new();
@@ -250,6 +251,7 @@ public sealed class CameraSettingsForm : Form
         AddRow(properties, "Threads (ONNX Runtime IntraOp)", ConfigureNumber(_numThreads, 1, Math.Max(1, Math.Min(16, Environment.ProcessorCount)), 1, 0));
         AddRow(properties, "Buffer count (0 = newest only)", ConfigureNumber(_numPlateBuffer, 0, 10, 1, 0));
         AddRow(properties, "Track max misses", ConfigureNumber(_numTrackMisses, 1, 30, 1, 0));
+        AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numPlateEventCooldown, 0, 3600, 1, 0));
         AddSection(properties, "FACE DETECTION  •  YuNet finds face boxes");
         AddRow(properties, "Enabled", ConfigureCheckBox(_chkFaceEnabled));
         AddRow(properties, "Detection model", ConfigureCombo(_cmbFaceModel));
@@ -270,7 +272,7 @@ public sealed class CameraSettingsForm : Form
         AddRow(properties, "Threads (ONNX Runtime IntraOp)", ConfigureNumber(_numFaceThreads, 1, Math.Max(1, Math.Min(16, Environment.ProcessorCount)), 1, 0));
         AddRow(properties, "Buffer count (0 = newest only)", ConfigureNumber(_numFaceBuffer, 0, 10, 1, 0));
         AddRow(properties, "History record confidence", ConfigureNumber(_numFaceRecordConfidence, 0.05m, 0.99m, 0.01m, 2));
-        AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numFaceEventCooldown, 1, 3600, 1, 0));
+        AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numFaceEventCooldown, 0, 3600, 1, 0));
         AddRow(properties, "Tracking IoU", ConfigureNumber(_numFaceIou, 0.05m, 0.90m, 0.05m, 2));
         AddRow(properties, "Track max misses", ConfigureNumber(_numFaceTrackMisses, 1, 60, 1, 0));
         AddSection(properties, "MODULE OPTIONS  •  custom processing");
@@ -682,6 +684,7 @@ public sealed class CameraSettingsForm : Form
         _numMaxFps.Value = Math.Clamp(item.MaxFps, 1, 30);
         _numThreads.Value = Math.Clamp(item.Threads, 1, (int)_numThreads.Maximum);
         _numTrackMisses.Value = Math.Clamp(plate.TrackMaxMisses, 1, 30);
+        _numPlateEventCooldown.Value = Math.Clamp(plate.EventCooldownSeconds, 0, 3600);
 
         _cmbFaceModel.SelectedItem = _cmbFaceModel.Items.Contains(face.ModelFile) ? face.ModelFile : _cmbFaceModel.Items.Cast<string>().FirstOrDefault();
         _cmbFacePreprocessing.SelectedItem = face.Preprocessing;
@@ -693,7 +696,7 @@ public sealed class CameraSettingsForm : Form
         _numFaceNms.Value = (decimal)Math.Clamp(face.NmsThreshold, 0.05f, 0.90f);
         _numFaceTopK.Value = Math.Clamp(face.TopK, 1, 10000);
         _numFaceRecordConfidence.Value = (decimal)Math.Clamp(face.RecordConfidence, 0.05f, 0.99f);
-        _numFaceEventCooldown.Value = Math.Clamp(face.EventCooldownSeconds, 1, 3600);
+        _numFaceEventCooldown.Value = Math.Clamp(face.EventCooldownSeconds, 0, 3600);
         _numFaceRecognitionThreshold.Value = (decimal)Math.Clamp(face.RecognitionThreshold, 0.05f, 0.99f);
         _numFaceUnknownMatch.Value = (decimal)Math.Clamp(face.UnknownMatchThreshold, 0.05f, 0.99f);
         _cmbFaceRecognitionModel.SelectedItem = _cmbFaceRecognitionModel.Items.Contains(face.RecognitionModelFile) ? face.RecognitionModelFile : _cmbFaceRecognitionModel.Items.Cast<string>().FirstOrDefault();
@@ -759,6 +762,7 @@ public sealed class CameraSettingsForm : Form
                 plateOptions.Confidence = (float)_numConfidence.Value;
                 plateOptions.NmsIoU = (float)_numIou.Value;
                 plateOptions.TrackMaxMisses = (int)_numTrackMisses.Value;
+                plateOptions.EventCooldownSeconds = (int)_numPlateEventCooldown.Value;
                 item.SetOptions(plateOptions);
             }
             return true;
