@@ -63,6 +63,18 @@
 
 `FaceInputSize` برای YuNetهای فعلی از metadata مدل به `640` محدود می‌شود؛ فرم ویندوزی و UI وب همین مقدار را از catalog مشترک می‌گیرند. `FacePreprocessing` برای تشخیص YuNet است و SFace پس از تشخیص، crop را با پنج landmark به `112×112` هم‌تراز می‌کند و آماده‌سازی ورودی خودش را انجام می‌دهد. با فعال‌بودن recognition مقدار `None` توصیه می‌شود؛ `Advanced` با grayscale و equalization ممکن است embedding را تغییر دهد. در تب `Processing`، لیبل‌های Plate و Face شامل `Model`، `Input size`، `Preprocessing`، `Confidence`، `Max processing FPS`، `Threads (ONNX Runtime IntraOpNumThreads)` و `Buffer count (0 = newest only)` هستند. کنترل‌های `Threads` در بخش تشخیص Plate و tracking/recording Face برای آیتم انتخاب‌شده به‌صورت دوطرفه sync می‌شوند و مقدار همان آیتم را ویرایش می‌کنند؛ `Buffer count` در سطح دوربین مشترک است. فیلدهای Face در سطح `CameraSettings` فقط template پیش‌فرض برای ساخت processing item جدید هستند؛ Save تنظیمات آیتم را به camera default برنمی‌گرداند و تغییر camera default آیتم‌های موجود را overwrite نمی‌کند.
 
+نرخ واقعی Face برابر کمینهٔ نرخ فعال/idle دوربین و `MaxFps` همان آیتم داخل
+`Cameras[].Rois[].Processing[]` است. برای افزایش سرعت، فقط `FaceMaxFps` عمومی
+را تغییر ندهید؛ `ActiveDetectionFps` دوربین و `MaxFps` آیتم Face باید هر دو به
+مقدار هدف برسند. `IdleDetectionFps = 0` در حالت بدون حرکت inference را متوقف
+می‌کند. شناسایی SFace برای هر چهرهٔ پذیرفته‌شده در هر اجرای Face انجام می‌شود؛
+`FaceEventCooldownSeconds` فقط ثبت رخداد را محدود می‌کند و جایگزین کاهش نرخ
+inference نیست. برای رسیدن به near-real-time با فشار کنترل‌شده، ابتدا مدل
+`face_yunet_2023mar_int8`، نرخ 8 FPS، `Threads = 1`، Motion Gate فعال و
+`BufferCount = 0` را انتخاب کنید؛ سپس فقط در صورت وجود ظرفیت CPU نرخ 10 FPS یا
+`Threads = 2` را آزمایش کنید. پروفایل High performance با 15 FPS و 4 thread
+برای چند دوربین پرمصرف است و نباید انتخاب پیش‌فرض تلقی شود.
+
 ### پروفایل‌های کارایی در تنظیمات دوربین
 
 > نکتهٔ به‌روز: `InputSize` در UI از catalog مدل انتخاب می‌شود و مقدار دلخواه پذیرفته نمی‌شود. مدل‌های YuNet فعلی (`face_yunet_2023mar` و `int8`) ورودی `640×640` دارند و مقدار پیش‌فرض Face نیز `640` است؛ runtime اندازهٔ واقعی مدل را از metadata بررسی می‌کند.

@@ -61,9 +61,17 @@ MediaMTX:
 در حالت MediaMTX، مسیر WHEP خام برای ویدئوی مرورگر از مسیر ورودی موتور تشخیص
 جداست. مرورگر تصویر را مستقیماً از MediaMTX می‌گیرد و endpoint
 `/api/v1/streams/{cameraId}/overlay` را برای وضعیت سبک ROI و Drawingهای پویا
-هر 180ms poll می‌کند. Overlay فعال در کلاینت با `LiveOverlaySvg` روی `<video>`
-رسم می‌شود؛ بنابراین نمایش زندهٔ
+poll می‌کند. نمای متمرکز با فاصلهٔ پیش‌فرض 180ms و thumbnailهای داشبورد با
+فاصلهٔ 400ms درخواست بعدی را، پس از پایان درخواست قبلی، زمان‌بندی می‌کنند.
+Overlay فعال در کلاینت با `LiveOverlaySvg` روی `<video>` رسم می‌شود؛ بنابراین نمایش زندهٔ
 MediaMTX دوباره از FFmpeg، Bitmap یا encoder کامپوزیت‌شده عبور نمی‌کند.
+
+داشبورد thumbnailها را در صفحه‌های حداکثر شش‌تایی نشان می‌دهد و فقط tileهای
+صفحهٔ جاری را mount می‌کند. با تغییر صفحه، WHEP و polling tileهای قبلی با
+unmount شدن متوقف می‌شود. `RawMediaMtxStream` و `SnapshotImage` همچنین به
+`visibilitychange` مرورگر واکنش می‌دهند و هنگام hidden بودن تب، session یا
+timer فعال نگه نمی‌دارند. این محدودسازی فقط مصرف نمایش در UI/API است؛ دوربینی
+که در سرویس start شده، مستقل از صفحهٔ UI همچنان capture و inference می‌کند.
 
 `/api/v1/streams/{cameraId}/webrtc/offer` و `WebRtcGateway` برای سازگاری با
 کلاینت‌های legacy که خروجی کامپوزیت‌شده می‌خواهند باقی مانده‌اند، اما مسیر اصلی
@@ -83,6 +91,8 @@ MediaMTX دوباره از FFmpeg، Bitmap یا encoder کامپوزیت‌شد�
 ## گلوگاه‌های طراحی که باید حفظ شوند
 
 - `Threads` تعداد threadهای `IntraOp` در sessionهای ONNX Runtime است و در `CameraProcessingSettings` همان آیتم ذخیره می‌شود. UI کنترل Plate و Face را برای آیتم انتخاب‌شده sync می‌کند؛ `CameraSettings.Threads` فقط default ساخت آیتم جدید است و از آیتم موجود دوباره مقداردهی نمی‌شود.
+- نرخ مؤثر Face از دو سقف عبور می‌کند: حلقهٔ دوربین با `ActiveDetectionFps`/`IdleDetectionFps` تعیین می‌کند چه زمانی pipeline فراخوانی شود و خود آیتم Face با `Rois[].Processing[].MaxFps` سقف مستقل دارد؛ بنابراین نرخ عملی حداکثر `min(active-or-idle-rate, item.MaxFps)` است. `FaceMaxFps` در سطح دوربین فقط default ساخت آیتم جدید یا migration است و تغییر آن آیتم Face موجود را overwrite نمی‌کند.
+- وقتی `RecognitionEnabled` فعال است، برای هر چهرهٔ پذیرفته‌شده در هر اجرای Face، SFace embedding ساخته و با نمونه‌های database مقایسه می‌شود؛ `EventCooldownSeconds` فقط ثبت رخداد را محدود می‌کند و هزینهٔ inference را کم نمی‌کند. برای CPU محدود، Motion Gate، `BufferCount = 0`، مدل INT8 و `Threads = 1` در هر دوربین اولویت دارند.
 - `CameraPipelineCoordinator` برای هر ROI فعال فهرست pipeline مستقل می‌سازد؛ Plate و Face هر دو از `ProcessingRegistry` و registration ماژول خود ساخته می‌شوند. `CameraRuntime` فقط lifecycle/capture، Motion، هندسهٔ ROI و policy خروجی را نگه می‌دارد و به concrete type یا factory مخصوص قابلیت‌ها وابسته نیست. state، tracker و محدودیت FPS بین ROIها مشترک نیستند.
 - graph پردازش در `CameraPipelineCoordinator` به‌صورت immutable و قابل تعویض نگه‌داری می‌شود. اجرای inference یک lease کوتاه روی graph می‌گیرد، اما قفل coordinator را در طول inference نگه نمی‌دارد؛ بنابراین status/API پشت اجرای ONNX منتظر نمی‌مانند. هنگام rebuild، graph قبلی فقط پس از پایان inferenceهای فعال dispose می‌شود.
 - صف event ذخیره‌سازی bounded است و ظرفیت آن از `Service.Runtime.MaxEventQueueLength` می‌آید. در صورت پرشدن صف، artifactهای رخداد جدید آزاد و شمارندهٔ `droppedEventCount` افزایش می‌یابد تا فشار ذخیره‌سازی باعث رشد بی‌نهایت حافظه نشود.

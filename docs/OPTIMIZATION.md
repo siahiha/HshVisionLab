@@ -67,6 +67,30 @@ YuNet با ورودی مربعی اجرا می‌شود؛ ROI ابتدا به `F
 
 `Threads` در `SessionOptions.IntraOpNumThreads` برای sessionهای YuNet و SFace تنظیم می‌شود و از `CameraProcessingSettings` همان آیتم می‌آید. UI کنترل Plate و Face را برای آیتم انتخاب‌شده sync می‌کند؛ مقدار camera-level فقط default ساخت آیتم جدید است. در چند دوربین، هر session تنظیم خودش را دارد و دیگر `CvInvoke.NumThreads` سراسری تغییر نمی‌کند.
 
+برای Face، نرخ مؤثر از ترکیب `ActiveDetectionFps` یا `IdleDetectionFps` در
+سطح دوربین و `MaxFps` در `Rois[].Processing[]` به‌دست می‌آید و برابر کمینهٔ
+آن‌هاست. در نتیجه افزایش `FaceMaxFps` عمومی به‌تنهایی نرخ آیتم موجود را بالا
+نمی‌برد. اجرای `FacePipeline.Process` شامل YuNet است و اگر SFace فعال باشد،
+برای هر چهرهٔ پذیرفته‌شده در همان اجرا یک embedding و مقایسهٔ database نیز
+انجام می‌شود؛ در نسخهٔ فعلی cache مستقلِ «شناسایی هر track هر چند فریم» وجود
+ندارد. `EventCooldownSeconds` فقط ذخیرهٔ event/unknown sample را محدود می‌کند
+و هزینهٔ محاسبهٔ SFace را حذف نمی‌کند.
+
+ترتیب پیشنهادی tuning برای near-real-time با CPU متعادل:
+
+1. `BufferCount = 0` و `MotionGateEnabled = true` را حفظ کنید تا صف فریم و
+   inference بی‌دلیل ایجاد نشود.
+2. مدل `face_yunet_2023mar_int8` را انتخاب کنید، سپس `ActiveDetectionFps` و
+   Face item `MaxFps` را هر دو روی `8` بگذارید؛ در حالت idle مقدار `0` یا `1`
+   مناسب است.
+3. برای چند دوربین `Threads = 1` را نگه دارید. فقط اگر زمان inference از
+   budget هر فریم بیشتر است و CPU ظرفیت دارد، `Threads = 2` را تست کنید؛
+   افزایش thread برای هر دوربین می‌تواند با چند session باعث oversubscription
+   شود.
+4. اگر پس از این مراحل هنوز نرخ لازم حاصل نشد، ابتدا به‌صورت کنترل‌شده هر دو
+   نرخ را به `10` افزایش دهید. پروفایل High performance با `15 FPS` و `4`
+   thread برای CPU قوی و تعداد کم دوربین است، نه سناریوی چنددوربینهٔ عمومی.
+
 ## محافظت از مدل
 
 فرمت `.hshmodel` فعلی رمزگذاری AES با header `HSHM0001` و IV 16-byte است. برای ساخت session، مدل ONNX رمزگشایی‌شده موقتاً در temp نوشته و سپس حذف می‌شود. بنابراین package صرفاً مانع دسترسی ساده است؛ شخص دارای کنترل کامل دستگاه می‌تواند حافظه، فایل موقت یا باینری را بررسی کند.

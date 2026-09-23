@@ -9,7 +9,7 @@
       "Processing": [],
       "FaceModelFile": "face_yunet_2023mar.onnx",
       "FaceEnabled": true,
-      "FaceInputSize": 320,
+      "FaceInputSize": 640,
       "FaceConfidence": 0.8,
       "FaceRecordConfidence": 0.8,
       "FaceRecognitionEnabled": true,
@@ -84,7 +84,7 @@
               "Threads": 1,
               "Options": {
                 "ModelFile": "face_yunet_2023mar.onnx",
-                "InputSize": 320,
+                "InputSize": 640,
                 "Preprocessing": "None",
                 "Confidence": 0.7,
                 "RecordConfidence": 0.8,

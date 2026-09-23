@@ -586,7 +586,9 @@ layoutهای camera/faces/events/triggers تک‌ستونه، formها تک‌س
   نشود؛
 - در focus ابزارهای view/edit/new/delete و در edit/new ذخیره/لغو وجود داشته
   باشد؛
-- MediaMTX از WHEP خام و Overlay SVG با polling حدود 180ms استفاده کند؛
+- MediaMTX از WHEP خام و Overlay SVG استفاده کند؛ نمای متمرکز polling پیش‌فرض
+  180ms و thumbnail داشبورد polling 400ms دارد و polling بعدی پس از پایان
+  پاسخ قبلی زمان‌بندی می‌شود؛
 - MediaMTX در UI پایش سلامت WebRTC و recovery خودکار per-tile داشته باشد تا
   lag تدریجی با refresh کل صفحه برطرف نشود؛
 - backendهای دیگر snapshot باشند؛

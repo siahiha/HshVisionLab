@@ -7,7 +7,7 @@
 - YuNet packageها: `Models/face_yunet_2023mar.hshmodel` (FP32) و `Models/face_yunet_2023mar_int8.hshmodel` (CPU سبک‌تر).
 - SFace package: `Models/face_recognition_sface_2021dec.hshmodel` با embedding ورودی 112×112.
 - مدل‌ها باید در Release جداگانه در `Models/Face` یا به‌صورت flat در `Models` کنار executable قرار گیرند؛ build آن‌ها را خودکار کپی نمی‌کند. مسیر قدیمی `Modules/Face/Models` برای سازگاری پشتیبانی می‌شود. در اجرای Debug/Visual Studio، `HshDetectionEngin.Face/Models` نیز fallback است تا مدل‌های repository بدون کپی‌شدن به `bin` قابل تست باشند.
-- UI برای `FaceInputSize` مقدارهای 320، 416، 480، 512 و 640 عرضه می‌کند. این مقدار اندازهٔ میانی preprocessing است؛ package فعلی YuNet در نهایت ورودی ثابت `640×640` دریافت می‌کند.
+- UI مقدار `FaceInputSize` را از catalog مدل می‌گیرد؛ برای packageهای فعلی YuNet که tensor ثابت دارند، فقط `640` معتبر/نمایش‌داده‌شده است. runtime نیز اندازهٔ واقعی مدل را از metadata می‌خواند و ورودی `640×640` می‌سازد؛ مقدارهای قدیمی مانند `320` در فایل‌های legacy ممکن است باقی بمانند اما راه کنترل سرعت مدل فعلی نیستند.
 - `Threads` در `SessionOptions.IntraOpNumThreads` برای sessionهای YuNet و SFace اعمال می‌شود و از تنظیم `Threads` همان آیتم Face می‌آید؛ UI کنترل Threads را هنگام انتخاب آیتم بین بخش‌های Plate و Face sync می‌کند. مقدار سطح دوربین فقط هنگام ساخت آیتم Face جدید به‌عنوان default استفاده می‌شود.
 
 `FacePreprocessing` پیش‌پردازش عمومیِ مسیر تشخیص YuNet است، نه پیش‌نیاز SFace. مقدار پیش‌فرض و مقدار توصیه‌شده هنگام فعال‌بودن recognition، `None` است. حالت `Standard` روشنایی/کنتراست را تغییر می‌دهد و `Advanced` تصویر را خاکستری و equalize می‌کند؛ این تغییرات می‌توانند embedding SFace را ناپایدار کنند.
