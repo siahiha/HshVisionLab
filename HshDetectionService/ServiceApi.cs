@@ -282,17 +282,11 @@ public static class ServiceApi
 
         app.MapGet("/api/v1/events", (long? afterSequence, int? limit, string? cameraId, string? scenario, DateTime? fromUtc, DateTime? toUtc, string? clientMode, bool? faceRequired, bool? plateRequired, bool? includeUnknownFace, int? windowMs, string? clientCameraIds, string? clientRoiIds, DetectionRuntimeHost host) =>
         {
-            IReadOnlyList<DetectionEventEnvelope> events = host.Events.ReadAfter(afterSequence ?? 0, Math.Clamp(limit ?? 200, 1, 2000));
-            IEnumerable<DetectionEventEnvelope> filtered = events;
-            if (!string.IsNullOrWhiteSpace(cameraId))
-                filtered = filtered.Where(item => string.Equals(item.Source["cameraId"]?.GetValue<string>(), cameraId, StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrWhiteSpace(scenario))
-                filtered = filtered.Where(item => string.Equals(item.Scenario, scenario, StringComparison.OrdinalIgnoreCase));
-            if (fromUtc is not null) filtered = filtered.Where(item => item.OccurredAtUtc >= fromUtc.Value.ToUniversalTime());
-            if (toUtc is not null) filtered = filtered.Where(item => item.OccurredAtUtc <= toUtc.Value.ToUniversalTime());
+            int requestedLimit = Math.Clamp(limit ?? 200, 1, 2000);
+            ClientSubscription? subscription = null;
             if (!string.IsNullOrWhiteSpace(clientMode))
             {
-                var subscription = new ClientSubscription
+                subscription = new ClientSubscription
                 {
                     Mode = clientMode,
                     FaceRequired = faceRequired ?? false,
@@ -302,9 +296,49 @@ public static class ServiceApi
                     CameraIds = SplitList(clientCameraIds),
                     RoiIds = SplitList(clientRoiIds)
                 };
-                filtered = filtered.Where(item => DetectionHub.Matches(item, subscription));
             }
-            return Results.Ok(filtered.ToArray());
+
+            bool hasFilter = !string.IsNullOrWhiteSpace(cameraId) ||
+                !string.IsNullOrWhiteSpace(scenario) ||
+                fromUtc is not null ||
+                toUtc is not null ||
+                subscription is not null;
+            if (!hasFilter)
+                return Results.Ok(host.Events.ReadAfter(afterSequence ?? 0, requestedLimit).ToArray());
+
+            DateTime from = fromUtc?.ToUniversalTime() ?? DateTime.MinValue;
+            DateTime to = toUtc?.ToUniversalTime() ?? DateTime.MaxValue;
+            var matched = new List<DetectionEventEnvelope>(requestedLimit);
+            long cursor = afterSequence ?? 0;
+            const int pageSize = 2000;
+            while (matched.Count < requestedLimit)
+            {
+                IReadOnlyList<DetectionEventEnvelope> page = host.Events.ReadAfter(cursor, pageSize);
+                if (page.Count == 0) break;
+                cursor = page[^1].Sequence;
+                foreach (DetectionEventEnvelope item in page)
+                {
+                    if (!string.IsNullOrWhiteSpace(cameraId) && !string.Equals(item.Source["cameraId"]?.GetValue<string>(), cameraId, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.IsNullOrWhiteSpace(scenario) && !string.Equals(item.Scenario, scenario, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (item.OccurredAtUtc < from || item.OccurredAtUtc > to) continue;
+                    if (subscription is not null && !DetectionHub.Matches(item, subscription)) continue;
+                    matched.Add(item);
+                    if (matched.Count >= requestedLimit) break;
+                }
+                if (page.Count < pageSize) break;
+            }
+            return Results.Ok(matched.ToArray());
+        });
+        app.MapDelete("/api/v1/events", (string? fromUtc, string? toUtc, EventStore events, ArtifactStore artifacts) =>
+        {
+            if (!TryParseUtc(fromUtc, out DateTime? from) || !TryParseUtc(toUtc, out DateTime? to))
+                return Results.BadRequest(new { error = "fromUtc and toUtc must be valid ISO-8601 timestamps." });
+            if (from is not null && to is not null && from > to)
+                return Results.BadRequest(new { error = "fromUtc must be earlier than or equal to toUtc." });
+
+            IReadOnlyList<string> deleted = events.Delete(from, to);
+            artifacts.DeleteEventArtifacts(deleted);
+            return Results.Ok(new { deletedCount = deleted.Count });
         });
         app.MapGet("/api/v1/events/{eventId}", (string eventId, DetectionRuntimeHost host) =>
         {
@@ -510,6 +544,16 @@ public static class ServiceApi
     private static List<string> SplitList(string? value) => string.IsNullOrWhiteSpace(value)
         ? []
         : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private static bool TryParseUtc(string? value, out DateTime? result)
+    {
+        result = null;
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        if (!DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out DateTimeOffset parsed))
+            return false;
+        result = parsed.UtcDateTime;
+        return true;
+    }
 }
 
 public sealed record ConfigurationUpdateRequest(long Revision, AppSettings? Detection, ServiceSettingsDocument? Service);

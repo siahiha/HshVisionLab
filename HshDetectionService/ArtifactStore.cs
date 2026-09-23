@@ -50,11 +50,30 @@ public sealed class ArtifactStore
 
     public string Resolve(EventArtifactDescriptor artifact)
     {
-        string root = Path.GetFullPath(_paths.Root) + Path.DirectorySeparatorChar;
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_paths.Root)) + Path.DirectorySeparatorChar;
         string path = Path.GetFullPath(Path.Combine(_paths.Root, artifact.RelativePath));
         if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Artifact path is outside the service data root.");
         return path;
+    }
+
+    public void DeleteEventArtifacts(IEnumerable<string> eventIds)
+    {
+        string root = Path.GetFullPath(_paths.ArtifactDirectory) + Path.DirectorySeparatorChar;
+        foreach (string eventId in eventIds)
+        {
+            string directory = Path.GetFullPath(Path.Combine(_paths.ArtifactDirectory, eventId));
+            if (!directory.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            }
+            catch
+            {
+                // The event row has already been removed. Retention cleanup can
+                // remove an orphaned artifact directory on a later pass.
+            }
+        }
     }
 
     public void DeleteExpired(DateTime utcNow)

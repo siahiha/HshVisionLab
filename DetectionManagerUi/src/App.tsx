@@ -50,7 +50,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { api } from "./api";
+import { api, serviceUrl } from "./api";
 import {
   keys,
   useCamera,
@@ -58,6 +58,7 @@ import {
   useCameraMutation,
   useCameras,
   useCapabilities,
+  useDeleteEvents,
   useDetectionStream,
   useEvent,
   useEvents,
@@ -747,7 +748,7 @@ function DetectionHistoryPanel({
             return (
               <button className="detected-event-card" key={event.eventId} onClick={() => onOpenEvent(event.eventId)}>
                 <div className="detected-event-image">
-                  {crop ? <img src={crop.downloadUrl} alt={crop.type} /> : <Database size={28} />}
+                  {crop ? <img src={serviceUrl(crop.downloadUrl)} alt={crop.type} /> : <Database size={28} />}
                 </div>
                 <div className="detected-event-copy">
                   <span className="detected-event-camera">{camera}</span>
@@ -2468,6 +2469,16 @@ function GeneralSettings({
             />
             <span>نمایش Drawing، ROI و کادر تشخیص</span>
           </label>
+          <Field label="مدت نمایش کادر تشخیص (ms)" hint="برای Face و Plate مستقل نگه‌داری می‌شود">
+            <input
+              type="number"
+              min="0"
+              max="60000"
+              step="100"
+              value={draft.detectionOverlayHoldMs}
+              onChange={(e) => update("detectionOverlayHoldMs", Number(e.target.value))}
+            />
+          </Field>
         </div>
       </section>
       <section className="panel">
@@ -3822,12 +3833,40 @@ function SimilarityDialog({
 }
 
 function Events() {
+  type DeleteMode = "all" | "today" | "7days" | "30days" | "custom";
+  type DeleteSelection = { range: { fromUtc?: string; toUtc?: string }; label: string };
   const [filter, setFilter] = useState("");
   const [scenario, setScenario] = useState("");
+  const [deleteMode, setDeleteMode] = useState<DeleteMode>("all");
+  const [deleteFrom, setDeleteFrom] = useState("");
+  const [deleteTo, setDeleteTo] = useState("");
+  const [deleteNotice, setDeleteNotice] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const deleteEvents = useDeleteEvents();
   const events = useEvents(
     scenario ? `&scenario=${encodeURIComponent(scenario)}` : "",
     2000,
   );
+  const getDeleteSelection = (): DeleteSelection | null => {
+    const now = new Date();
+    if (deleteMode === "all") return { range: {}, label: "همهٔ تاریخچه" };
+    if (deleteMode === "today") {
+      const from = new Date(now);
+      from.setHours(0, 0, 0, 0);
+      return { range: { fromUtc: from.toISOString(), toUtc: now.toISOString() }, label: "رخدادهای امروز" };
+    }
+    if (deleteMode === "7days" || deleteMode === "30days") {
+      const days = deleteMode === "7days" ? 7 : 30;
+      const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      return { range: { fromUtc: from.toISOString(), toUtc: now.toISOString() }, label: `رخدادهای ${days} روز اخیر` };
+    }
+    if (!deleteFrom || !deleteTo) return null;
+    const from = new Date(`${deleteFrom}T00:00:00`);
+    const to = new Date(`${deleteTo}T23:59:59.999`);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return null;
+    return { range: { fromUtc: from.toISOString(), toUtc: to.toISOString() }, label: `رخدادهای ${deleteFrom} تا ${deleteTo}` };
+  };
+
   const [selected, setSelected] = useState<string>();
   const list = (events.data ?? [])
     .filter(
@@ -3839,6 +3878,41 @@ function Events() {
     )
     .slice()
     .sort((a, b) => b.sequence - a.sequence);
+  const deletePreview = getDeleteSelection();
+  const previewList = deleteMode === "all"
+    ? list
+    : deletePreview?.range.fromUtc && deletePreview.range.toUtc
+      ? list.filter((event) => {
+          const occurred = new Date(event.occurredAtUtc).getTime();
+          return occurred >= new Date(deletePreview.range.fromUtc!).getTime() && occurred <= new Date(deletePreview.range.toUtc!).getTime();
+        })
+      : [];
+
+  const runDelete = () => {
+    setDeleteError("");
+    setDeleteNotice("");
+    const selection = getDeleteSelection();
+    if (!selection) {
+      setDeleteError(deleteMode === "custom" ? "برای حذف بازهٔ سفارشی، تاریخ شروع و پایان معتبر انتخاب کنید." : "بازهٔ انتخابی معتبر نیست.");
+      return;
+    }
+    if (!window.confirm(`آیا ${selection.label} حذف شود؟ این عملیات قابل بازگشت نیست.`)) return;
+    deleteEvents.mutate(selection.range, {
+      onSuccess: (result) => {
+        setSelected(undefined);
+        setDeleteNotice(`${result.deletedCount.toLocaleString("fa-IR")} رخداد حذف شد.`);
+      },
+      onError: (error) => setDeleteError(error instanceof Error ? error.message : "حذف تاریخچه ناموفق بود."),
+    });
+  };
+
+  const deleteLabel: Record<DeleteMode, string> = {
+    all: "حذف همه",
+    today: "حذف امروز",
+    "7days": "حذف ۷ روز",
+    "30days": "حذف ۳۰ روز",
+    custom: "حذف بازه",
+  };
   return (
     <>
       <PageHead
@@ -3861,10 +3935,38 @@ function Events() {
               onChange={(e) => setScenario(e.target.value)}
             >
               <option value="">همهٔ سناریوها</option>
-              <option value="PlateRecognition">پلاک</option>
+              <option value="PlateOnly">پلاک</option>
               <option value="FaceRecognition">چهره</option>
-              <option value="PlateFaceMatch">پلاک + چهره</option>
+              <option value="PlateFaceAssociation">پلاک + چهره</option>
             </select>
+            <div className="event-delete-tools">
+              <select
+                className="toolbar-select"
+                value={deleteMode}
+                onChange={(e) => {
+                  setDeleteMode(e.target.value as DeleteMode);
+                  setDeleteError("");
+                  setDeleteNotice("");
+                }}
+                aria-label="بازه حذف تاریخچه"
+              >
+                <option value="all">همهٔ تاریخچه</option>
+                <option value="today">امروز</option>
+                <option value="7days">۷ روز اخیر</option>
+                <option value="30days">۳۰ روز اخیر</option>
+                <option value="custom">بازهٔ سفارشی</option>
+              </select>
+              {deleteMode === "custom" && (
+                <>
+                  <input className="toolbar-select event-date-input" type="date" value={deleteFrom} onChange={(e) => setDeleteFrom(e.target.value)} aria-label="از تاریخ" />
+                  <input className="toolbar-select event-date-input" type="date" value={deleteTo} onChange={(e) => setDeleteTo(e.target.value)} aria-label="تا تاریخ" />
+                </>
+              )}
+              <Button variant="danger" icon={Trash2} disabled={deleteEvents.isPending} onClick={runDelete}>
+                {deleteEvents.isPending ? "در حال حذف..." : deleteLabel[deleteMode]}
+              </Button>
+              {(deleteError || deleteNotice) && <small className={deleteError ? "event-delete-error" : "event-delete-notice"}>{deleteError || deleteNotice}</small>}
+            </div>
           </div>
         }
       />
@@ -3887,7 +3989,7 @@ function Events() {
           <div className="panel-head compact">
             <div>
               <h3>Event Store</h3>
-              <span>{list.length} رخداد · sequence replay امن</span>
+              <span>{previewList.length} رخداد در محدودهٔ حذف · {list.length} رخداد بارگذاری‌شده</span>
             </div>
             <Button
               variant="soft"
@@ -3905,7 +4007,7 @@ function Events() {
               <span>زمان</span>
               <span />
             </div>
-            {list.map((event) => (
+            {previewList.map((event) => (
               <button
                 className={`table-row ${selected === event.eventId ? "selected" : ""}`}
                 key={event.eventId}
@@ -3939,11 +4041,11 @@ function Events() {
                 <ChevronLeft size={15} />
               </button>
             ))}
-            {!list.length && (
+            {!previewList.length && (
               <Empty
                 icon={Activity}
-                title="رخدادی وجود ندارد"
-                text="پس از فعال‌شدن دوربین و taskها اینجا پر می‌شود."
+                title={deleteMode === "all" ? "رخدادی وجود ندارد" : "در این بازه رخدادی وجود ندارد"}
+                text={deleteMode === "all" ? "پس از فعال‌شدن دوربین و taskها اینجا پر می‌شود." : "با این انتخاب، موردی برای حذف در گرید دیده نمی‌شود."}
               />
             )}
           </div>
@@ -3996,10 +4098,10 @@ function EventPreview({ id }: { id: string }) {
           <a
             className="artifact"
             key={artifact.artifactId}
-            href={artifact.downloadUrl}
+            href={serviceUrl(artifact.downloadUrl)}
             target="_blank"
           >
-            <img src={artifact.downloadUrl} alt={artifact.type} />
+            <img src={serviceUrl(artifact.downloadUrl)} alt={artifact.type} />
             <span>
               {artifact.type} · {Math.round(artifact.sizeBytes / 1024)} KB
             </span>

@@ -63,6 +63,7 @@ public sealed class CameraSettingsForm : Form
     private readonly PropertyGrid _genericOptions = new();
     private readonly NumericUpDown _numReconnect = new();
     private readonly CheckBox _chkDrawBoxes = new();
+    private readonly NumericUpDown _numDetectionOverlayHold = new();
     private readonly CheckBox _chkMotionGate = new();
     private readonly NumericUpDown _numMotionFps = new();
     private readonly NumericUpDown _numMotionThreshold = new();
@@ -178,6 +179,7 @@ public sealed class CameraSettingsForm : Form
         AddRow(general, "Reconnect delay (seconds)", ConfigureNumber(_numReconnect, 1, 120, 1, 0));
         AddSection(general, "Performance");
         AddRow(general, "Draw boxes and labels", ConfigureCheckBox(_chkDrawBoxes));
+        AddRow(general, "Detection overlay hold (ms)", ConfigureNumber(_numDetectionOverlayHold, 0, 60000, 100, 0));
         AddSection(general, "Motion gate");
         AddRow(general, "Enable motion gate", ConfigureCheckBox(_chkMotionGate));
         AddRow(general, "Motion sampling FPS", ConfigureNumber(_numMotionFps, 1, 60, 1, 0));
@@ -826,6 +828,7 @@ public sealed class CameraSettingsForm : Form
         RefreshProcessingList();
         _numReconnect.Value = Math.Clamp(_settings.ReconnectDelaySec, 1, 120);
         _chkDrawBoxes.Checked = _settings.DrawBoxes;
+        _numDetectionOverlayHold.Value = Math.Clamp(_settings.DetectionOverlayHoldMs, 0, 60000);
         _chkMotionGate.Checked = _settings.MotionGateEnabled;
         _numMotionFps.Value = Math.Clamp(_settings.MotionFps, 1, 60);
         _numMotionThreshold.Value = (decimal)Math.Clamp(_settings.MotionThreshold, 1, 255);
@@ -862,6 +865,7 @@ public sealed class CameraSettingsForm : Form
         _settings.BufferCount = (int)_numPlateBuffer.Value;
         _settings.ReconnectDelaySec = (int)_numReconnect.Value;
         _settings.DrawBoxes = _chkDrawBoxes.Checked;
+        _settings.DetectionOverlayHoldMs = (int)_numDetectionOverlayHold.Value;
         _settings.MotionGateEnabled = _chkMotionGate.Checked;
         _settings.MotionFps = (int)_numMotionFps.Value;
         _settings.MotionThreshold = (double)_numMotionThreshold.Value;

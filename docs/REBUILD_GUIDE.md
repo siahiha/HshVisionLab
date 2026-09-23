@@ -134,7 +134,7 @@ UI مقدار `InputSize` را از catalog مدل می‌گیرد و فقط ا�
 | قابلیت‌ها و schema | `ProcessingSchemaVersion`، `PlateEnabled`، `FaceEnabled`، `Processing` legacy |
 | Plate | `Options: PlateProcessingOptions` در `Rois[].Processing[]` به‌همراه `MaxFps` و `Threads` |
 | Face | `Options: FaceProcessingOptions` در `Rois[].Processing[]` به‌همراه `MaxFps` و `Threads` |
-| Motion و UI | `DrawBoxes`، `MotionGateEnabled`، `MotionFps`، `MotionThreshold`، `MotionChangedPercent`، `MotionRoiScalePercent`، `MotionHoldMs`، `ActiveDetectionFps`، `IdleDetectionFps` |
+| Motion و UI | `DrawBoxes`، `DetectionOverlayHoldMs`، `MotionGateEnabled`، `MotionFps`، `MotionThreshold`، `MotionChangedPercent`، `MotionRoiScalePercent`، `MotionHoldMs`، `ActiveDetectionFps`، `IdleDetectionFps` |
 | ROI و پردازش | `Rois[].Name`، `Rois[].Enabled`، `Rois[].Points`، `Rois[].Processing[]` و `RoiEnabled` |
 
 در schema فعلی، `ProcessingSchemaVersion = 3` است و هر پردازش باید داخل `Rois[].Processing[]` قرار بگیرد. هر `CameraProcessingSettings` علاوه بر `Id`، `Type`، `Name`، `Enabled` و تنظیمات مشترک `MaxFps`/`Threads`، فقط `Options` متعلق به همان ماژول را نگه می‌دارد. `CameraSettings.Processing` فقط فیلد legacy برای migration است و در فایل جدید باید خالی باشد. هنگام ساخت آیتم جدید، مقدارهای camera-level به‌عنوان default clone می‌شوند؛ پس از ایجاد، آیتم مرجع مستقل runtime است و تغییرات camera-level یا آیتم‌های دیگر آن را overwrite نمی‌کنند. فایل‌های flat قدیمی هنگام Load به options typed مهاجرت می‌شوند.

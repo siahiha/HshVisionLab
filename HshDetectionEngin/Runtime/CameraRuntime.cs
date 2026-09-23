@@ -41,8 +41,8 @@ public class CameraRuntime : IDisposable
     private double _lastInferenceMs;
     private Size _lastFrameSize = Size.Empty;
     private readonly object _overlayGate = new();
-    private readonly Dictionary<string, PlateOverlayInfo> _plateOverlay = new();
-    private readonly Dictionary<string, AnalysisOverlayInfo> _analysisOverlay = new();
+    private readonly Dictionary<AnalysisKind, PlateOverlayInfo> _plateOverlay = new();
+    private readonly Dictionary<AnalysisKind, AnalysisOverlayInfo> _analysisOverlay = new();
     private readonly Dictionary<string, DateTime> _analysisHistoryTimes = new();
     private readonly object _historyGate = new();
     private readonly List<HistoryItem> _history = [];
@@ -96,6 +96,11 @@ public class CameraRuntime : IDisposable
     }
 
     private const int PreviewFps = 15;
+    private int DetectionOverlayHoldMs => Math.Max(0, Settings.DetectionOverlayHoldMs);
+
+    private bool IsOverlayActive(DateTime updatedUtc, DateTime now)
+        => (now - updatedUtc).TotalMilliseconds <= DetectionOverlayHoldMs;
+
     internal sealed record RuntimeRoi(string Id, string Name, PointF[] Polygon, Rectangle Bounds, bool Enabled);
     private sealed record PlateOverlayInfo(string Key, AnalysisDetection Detection, string Text, float Confidence, DateTime UpdatedUtc, Bitmap? Crop, bool Accepted);
     private sealed record AnalysisOverlayInfo(string Key, AnalysisDetection Detection, DateTime UpdatedUtc);
@@ -267,7 +272,7 @@ public class CameraRuntime : IDisposable
             {
                 foreach (PlateOverlayInfo overlay in _plateOverlay.Values)
                 {
-                    if ((now - overlay.UpdatedUtc).TotalSeconds > 2.5) continue;
+                    if (!IsOverlayActive(overlay.UpdatedUtc, now)) continue;
                     detections.Add(ToLiveOverlayDetection(
                         overlay.Detection,
                         overlay.Accepted,
@@ -276,7 +281,7 @@ public class CameraRuntime : IDisposable
 
                 foreach (AnalysisOverlayInfo overlay in _analysisOverlay.Values)
                 {
-                    if ((now - overlay.UpdatedUtc).TotalSeconds > 2.5) continue;
+                    if (!IsOverlayActive(overlay.UpdatedUtc, now)) continue;
                     detections.Add(ToLiveOverlayDetection(
                         overlay.Detection,
                         IsDetectionAcceptedForOverlay(overlay.Detection),
@@ -285,7 +290,7 @@ public class CameraRuntime : IDisposable
             }
 
             IReadOnlyList<LiveOverlayPrimitive> processingOverlays =
-                Settings.DrawBoxes && (now - _lastProcessingOverlaysUpdatedUtc).TotalSeconds <= 2.5
+                Settings.DrawBoxes && IsOverlayActive(_lastProcessingOverlaysUpdatedUtc, now)
                     ? _lastProcessingOverlays.Select(ToLiveOverlayPrimitive).ToArray()
                     : [];
 
@@ -651,10 +656,18 @@ public class CameraRuntime : IDisposable
 
     private void UpdatePlateOverlays(Mat frame, IReadOnlyList<AnalysisDetection> detections)
     {
-        foreach (AnalysisDetection detection in detections.Where(d => d.Kind == AnalysisKind.Plate))
+        AnalysisDetection? detection = detections
+            .Where(item => item.Kind == AnalysisKind.Plate)
+            .OrderByDescending(item => item.Confidence)
+            .FirstOrDefault();
+        if (detection is not null)
         {
             Rectangle bounds = Rectangle.Intersect(detection.Bounds, new Rectangle(Point.Empty, frame.Size));
-            if (bounds.Width <= 0 || bounds.Height <= 0) continue;
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+            {
+                CleanupPlateOverlays();
+                return;
+            }
 
             bool accepted = detection.Metadata?.TryGetValue("Accepted", out object? acceptedValue) == true && acceptedValue is bool acceptedFlag && acceptedFlag;
             string text = detection.Metadata?.TryGetValue("PlateText", out object? textValue) == true && textValue is string plateText
@@ -671,8 +684,8 @@ public class CameraRuntime : IDisposable
             using Bitmap bitmap = crop.ToBitmap();
             lock (_overlayGate)
             {
-                if (_plateOverlay.Remove(key, out PlateOverlayInfo? old)) old.Crop?.Dispose();
-                _plateOverlay[key] = new PlateOverlayInfo(
+                if (_plateOverlay.Remove(AnalysisKind.Plate, out PlateOverlayInfo? old)) old.Crop?.Dispose();
+                _plateOverlay[AnalysisKind.Plate] = new PlateOverlayInfo(
                     key, detection, text, detection.Confidence, DateTime.UtcNow, new Bitmap(bitmap), accepted);
             }
         }
@@ -794,18 +807,23 @@ public class CameraRuntime : IDisposable
     {
         lock (_overlayGate)
         {
-            foreach (AnalysisDetection detection in detections)
+            foreach (AnalysisDetection detection in detections
+                .Where(item => item.Kind != AnalysisKind.Plate)
+                .GroupBy(item => item.Kind)
+                .Select(group => group.OrderByDescending(item => item.Confidence).First()))
             {
-                if (detection.Kind == AnalysisKind.Plate) continue;
                 string processingKey = GetProcessingItemKey(detection);
                 string key = detection.TrackId is int trackId
                     ? $"{processingKey}:{detection.Kind}:{trackId}"
                     : $"{processingKey}:{detection.Kind}:{detection.Label}:{detection.Bounds.X}:{detection.Bounds.Y}";
-                _analysisOverlay[key] = new AnalysisOverlayInfo(key, detection, DateTime.UtcNow);
+                _analysisOverlay[detection.Kind] = new AnalysisOverlayInfo(key, detection, DateTime.UtcNow);
             }
             DateTime now = DateTime.UtcNow;
-            foreach (string key in _analysisOverlay.Where(x => (now - x.Value.UpdatedUtc).TotalSeconds > 2.5).Select(x => x.Key).ToList())
-                _analysisOverlay.Remove(key);
+            foreach (AnalysisKind kind in _analysisOverlay
+                .Where(item => !IsOverlayActive(item.Value.UpdatedUtc, now))
+                .Select(item => item.Key)
+                .ToList())
+                _analysisOverlay.Remove(kind);
         }
     }
 
@@ -814,7 +832,10 @@ public class CameraRuntime : IDisposable
         lock (_overlayGate)
         {
             DateTime now = DateTime.UtcNow;
-            return _analysisOverlay.Values.Where(x => (now - x.UpdatedUtc).TotalSeconds <= 2.5).Select(x => x.Detection).ToArray();
+            return _analysisOverlay.Values
+                .Where(item => IsOverlayActive(item.UpdatedUtc, now))
+                .Select(item => item.Detection)
+                .ToArray();
         }
     }
 
@@ -833,7 +854,7 @@ public class CameraRuntime : IDisposable
     {
         lock (_overlayGate)
         {
-            if ((DateTime.UtcNow - _lastProcessingOverlaysUpdatedUtc).TotalSeconds > 2.5)
+            if (!IsOverlayActive(_lastProcessingOverlaysUpdatedUtc, DateTime.UtcNow))
                 return [];
 
             return _lastProcessingOverlays;
@@ -1021,7 +1042,8 @@ public class CameraRuntime : IDisposable
 
             foreach (PlateOverlayInfo overlay in _plateOverlay.Values)
             {
-            AnalysisDetection detection = overlay.Detection;
+                if (!IsOverlayActive(overlay.UpdatedUtc, DateTime.UtcNow)) continue;
+                AnalysisDetection detection = overlay.Detection;
 
             RectangleF plateRectangle = new(
                 detection.Bounds.X * scaleX,
@@ -1109,8 +1131,8 @@ public class CameraRuntime : IDisposable
         lock (_overlayGate)
         {
             DateTime now = DateTime.UtcNow;
-            foreach (string key in _plateOverlay
-                .Where(x => (now - x.Value.UpdatedUtc).TotalSeconds > 2.5)
+            foreach (AnalysisKind key in _plateOverlay
+                .Where(x => !IsOverlayActive(x.Value.UpdatedUtc, now))
                 .Select(x => x.Key).ToList())
             {
                 if (_plateOverlay.Remove(key, out PlateOverlayInfo? old)) old.Crop?.Dispose();

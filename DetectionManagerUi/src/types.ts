@@ -48,6 +48,7 @@ export interface CameraSettings {
   bufferCount: number;
   reconnectDelaySec: number;
   drawBoxes: boolean;
+  detectionOverlayHoldMs: number;
   motionGateEnabled: boolean;
   motionFps: number;
   motionThreshold: number;

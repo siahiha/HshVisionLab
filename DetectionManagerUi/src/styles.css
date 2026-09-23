@@ -613,6 +613,17 @@ button { -webkit-tap-highlight-color: transparent; }
 /* Give the camera wall the dominant width on the dashboard. */
 .dashboard-live-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 250px); }
 .detection-history-panel { width: 100%; max-width: 250px; }
+
+/* Event history retention controls. */
+.event-delete-tools { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.event-delete-tools .event-date-input { width: 128px; min-width: 128px; }
+.event-delete-error, .event-delete-notice { max-width: 230px; font-size: 9px; line-height: 1.5; }
+.event-delete-error { color: #ff9ba4; }
+.event-delete-notice { color: #63ddb0; }
+@media (max-width: 820px) {
+  .event-delete-tools { flex-wrap: nowrap; }
+  .event-delete-error, .event-delete-notice { flex: 0 0 auto; }
+}
 .stats-grid { gap: 8px; margin: 8px 0; }
 .stat-card { gap: 9px; min-height: 0; padding: 10px 11px; }
 .stat-icon { width: 32px; height: 32px; border-radius: 6px; }

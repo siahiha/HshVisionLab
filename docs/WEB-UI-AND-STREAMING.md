@@ -1,5 +1,17 @@
 # رابط وب و مسیرهای دریافت/نمایش تصویر
 
+در توسعه، UI مستقل `DetectionManagerUi` با Vite روی پورت `5173` اجرا می‌شود. برای
+دسترسی از شبکهٔ محلی باید Vite روی همهٔ interfaceها bind شود:
+
+```powershell
+cd DetectionManagerUi
+npx vite --host 0.0.0.0 --port 5173
+```
+
+آدرس LAN فعلی این محیط `http://192.168.10.172:5173/` است؛ این IP ممکن است با
+تغییر شبکه عوض شود. سرویس تشخیص باید جداگانه روی `http://127.0.0.1:5080` فعال
+باشد و برای پخش WebRTC از دستگاه دیگر، پورت UDP WebRTC در Firewall مجاز باشد.
+
 برای مشخصات بازسازی route، component، اندازه‌ها و breakpointها، ابتدا
 [مشخصات مرجع بازسازی UI وب](WEB-UI-RECONSTRUCTION-SPEC.md) را بخوانید. این سند
 رفتار نهایی `DetectionManagerUi` و مسیر تصویر بین دوربین، موتور

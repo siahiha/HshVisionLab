@@ -97,6 +97,45 @@ public sealed class EventStore : IDisposable
         }
     }
 
+    public IReadOnlyList<string> Delete(DateTime? fromUtc, DateTime? toUtc)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            string? from = fromUtc?.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            string? to = toUtc?.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            var predicates = new List<string>();
+            if (from is not null) predicates.Add("OccurredAtUtc >= $from");
+            if (to is not null) predicates.Add("OccurredAtUtc <= $to");
+            string where = predicates.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", predicates);
+
+            using SqliteTransaction transaction = _connection.BeginTransaction();
+            using SqliteCommand select = _connection.CreateCommand();
+            select.Transaction = transaction;
+            select.CommandText = $"SELECT EventId FROM DetectionEvents{where};";
+            if (from is not null) Add(select, "$from", from);
+            if (to is not null) Add(select, "$to", to);
+            var eventIds = new List<string>();
+            using (SqliteDataReader reader = select.ExecuteReader())
+            {
+                while (reader.Read()) eventIds.Add(reader.GetString(0));
+            }
+
+            if (eventIds.Count > 0)
+            {
+                using SqliteCommand delete = _connection.CreateCommand();
+                delete.Transaction = transaction;
+                delete.CommandText = $"DELETE FROM DetectionEvents{where};";
+                if (from is not null) Add(delete, "$from", from);
+                if (to is not null) Add(delete, "$to", to);
+                delete.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+            return eventIds;
+        }
+    }
+
     public long CurrentSequence()
     {
         lock (_gate)

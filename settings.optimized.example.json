@@ -33,6 +33,7 @@
       "InputSize": 416,
       "Threads": 1,
       "DrawBoxes": true,
+      "DetectionOverlayHoldMs": 2500,
       "MotionGateEnabled": true,
       "MotionFps": 8,
       "MotionThreshold": 20,

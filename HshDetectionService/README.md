@@ -50,6 +50,7 @@ GET  /api/v1/face/samples/{sampleId}/image
 POST /api/v1/face/samples/{sampleId}/move
 
 GET /api/v1/events?afterSequence=0&limit=200
+DELETE /api/v1/events?fromUtc=...&toUtc=...  (هر دو خالی = حذف همه)
 GET /api/v1/events/{eventId}/artifacts/{artifactId}
 GET /api/v1/triggers
 POST /api/v1/triggers
@@ -59,7 +60,7 @@ POST/PATCH/DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 GET /api/v1/streams/{cameraId}/snapshot
 ```
 
-برای routeهای مدیریتی از `X-Hsh-Api-Key` استفاده می‌شود. به‌صورت پیش‌فرض دسترسی loopback بدون کلید برای ابزار تنظیمات محلی مجاز است و باید برای استقرار remote غیرفعال شود.
+برای حذف تاریخچه، `DELETE /api/v1/events` با `fromUtc` و `toUtc` به‌صورت ISO-8601 استفاده می‌شود؛ حذف بدون بازه تمام eventها و artifactهای تصویری آن‌ها را پاک می‌کند. برای routeهای مدیریتی از `X-Hsh-Api-Key` استفاده می‌شود. به‌صورت پیش‌فرض دسترسی loopback بدون کلید برای ابزار تنظیمات محلی مجاز است و باید برای استقرار remote غیرفعال شود.
 
 ## قرارداد رخداد
 

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr'
 import { useEffect, useState } from 'react'
 import { api, serviceUrl } from './api'
+import type { EventDeletionRange } from './api'
 import type { CameraSettings, ClientSubscription, DetectionEvent, TriggerDefinition } from './types'
 export const keys = { status: ['status'], cameras: ['cameras'], settings: ['settings'], capabilities: ['capabilities'], models: ['models'], people: ['people'], triggers: ['triggers'], events: ['events'] }
 export const clientSubscriptionKey = 'hsh-client-subscription'
@@ -39,6 +40,7 @@ export function useEvents(query = '', limit = 200) {
   return useQuery({ queryKey: [...keys.events, query, limit, subscriptionKey], queryFn: () => api.events(query, subscription, limit), refetchInterval: 5000 })
 }
 export function useEvent(id?: string) { return useQuery({ queryKey: ['event', id], queryFn: () => api.event(id!), enabled: Boolean(id) }) }
+export function useDeleteEvents() { const client = useQueryClient(); return useMutation({ mutationFn: (range: EventDeletionRange) => api.deleteEvents(range), onSuccess: () => { void client.invalidateQueries({ queryKey: keys.events }); void client.removeQueries({ queryKey: ['event'] }) } }) }
 export function useTriggers() { return useQuery({ queryKey: keys.triggers, queryFn: api.triggers }) }
 export function useCameraMutation() { const client = useQueryClient(); return useMutation({ mutationFn: (camera: CameraSettings) => api.saveCamera(camera), onSuccess: (_, camera) => { void client.invalidateQueries({ queryKey: keys.cameras }); void client.invalidateQueries({ queryKey: ['camera', camera.id] }); void client.invalidateQueries({ queryKey: keys.settings }) } }) }
 export function useCameraAction() { const client = useQueryClient(); return useMutation({ mutationFn: ({ id, action }: { id: string; action: 'start' | 'stop' | 'restart' }) => api.cameraAction(id, action), onSuccess: () => { void client.invalidateQueries({ queryKey: keys.cameras }); void client.invalidateQueries({ queryKey: keys.status }) } }) }

@@ -191,6 +191,7 @@ GET /api/v1/events/gaps
 GET /api/v1/events/export
 GET /api/v1/events/{eventId}/artifacts
 GET /api/v1/events/{eventId}/artifacts/{artifactId}
+DELETE /api/v1/events?fromUtc=...&toUtc=...
 ```
 
 پارامترهای query:
@@ -208,6 +209,8 @@ GET /api/v1/events/{eventId}/artifacts/{artifactId}
 برای مصرف زنده، Hub فعال رخداد:
 
 در implementation فعلی endpointهای `/api/v1/events/{eventId}/image`، `/api/v1/events/gaps` و `/api/v1/events/export` وجود ندارند. Queryهای واقعی شامل `afterSequence`، `limit`، `cameraId`، `scenario`، `fromUtc`، `toUtc` و فیلترهای subscription شامل `clientMode`، `faceRequired`، `plateRequired`، `includeUnknownFace`، `windowMs`، `clientCameraIds` و `clientRoiIds` هستند.
+
+`DELETE /api/v1/events` تاریخچه را حذف می‌کند. اگر هر دو پارامتر `fromUtc` و `toUtc` خالی باشند، همهٔ رخدادها حذف می‌شوند؛ در غیر این صورت بازهٔ زمانی انتخاب‌شده حذف می‌شود. `fromUtc` و `toUtc` باید timestamp معتبر ISO-8601 باشند. پوشهٔ artifact هر رخداد نیز پس از حذف رکورد پاک می‌شود و پاسخ شامل `deletedCount` است.
 
 ```text
 /hubs/detections

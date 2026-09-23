@@ -85,6 +85,8 @@ public class CameraSettings
     public int InputSize { get; set; } = 416;
     public int Threads { get; set; } = 1;
     public bool DrawBoxes { get; set; } = true;
+    /// <summary>How long the latest detection overlay remains visible, in milliseconds.</summary>
+    public int DetectionOverlayHoldMs { get; set; } = 2500;
     public bool MotionGateEnabled { get; set; } = true;
     public int MotionFps { get; set; } = 8;
     public double MotionThreshold { get; set; } = 20;
@@ -425,6 +427,7 @@ public sealed class AppSettings
     public int InputSize { get; set; } = 416;
     public int Threads { get; set; } = 1;
     public bool DrawBoxes { get; set; } = true;
+    public int DetectionOverlayHoldMs { get; set; } = 2500;
     public bool MotionGateEnabled { get; set; } = true;
     public int MotionFps { get; set; } = 8;
     public double MotionThreshold { get; set; } = 20;
@@ -487,6 +490,7 @@ public sealed class AppSettings
                         BufferCount = loaded.BufferCount, ReconnectDelaySec = loaded.ReconnectDelaySec,
                         Confidence = loaded.Confidence, NmsIoU = loaded.NmsIoU, MaxFps = loaded.MaxFps,
                         InputSize = loaded.InputSize, Threads = loaded.Threads, DrawBoxes = loaded.DrawBoxes,
+                        DetectionOverlayHoldMs = loaded.DetectionOverlayHoldMs,
                         MotionGateEnabled = loaded.MotionGateEnabled, MotionFps = loaded.MotionFps,
                         MotionThreshold = loaded.MotionThreshold, MotionChangedPercent = loaded.MotionChangedPercent,
                         MotionRoiScalePercent = loaded.MotionRoiScalePercent,
