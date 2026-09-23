@@ -58,7 +58,6 @@ npm run dev
 - نوار اکشن بالایی و tileهای دوربین با کنترل‌های Start/Stop، Edit و نمای کامل؛ زیر layout اصلی داشبورد نیز پنل واقعی `وضعیت runtime` برای پنج دوربین اول وجود دارد
 - پنل `Detected events` در کنار تصویر با crop تشخیص، نام دوربین، label، confidence و زمان؛ کارت‌های صرفاً متنی جایگزین این پنل نیستند
 - صفحهٔ تاریخچهٔ تشخیص امکان حذف همهٔ eventها، بازه‌های آماده و بازهٔ سفارشی را با تأیید کاربر دارد؛ artifactهای تصویری حذف‌شده نیز پاک می‌شوند
-- در تنظیمات عمومی دوربین، `Duplicate event cooldown` رخداد canonical تکراری را بر اساس دوربین، ROI، پلاک و هویت چهره کنترل می‌کند؛ برای رخداد `Plate+Face` همان جفت تا پایان cooldown دوباره ذخیره یا اعلام نمی‌شود
 - ادیتور تصویری ROI چندضلعی با نقاط نرمال‌شده، نام/فعال‌بودن ROI و ترتیب اجرای taskها
 - نمای متمرکز دوربین تصویر همان دوربین را در workspace میانی نشان می‌دهد و به‌صورت خودکار وارد edit نمی‌شود؛ ابزارهای ویرایش، ROI جدید، حذف، ذخیره، لغو و بازگشت مستقل‌اند
 - تنظیمات کامل General/Capture، FFmpeg، LibVLC یا MediaMTX، TCP/UDP، reconnect، buffer و Motion Gate
@@ -70,7 +69,7 @@ npm run dev
 - Face Database کامل: افراد نام‌دار/Unknown، rename، حذف sample/person، enrollment چندتصویری، انتقال sample و Similarity/Merge
 - مشاهدهٔ eventهای پایدار، فریم کامل، ROI/Plate/Face crop، metadata جزئی و payload کامل trigger
 - اتصال SignalR با نگهداری sequence و replay پس از reconnect؛ polling فقط fallback است
-- triggerهای سناریویی Plate، Face و Plate+Face با camera scope، identity، confidence، cooldown، LiveEvent و Webhook
+- triggerهای سناریویی Plate، Face و Plate+Face با camera scope، identity، confidence و `History event cooldown (sec)`؛ cooldown هر تریگر از Event Store بررسی می‌شود و برای کلید همان سناریو اعمال می‌شود
 - مدیریت سرویس، listener، API key، retention، runtime reload، capability registry و inventory مدل‌ها
 
 ## ساخت production

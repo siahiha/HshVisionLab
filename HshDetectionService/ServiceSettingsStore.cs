@@ -40,6 +40,7 @@ public sealed class ServiceSettingsStore
             _service.Association ??= new ServiceAssociationSettings();
             _service.Retention ??= new ServiceRetentionSettings();
             _service.Triggers ??= [];
+            NormalizeTriggers(_service.Triggers);
             if (string.IsNullOrWhiteSpace(_service.ServiceNodeId)) _service.ServiceNodeId = Guid.NewGuid().ToString("N");
             if (string.IsNullOrWhiteSpace(_service.Security.ApiKey)) _service.Security.ApiKey = Guid.NewGuid().ToString("N");
 
@@ -89,6 +90,7 @@ public sealed class ServiceSettingsStore
             settings.Runtime ??= new ServiceRuntimeSettings();
             settings.Retention ??= new ServiceRetentionSettings();
             settings.Triggers ??= [];
+            NormalizeTriggers(settings.Triggers);
             _service = settings;
             SaveServiceUnsafe();
         }
@@ -128,6 +130,20 @@ public sealed class ServiceSettingsStore
     private static T JsonClone<T>(T value)
     {
         return JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, ServiceJson.Options), ServiceJson.Options)!;
+    }
+
+    private static void NormalizeTriggers(IList<TriggerDefinition> triggers)
+    {
+        foreach (TriggerDefinition trigger in triggers)
+        {
+            trigger.Id = string.IsNullOrWhiteSpace(trigger.Id) ? Guid.NewGuid().ToString("N") : trigger.Id;
+            trigger.Name = string.IsNullOrWhiteSpace(trigger.Name) ? "Trigger" : trigger.Name.Trim();
+            trigger.CameraIds ??= [];
+            trigger.TaskIds ??= [];
+            trigger.Kinds ??= [];
+            trigger.Actions ??= [];
+            trigger.CooldownSeconds = Math.Clamp(trigger.CooldownSeconds, 0, 3600);
+        }
     }
 }
 

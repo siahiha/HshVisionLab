@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 
 namespace HshDetectionService;
@@ -21,7 +22,7 @@ public sealed class EventStore : IDisposable
         }.ToString());
         _connection.Open();
         using SqliteCommand pragma = _connection.CreateCommand();
-        pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;";
+        pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;";
         pragma.ExecuteNonQuery();
         EnsureSchema();
     }
@@ -51,6 +52,22 @@ public sealed class EventStore : IDisposable
             Add(update, "$payload", JsonSerializer.Serialize(envelope, ServiceJson.Options));
             Add(update, "$sequence", sequence);
             update.ExecuteNonQuery();
+
+            if (envelope.Trigger["matchingTriggerKeys"] is JsonObject triggerKeys)
+            {
+                foreach ((string triggerId, JsonNode? keyNode) in triggerKeys)
+                {
+                    if (keyNode?.GetValue<string>() is not string triggerKey) continue;
+                    using SqliteCommand history = _connection.CreateCommand();
+                    history.Transaction = transaction;
+                    history.CommandText = "INSERT INTO TriggerHistory(EventSequence, TriggerId, TriggerKey, OccurredAtUtc) VALUES ($sequence, $triggerId, $triggerKey, $occurred);";
+                    Add(history, "$sequence", sequence);
+                    Add(history, "$triggerId", triggerId);
+                    Add(history, "$triggerKey", triggerKey);
+                    Add(history, "$occurred", envelope.OccurredAtUtc.ToUniversalTime().ToString("O"));
+                    history.ExecuteNonQuery();
+                }
+            }
             transaction.Commit();
             return envelope;
         }
@@ -97,6 +114,20 @@ public sealed class EventStore : IDisposable
         }
     }
 
+    public bool HasRecentTriggerEvent(string triggerId, string triggerKey, DateTime sinceUtc)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM TriggerHistory WHERE TriggerId = $triggerId AND TriggerKey = $triggerKey AND OccurredAtUtc >= $since LIMIT 1);";
+            Add(command, "$triggerId", triggerId);
+            Add(command, "$triggerKey", triggerKey);
+            Add(command, "$since", sinceUtc.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            return Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) != 0;
+        }
+    }
+
     public IReadOnlyList<string> Delete(DateTime? fromUtc, DateTime? toUtc)
     {
         lock (_gate)
@@ -112,17 +143,31 @@ public sealed class EventStore : IDisposable
             using SqliteTransaction transaction = _connection.BeginTransaction();
             using SqliteCommand select = _connection.CreateCommand();
             select.Transaction = transaction;
-            select.CommandText = $"SELECT EventId FROM DetectionEvents{where};";
+            select.CommandText = $"SELECT Sequence, EventId FROM DetectionEvents{where};";
             if (from is not null) Add(select, "$from", from);
             if (to is not null) Add(select, "$to", to);
             var eventIds = new List<string>();
+            var eventSequences = new List<long>();
             using (SqliteDataReader reader = select.ExecuteReader())
             {
-                while (reader.Read()) eventIds.Add(reader.GetString(0));
+                while (reader.Read())
+                {
+                    eventSequences.Add(reader.GetInt64(0));
+                    eventIds.Add(reader.GetString(1));
+                }
             }
 
             if (eventIds.Count > 0)
             {
+                foreach (long eventSequence in eventSequences)
+                {
+                    using SqliteCommand deleteHistory = _connection.CreateCommand();
+                    deleteHistory.Transaction = transaction;
+                    deleteHistory.CommandText = "DELETE FROM TriggerHistory WHERE EventSequence = $sequence;";
+                    Add(deleteHistory, "$sequence", eventSequence);
+                    deleteHistory.ExecuteNonQuery();
+                }
+
                 using SqliteCommand delete = _connection.CreateCommand();
                 delete.Transaction = transaction;
                 delete.CommandText = $"DELETE FROM DetectionEvents{where};";
@@ -171,6 +216,15 @@ public sealed class EventStore : IDisposable
             );
             CREATE INDEX IF NOT EXISTS IX_DetectionEvents_EventId ON DetectionEvents(EventId);
             CREATE INDEX IF NOT EXISTS IX_DetectionEvents_OccurredAtUtc ON DetectionEvents(OccurredAtUtc);
+            CREATE TABLE IF NOT EXISTS TriggerHistory(
+                EventSequence INTEGER NOT NULL,
+                TriggerId TEXT NOT NULL,
+                TriggerKey TEXT NOT NULL,
+                OccurredAtUtc TEXT NOT NULL,
+                PRIMARY KEY(EventSequence, TriggerId),
+                FOREIGN KEY(EventSequence) REFERENCES DetectionEvents(Sequence) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS IX_TriggerHistory_Lookup ON TriggerHistory(TriggerId, TriggerKey, OccurredAtUtc);
             """;
         command.ExecuteNonQuery();
     }

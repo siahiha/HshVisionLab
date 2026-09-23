@@ -26,15 +26,12 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private readonly IHubContext<DetectionHub> _hub;
     private readonly WebRtcGateway _webrtc;
     private readonly Dictionary<string, Camera> _cameras = new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _triggerGate = new();
-    private readonly Dictionary<string, DateTime> _triggerLastFiredUtc = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, LatestFrameSlot> _latestFrames = new(StringComparer.OrdinalIgnoreCase);
     private Channel<DetectionWork> _eventQueue = CreateEventQueue(10_000);
     private readonly object _associationGate = new();
     private readonly List<PendingComponent> _pendingComponents = [];
     private readonly Dictionary<string, DateTime> _emittedAssociationTimes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTime> _emittedComponentTimes = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DateTime> _emittedEventTimes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _associationTimer;
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _eventWorker;
@@ -469,7 +466,6 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             _pendingComponents.Clear();
             _emittedAssociationTimes.Clear();
             _emittedComponentTimes.Clear();
-            _emittedEventTimes.Clear();
         }
     }
 
@@ -495,20 +491,10 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
             bool associationDuplicate = _emittedAssociationTimes.TryGetValue(associationKey, out DateTime previous) &&
                 (now - previous).TotalSeconds < 5;
-            bool eventDuplicate = false;
-            string eventKey = BuildEventDeduplicationKey(work);
-            int cooldownSeconds = GetDuplicateEventCooldownSeconds(work.CameraId);
-            if (!associationDuplicate && cooldownSeconds > 0)
-            {
-                eventDuplicate = _emittedEventTimes.TryGetValue(eventKey, out DateTime eventPrevious) &&
-                    (now - eventPrevious).TotalSeconds < cooldownSeconds;
-            }
-
-            duplicate = associationDuplicate || eventDuplicate;
+            duplicate = associationDuplicate;
             if (!duplicate)
             {
                 _emittedAssociationTimes[associationKey] = now;
-                if (cooldownSeconds > 0) _emittedEventTimes[eventKey] = now;
                 foreach (PendingComponent component in work.Components)
                     _emittedComponentTimes[string.Concat(component.CameraId, ":", component.RoiKey, ":", component.ComponentKey)] = now;
             }
@@ -520,10 +506,6 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 .Where(item => (now - item.Value).TotalMinutes > 1)
                 .Select(item => item.Key).ToArray())
                 _emittedComponentTimes.Remove(oldKey);
-            foreach (string oldKey in _emittedEventTimes
-                .Where(item => (now - item.Value).TotalHours > 24)
-                .Select(item => item.Key).ToArray())
-                _emittedEventTimes.Remove(oldKey);
         }
 
         if (duplicate)
@@ -540,40 +522,6 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         }
     }
 
-    private int GetDuplicateEventCooldownSeconds(string cameraId)
-    {
-        CameraSettings? camera = _settings.Cameras.FirstOrDefault(item =>
-            item.Id.Equals(cameraId, StringComparison.OrdinalIgnoreCase));
-        return Math.Clamp(camera?.DuplicateEventCooldownSeconds ?? 60, 0, 3600);
-    }
-
-    private static string BuildEventDeduplicationKey(DetectionWork work)
-    {
-        string camera = NormalizeEventKeyPart(work.CameraId);
-        string roi = string.Join(",", work.Components
-            .Select(item => NormalizeEventKeyPart(item.RoiKey))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
-        string plates = string.Join(",", work.Components
-            .Where(item => item.Detection.Kind == AnalysisKind.Plate)
-            .Select(item => NormalizeEventKeyPart(
-                GetMetadataString(item.Detection, "PlateText") ?? item.Detection.Label))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
-        string faces = string.Join(",", work.Components
-            .Where(item => item.Detection.Kind == AnalysisKind.Face)
-            .Select(item => NormalizeEventKeyPart(
-                GetMetadataString(item.Detection, "IdentityId") ?? item.Detection.Label))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
-
-        // Do not include TrackId: tracking IDs can change while the same
-        // plate/person remains in view. The pair itself is the stable key.
-        return string.Join("\u001f", camera, roi, plates, faces);
-    }
-
-    private static string NormalizeEventKeyPart(string? value) =>
-        (value ?? string.Empty).Trim().ToUpperInvariant();
 
     private static Channel<DetectionWork> CreateEventQueue(int configuredCapacity)
     {
@@ -749,7 +697,9 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 ["matched"] = triggerEvaluation.Matched.Count > 0,
                 ["cooldownApplied"] = triggerEvaluation.CooldownApplied,
                 ["matchingTriggerIds"] = new JsonArray(triggerEvaluation.Matched.Select(trigger => JsonValue.Create(trigger.Id)).ToArray()),
-                ["suppressedTriggerIds"] = new JsonArray(triggerEvaluation.Suppressed.Select(trigger => JsonValue.Create(trigger.Id)).ToArray())
+                ["suppressedTriggerIds"] = new JsonArray(triggerEvaluation.Suppressed.Select(trigger => JsonValue.Create(trigger.Id)).ToArray()),
+                ["matchingTriggerKeys"] = TriggerKeysJson(triggerEvaluation.MatchedKeys),
+                ["suppressedTriggerKeys"] = TriggerKeysJson(triggerEvaluation.SuppressedKeys)
             }
         };
 
@@ -843,6 +793,104 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         return true;
     }
 
+    private static bool TriggerMatchesComponents(
+        TriggerDefinition trigger,
+        string cameraId,
+        IReadOnlyList<PendingComponent> components)
+    {
+        if (!trigger.Enabled) return false;
+        if (trigger.CameraIds.Count > 0 && !trigger.CameraIds.Contains(cameraId, StringComparer.OrdinalIgnoreCase)) return false;
+
+        bool pairRequired = trigger.Kinds.Any(IsPlateFaceKind);
+        bool plateRequired = pairRequired || trigger.Kinds.Any(IsPlateKind);
+        bool faceRequired = pairRequired || trigger.Kinds.Any(IsFaceKind);
+        if (!plateRequired && !faceRequired)
+        {
+            return components.Any(item =>
+            {
+                AnalysisDetection detection = item.Detection;
+                string taskId = GetMetadataString(detection, "ProcessingItemId") ?? string.Empty;
+                return MatchesTrigger(trigger, cameraId, taskId, detection.Kind.ToString(), detection.Label, detection.Confidence, detection);
+            });
+        }
+
+        IReadOnlyList<PendingComponent> plates = components.Where(item => item.Detection.Kind == AnalysisKind.Plate).ToArray();
+        IReadOnlyList<PendingComponent> faces = components.Where(item => item.Detection.Kind == AnalysisKind.Face).ToArray();
+        if (plateRequired && plates.Count == 0) return false;
+        if (faceRequired && faces.Count == 0) return false;
+
+        IEnumerable<PendingComponent> required = plateRequired && faceRequired
+            ? plates.Concat(faces)
+            : plateRequired ? plates : faces;
+        PendingComponent[] requiredComponents = required.ToArray();
+        if (trigger.TaskIds.Count > 0 && !requiredComponents.Any(item =>
+                trigger.TaskIds.Contains(GetMetadataString(item.Detection, "ProcessingItemId") ?? string.Empty, StringComparer.OrdinalIgnoreCase)))
+            return false;
+        if (!string.IsNullOrWhiteSpace(trigger.LabelEquals) && !requiredComponents.Any(item =>
+                string.Equals(trigger.LabelEquals, item.Detection.Label, StringComparison.OrdinalIgnoreCase)))
+            return false;
+        if (trigger.MinimumConfidence is float minimum && requiredComponents.Any(item => item.Detection.Confidence < minimum)) return false;
+        if (!string.IsNullOrWhiteSpace(trigger.PlateTextEquals) && !plates.Any(item =>
+                string.Equals(trigger.PlateTextEquals, GetMetadataString(item.Detection, "PlateText") ?? item.Detection.Label, StringComparison.OrdinalIgnoreCase)))
+            return false;
+        if (!string.IsNullOrWhiteSpace(trigger.IdentityId) && !faces.Any(item =>
+                string.Equals(trigger.IdentityId, GetMetadataString(item.Detection, "IdentityId"), StringComparison.OrdinalIgnoreCase)))
+            return false;
+        return true;
+    }
+
+    private static bool IsPlateFaceKind(string kind) =>
+        kind.Equals("PlateFaceMatch", StringComparison.OrdinalIgnoreCase) ||
+        kind.Equals("PlateFaceAssociation", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPlateKind(string kind) =>
+        kind.Equals("PlateRecognition", StringComparison.OrdinalIgnoreCase) ||
+        kind.Equals("Plate", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFaceKind(string kind) =>
+        kind.Equals("FaceRecognition", StringComparison.OrdinalIgnoreCase) ||
+        kind.Equals("Face", StringComparison.OrdinalIgnoreCase);
+
+    private static string BuildTriggerHistoryKey(
+        TriggerDefinition trigger,
+        string cameraId,
+        IReadOnlyList<PendingComponent> components)
+    {
+        bool pairRequired = trigger.Kinds.Any(IsPlateFaceKind);
+        bool plateRequired = pairRequired || trigger.Kinds.Any(IsPlateKind);
+        bool faceRequired = pairRequired || trigger.Kinds.Any(IsFaceKind);
+        IEnumerable<PendingComponent> selected = plateRequired || faceRequired
+            ? components.Where(item =>
+                (plateRequired && item.Detection.Kind == AnalysisKind.Plate) ||
+                (faceRequired && item.Detection.Kind == AnalysisKind.Face))
+            : components;
+
+        string roi = string.Join(",", selected
+            .Select(item => NormalizeTriggerKeyPart(item.RoiKey))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        string plates = string.Join(",", selected
+            .Where(item => item.Detection.Kind == AnalysisKind.Plate)
+            .Select(item => NormalizeTriggerKeyPart(GetMetadataString(item.Detection, "PlateText") ?? item.Detection.Label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        string faces = string.Join(",", selected
+            .Where(item => item.Detection.Kind == AnalysisKind.Face)
+            .Select(item => NormalizeTriggerKeyPart(GetMetadataString(item.Detection, "IdentityId") ?? item.Detection.Label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        return string.Join("\u001f", NormalizeTriggerKeyPart(cameraId), roi, plates, faces);
+    }
+
+    private static string NormalizeTriggerKeyPart(string? value) => (value ?? string.Empty).Trim().ToUpperInvariant();
+
+    private static JsonObject TriggerKeysJson(IReadOnlyDictionary<string, string> keys)
+    {
+        var result = new JsonObject();
+        foreach ((string triggerId, string key) in keys) result[triggerId] = key;
+        return result;
+    }
+
     private TriggerEvaluation EvaluateTriggers(
         IReadOnlyList<TriggerDefinition> triggers,
         string cameraId,
@@ -850,42 +898,24 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     {
         var matched = new List<TriggerDefinition>();
         var suppressed = new List<TriggerDefinition>();
+        var matchedKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var suppressedKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         DateTime now = DateTime.UtcNow;
-        lock (_triggerGate)
+        foreach (TriggerDefinition trigger in triggers)
         {
-            foreach (TriggerDefinition trigger in triggers)
+            if (!TriggerMatchesComponents(trigger, cameraId, components)) continue;
+            string triggerKey = BuildTriggerHistoryKey(trigger, cameraId, components);
+            int cooldownSeconds = Math.Clamp(trigger.CooldownSeconds, 0, 3600);
+            if (cooldownSeconds > 0 && _eventStore.HasRecentTriggerEvent(trigger.Id, triggerKey, now.AddSeconds(-cooldownSeconds)))
             {
-                bool combined = components.Any(item => item.Detection.Kind == AnalysisKind.Plate) &&
-                    components.Any(item => item.Detection.Kind == AnalysisKind.Face);
-                bool triggerMatches = combined && trigger.Kinds.Any(kind =>
-                    kind.Equals("PlateFaceMatch", StringComparison.OrdinalIgnoreCase) ||
-                    kind.Equals("PlateFaceAssociation", StringComparison.OrdinalIgnoreCase));
-                if (!triggerMatches)
-                {
-                    triggerMatches = components.Any(item =>
-                    {
-                        AnalysisDetection detection = item.Detection;
-                        string taskId = GetMetadataString(detection, "ProcessingItemId") ?? string.Empty;
-                        return MatchesTrigger(trigger, cameraId, taskId, detection.Kind.ToString(), detection.Label, detection.Confidence, detection);
-                    });
-                }
-                if (!triggerMatches) continue;
-                if (trigger.CooldownSeconds > 0 && _triggerLastFiredUtc.TryGetValue(trigger.Id, out DateTime previous) &&
-                    (now - previous).TotalSeconds < trigger.CooldownSeconds)
-                {
-                    suppressed.Add(trigger);
-                    continue;
-                }
-                _triggerLastFiredUtc[trigger.Id] = now;
-                matched.Add(trigger);
+                suppressed.Add(trigger);
+                suppressedKeys[trigger.Id] = triggerKey;
+                continue;
             }
-
-            foreach (string triggerId in _triggerLastFiredUtc
-                .Where(item => (now - item.Value).TotalHours > 24)
-                .Select(item => item.Key).ToArray())
-                _triggerLastFiredUtc.Remove(triggerId);
+            matched.Add(trigger);
+            matchedKeys[trigger.Id] = triggerKey;
         }
-        return new TriggerEvaluation(matched, suppressed);
+        return new TriggerEvaluation(matched, suppressed, matchedKeys, suppressedKeys);
     }
 
     private static bool IsAccepted(AnalysisDetection detection) => GetMetadataBool(detection, "Accepted") || detection.Confidence >= GetMetadataFloat(detection, "OverlayThreshold");
@@ -977,7 +1007,11 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         }
     }
 
-    private sealed record TriggerEvaluation(IReadOnlyList<TriggerDefinition> Matched, IReadOnlyList<TriggerDefinition> Suppressed)
+    private sealed record TriggerEvaluation(
+        IReadOnlyList<TriggerDefinition> Matched,
+        IReadOnlyList<TriggerDefinition> Suppressed,
+        IReadOnlyDictionary<string, string> MatchedKeys,
+        IReadOnlyDictionary<string, string> SuppressedKeys)
     {
         public bool CooldownApplied => Suppressed.Count > 0;
     }

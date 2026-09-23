@@ -124,7 +124,6 @@ function normalizeCameraSettings(value: CameraSettings): CameraSettings {
   return {
     ...raw,
     processingSchemaVersion: 3,
-    duplicateEventCooldownSeconds: n(raw.duplicateEventCooldownSeconds, 60),
     rois: rois.map((item, index) => {
       const roi = item as Partial<NamedRoi>;
       const points = Array.isArray(roi.points) ? roi.points : [];
@@ -2545,20 +2544,6 @@ function GeneralSettings({
               onChange={(e) => update("detectionOverlayHoldMs", Number(e.target.value))}
             />
           </Field>
-          <Field
-            label="جلوگیری از رخداد تکراری (ثانیه)"
-            hint="0 یعنی غیرفعال؛ برای کلید ترکیبی پلاک، چهره و ROI"
-          >
-            <input
-              type="number"
-              min="0"
-              max="3600"
-              value={draft.duplicateEventCooldownSeconds}
-              onChange={(e) =>
-                update("duplicateEventCooldownSeconds", Number(e.target.value))
-              }
-            />
-          </Field>
         </div>
       </section>
       <section className="panel">
@@ -4452,7 +4437,10 @@ function TriggerEditor({
             <option>PlateFaceMatch</option>
           </select>
         </Field>
-        <Field label="Cooldown (sec)">
+        <Field
+          label="History event cooldown (sec)"
+          hint="0 یعنی بدون محدودیت تاریخچه؛ کلید بر اساس سناریوی همین تریگر ساخته می‌شود"
+        >
           <input
             type="number"
             min="0"
