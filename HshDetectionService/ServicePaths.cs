@@ -4,10 +4,11 @@ public sealed class ServicePaths
 {
     public ServicePaths()
     {
-        string? configured = Environment.GetEnvironmentVariable("HSH_DETECTION_SERVICE_DATA_ROOT");
-        Root = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HshVision", "DetectionService")
-            : Path.GetFullPath(configured);
+        // Keep all service-owned state beside the service executable.  Using
+        // AppContext.BaseDirectory also makes the path independent of the
+        // Windows service working directory (which may be System32 or another
+        // location when the service is started by SCM).
+        Root = Path.GetFullPath(AppContext.BaseDirectory);
 
         ConfigDirectory = Path.Combine(Root, "config");
         DatabaseDirectory = Path.Combine(Root, "database");

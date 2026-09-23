@@ -5,7 +5,6 @@
 ## اجرا در توسعه
 
 ```powershell
-$env:HSH_DETECTION_SERVICE_DATA_ROOT = 'D:\HshVision\DetectionService'
 dotnet run --project .\HshDetectionService\HshDetectionService.csproj
 ```
 
@@ -22,12 +21,12 @@ dotnet build .\HshDetectionService\HshDetectionService.csproj -c Debug
 
 اگر سرویس Windows در حال اجراست، قبل از build باید آن را با دسترسی Administrator متوقف کنید تا فایل executable قفل نباشد، سپس بعد از build دوباره start کنید.
 
-اگر متغیر محیطی تنظیم نشود، data root برابر `%ProgramData%\HshVision\DetectionService` است. سرویس هنگام اجرا فایل‌های زیر را ایجاد می‌کند:
+data root سرویس برابر پوشهٔ اجرای `HshDetectionService.exe` است. سرویس هنگام اجرا فایل‌های زیر را در همین پوشه ایجاد می‌کند:
 
-- `settings.json`: همان `AppSettings` برنامهٔ HshVisionLab
-- `service-settings.json`: تنظیمات HTTP، امنیت، retention و triggerها
-- `databases\face-database.db`: دیتابیس SQLite چهره و sampleهای aligned
-- `databases\events.db`: event log ترتیبی برای replay
+- `config\settings.json`: همان `AppSettings` برنامهٔ HshVisionLab
+- `config\service-settings.json`: تنظیمات HTTP، امنیت، retention و triggerها
+- `database\face-database.db`: دیتابیس SQLite چهره و sampleهای aligned
+- `database\events.db`: event log ترتیبی برای replay
 - `media\event-artifacts`: فریم، ROI، crop تشخیص و aligned face
 
 ## APIهای اصلی

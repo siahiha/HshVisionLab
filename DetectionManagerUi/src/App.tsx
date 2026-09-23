@@ -1912,6 +1912,15 @@ function RawMediaMtxStream({
   className?: string;
   onLoadedMetadata?: React.ReactEventHandler<HTMLVideoElement>;
 }) {
+  const createViewerId = () => {
+    const uuid = globalThis.crypto?.randomUUID?.();
+    if (uuid) return `web-${uuid.replaceAll("-", "")}`;
+
+    // LAN-hosted HTTP pages are not secure contexts, so randomUUID() may be
+    // unavailable even though WebRTC itself is supported by the browser.
+    const random = Math.random().toString(36).slice(2);
+    return `web-${Date.now().toString(36)}${random}`;
+  };
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const [running, setRunning] = useState(false);
@@ -2055,7 +2064,7 @@ function RawMediaMtxStream({
       connecting = true;
       const session: ActiveSession = {
         pc: new RTCPeerConnection(),
-        viewerId: `web-${crypto.randomUUID().replaceAll("-", "")}`,
+        viewerId: createViewerId(),
         lastProgressAt: Date.now(),
       };
       const connection = session.pc;

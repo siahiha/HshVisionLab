@@ -11,7 +11,7 @@
 مسیر پیشنهادی:
 
 ```text
-%ProgramData%\HshVision\DetectionService\
+<پوشهٔ اجرای HshDetectionService.exe>\
  ├── config\
  │    ├── settings.json
  │    ├── service-settings.json
@@ -31,7 +31,7 @@
  └── logs\
 ```
 
-مسیر باید قابل override برای development و deploymentهای خاص باشد، ولی `AppContext.BaseDirectory` نباید تنها منبع مسیر در service باشد.
+تمام state پایدار سرویس، از جمله configuration و database، در همین data root کنار executable نگه‌داری می‌شود و به `%ProgramData%`، `%LocalAppData%` یا پوشهٔ موقت منتقل نمی‌شود.
 
 ## 3. تقسیم فایل‌ها
 

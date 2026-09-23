@@ -144,4 +144,4 @@ inference را ارائه می‌کند و UI با `VITE_HSH_API_BASE_URL` به 
 
 پروژه با Worker/Generic Host ساخته می‌شود و یک HTTP host نیز در همان process اجرا می‌شود. حالت Console برای توسعه و حالت Windows Service برای production هر دو باید فعال باشند.
 
-تنظیمات service account، دسترسی به `ProgramData`، دسترسی به مدل‌ها و دسترسی شبکهٔ RTSP بخشی از deployment است. سرویس نباید به desktop session یا UI کاربر وابسته باشد.
+تنظیمات service account، دسترسی نوشتن به data root کنار executable، دسترسی به مدل‌ها و دسترسی شبکهٔ RTSP بخشی از deployment است. سرویس نباید به desktop session یا UI کاربر وابسته باشد.

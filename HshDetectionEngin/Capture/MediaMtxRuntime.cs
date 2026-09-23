@@ -159,22 +159,12 @@ public sealed class MediaMtxRuntime : IDisposable
 
             string executable = ResolveExecutablePath();
             string config = ResolveConfigPath();
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(config)!);
-                // An explicitly supplied config belongs to the deployment and
-                // may contain network/security choices. Only generate the
-                // managed config when no custom file was supplied or it does
-                // not exist.
-                if (string.IsNullOrWhiteSpace(_options.ConfigPath) || !File.Exists(config))
-                    File.WriteAllText(config, BuildConfig());
-            }
-            catch when (string.IsNullOrWhiteSpace(_options.ConfigPath))
-            {
-                config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HshVision", "MediaMTX", "mediamtx-managed.yml");
-                Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+            // An explicitly supplied config belongs to the deployment and may
+            // contain network/security choices. Only generate the managed
+            // config when no custom file was supplied or it does not exist.
+            if (string.IsNullOrWhiteSpace(_options.ConfigPath) || !File.Exists(config))
                 File.WriteAllText(config, BuildConfig());
-            }
 
             var startInfo = new ProcessStartInfo
             {
@@ -353,8 +343,7 @@ public sealed class MediaMtxRuntime : IDisposable
     private string ResolveConfigPath()
     {
         if (!string.IsNullOrWhiteSpace(_options.ConfigPath)) return Path.GetFullPath(_options.ConfigPath);
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HshVision", "MediaMTX");
-        return Path.Combine(root, "mediamtx-managed.yml");
+        return Path.Combine(AppContext.BaseDirectory, "MediaMTX", "mediamtx-managed.yml");
     }
 
     private string BuildConfig()
