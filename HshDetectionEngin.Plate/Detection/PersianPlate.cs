@@ -59,6 +59,12 @@ internal static class PersianPlate
         [32] = "\u0632", // ز
     };
 
+    // Iranian private plates are eight characters in the OCR output:
+    // number-number-letter-number-number-number-number-number.
+    private static readonly Regex IranianPlatePattern = new(
+        @"^\d{2}[آ-ی]\d{5}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     /// <summary>Persian glyph for a class id, or empty string.</summary>
     public static string CharOf(int classId) =>
         CharMap.TryGetValue(classId, out var ch) ? ch : "";
@@ -76,6 +82,6 @@ internal static class PersianPlate
             .Replace('۰', '0').Replace('۱', '1').Replace('۲', '2')
             .Replace('۳', '3').Replace('۴', '4').Replace('۵', '5')
             .Replace('۶', '6').Replace('۷', '7').Replace('۸', '8').Replace('۹', '9');
-        return Regex.IsMatch(plate, @"^\d{2}[آ-ی]\d{3}\d{2}$");
+        return IranianPlatePattern.IsMatch(plate);
     }
 }

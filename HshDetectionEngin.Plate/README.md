@@ -35,4 +35,6 @@ Models\\Plate\\<ModelFile>.hshmodel
 
 `PlatePipeline` API عمومی برای مصرف‌کننده‌های بیرونی نیست؛ `PlateModule.CreateRegistration` factory آن را در `ProcessingRegistry` ثبت می‌کند و `CameraPipelineCoordinator` برای هر ROI فعال که `Plate` در `NamedRoi.Processing` آن فعال باشد، نمونهٔ مستقل می‌سازد. فعال یا غیرفعال بودن پلاک از تنظیم ROI و قابلیت `Plate` در لایسنس کنترل می‌شود.
 
+OCR فقط پلاک ایرانی با الگوی `NNLNNNNN` را accepted می‌کند: دو رقم، یک حرف فارسی و پنج رقم. نتیجهٔ نامعتبر با `Accepted=false` برای overlay قرمز قابل مشاهده است، اما `DetectionRuntimeHost` آن را به history، trigger یا client ارسال نمی‌کند.
+
 برای ساخت یا تغییر ماژول، قراردادهای [Abstractions](../HshDetectionEngin.Abstractions) را نشکنید و پیش از انتشار با مدل بسته‌بندی‌شده و یک جریان دوربین واقعی تست کنید.

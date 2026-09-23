@@ -957,7 +957,17 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         return new TriggerEvaluation(matched, suppressed, matchedKeys, suppressedKeys);
     }
 
-    private static bool IsAccepted(AnalysisDetection detection) => GetMetadataBool(detection, "Accepted") || detection.Confidence >= GetMetadataFloat(detection, "OverlayThreshold");
+    private static bool IsAccepted(AnalysisDetection detection)
+    {
+        // An explicit module decision is authoritative. In particular, an
+        // invalid OCR plate may still have high detector confidence, but it
+        // must not be persisted, trigger an action, or be sent to clients.
+        if (detection.Metadata?.TryGetValue("Accepted", out object? acceptedValue) == true &&
+            acceptedValue is bool accepted)
+            return accepted;
+
+        return detection.Confidence >= GetMetadataFloat(detection, "OverlayThreshold");
+    }
     private static bool IsUnknown(AnalysisDetection? detection) => detection is null || detection.Label.StartsWith("Unknown", StringComparison.OrdinalIgnoreCase);
     private static string? GetMetadataString(AnalysisDetection? detection, string key) => detection?.Metadata?.TryGetValue(key, out object? value) == true ? value?.ToString() : null;
     private static bool GetMetadataBool(AnalysisDetection? detection, string key) => detection?.Metadata?.TryGetValue(key, out object? value) == true && value is bool flag && flag;
