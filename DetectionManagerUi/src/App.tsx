@@ -104,6 +104,10 @@ const navItems = [
 const n = (v: unknown, fallback = 0) =>
   typeof v === "number" && Number.isFinite(v) ? v : fallback;
 const s = (v: unknown, fallback = "") => (typeof v === "string" ? v : fallback);
+const newId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID().replaceAll("-", "")
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 const clone = <T,>(value: T): T => structuredClone(value);
 const option = (task: ProcessingTask, key: string, fallback: unknown) =>
   task.options?.[key] ?? fallback;
@@ -129,7 +133,7 @@ function normalizeCameraSettings(value: CameraSettings): CameraSettings {
       const points = Array.isArray(roi.points) ? roi.points : [];
       const tasks = Array.isArray(roi.processing) ? roi.processing : [];
       return {
-        id: s(roi.id).trim() || crypto.randomUUID().replaceAll("-", ""),
+        id: s(roi.id).trim() || newId(),
         name: s(roi.name).trim() || `ROI ${index + 1}`,
         enabled: roi.enabled !== false,
         points: points
@@ -146,7 +150,7 @@ function normalizeCameraSettings(value: CameraSettings): CameraSettings {
         processing: tasks.map((taskValue) => {
           const task = taskValue as Partial<ProcessingTask>;
           return {
-            id: s(task.id).trim() || crypto.randomUUID().replaceAll("-", ""),
+            id: s(task.id).trim() || newId(),
             type: processingType(task.type),
             name:
               s(task.name).trim() || `${processingType(task.type)} detection`,
@@ -894,7 +898,7 @@ function CameraFocusWorkspace({
   };
   const beginNew = () => {
     const next: NamedRoi = {
-      id: crypto.randomUUID().replaceAll("-", ""),
+      id: newId(),
       name: `ROI ${draft.rois.length + 1}`,
       enabled: true,
       points: [],
@@ -1047,7 +1051,7 @@ function CameraFullscreen({
   const roi = draft.rois.find((item) => item.id === activeRoi);
   const addRoi = () => {
     const next: NamedRoi = {
-      id: crypto.randomUUID().replaceAll("-", ""),
+      id: newId(),
       name: `ROI ${draft.rois.length + 1}`,
       enabled: true,
       points: [
@@ -1431,7 +1435,7 @@ function CameraEditor({ id }: { id: string }) {
     });
   const addRoi = () => {
     const next: NamedRoi = {
-      id: crypto.randomUUID().replaceAll("-", ""),
+      id: newId(),
       name: `ROI ${draft.rois.length + 1}`,
       enabled: true,
       points: [
@@ -1455,7 +1459,7 @@ function CameraEditor({ id }: { id: string }) {
     if (!roi) return;
     const face = type.toLocaleLowerCase() === "face";
     const task: ProcessingTask = {
-      id: crypto.randomUUID().replaceAll("-", ""),
+      id: newId(),
       type: face ? "Face" : "Plate",
       name: face ? "Face detection" : "Plate detection",
       enabled: true,
@@ -3262,7 +3266,10 @@ function TaskEditor({
                   }
                 />
               </Field>
-              <Field label="History event cooldown (sec)">
+              <Field
+                label="Face sample record cooldown (sec)"
+                hint="محدودیت داخلی ثبت نمونهٔ چهره است و به cooldown تریگرها مربوط نیست"
+              >
                 <input
                   type="number"
                   min="0"
@@ -4215,7 +4222,7 @@ function Triggers() {
   const client = useQueryClient();
   const [selected, setSelected] = useState<TriggerDefinition>();
   const blank = (): TriggerDefinition => ({
-    id: crypto.randomUUID().replaceAll("-", ""),
+    id: newId(),
     name: "تریگر جدید",
     enabled: true,
     cameraIds: [],
