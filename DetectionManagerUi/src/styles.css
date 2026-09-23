@@ -654,3 +654,17 @@ button { -webkit-tap-highlight-color: transparent; }
 .stat-card small { font-size: 8px; line-height: 1; }
 .dashboard-live-layout { gap: 8px; }
 .dashboard-runtime-grid { margin-top: 8px; }
+
+/* The dashboard only mounts six live tiles at a time; inactive pages are not polling. */
+.camera-wall.count-5, .camera-wall.count-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.camera-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 12px 12px; color: #899eaf; font-size: 9px; }
+.camera-pagination > span { min-width: 190px; text-align: center; }
+@media (max-width: 820px) {
+  .camera-wall.count-5, .camera-wall.count-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .camera-pagination { gap: 6px; }
+  .camera-pagination > span { min-width: 0; }
+}
+@media (max-width: 500px) {
+  .camera-wall.count-5, .camera-wall.count-6 { grid-template-columns: 1fr; }
+  .camera-pagination > span { font-size: 8px; }
+}

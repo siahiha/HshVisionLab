@@ -19,6 +19,7 @@ import {
   Camera,
   CheckCircle2,
   ChevronLeft,
+  ChevronRight,
   CircleGauge,
   Database,
   Download,
@@ -511,8 +512,21 @@ function Dashboard() {
   const people = usePeople();
   const navigate = useNavigate();
   const [focusedCameraId, setFocusedCameraId] = useState<string>();
+  const [cameraPage, setCameraPage] = useState(0);
   const [commandBusy, setCommandBusy] = useState(false);
   const list = cameras.data ?? [];
+  const cameraPageSize = 6;
+  const cameraPageCount = Math.max(1, Math.ceil(list.length / cameraPageSize));
+  const activeCameraPage = Math.min(cameraPage, cameraPageCount - 1);
+  const visibleCameras = list.slice(
+    activeCameraPage * cameraPageSize,
+    (activeCameraPage + 1) * cameraPageSize,
+  );
+  const cameraPageStart = activeCameraPage * cameraPageSize;
+  const cameraPageEnd = Math.min(cameraPageStart + cameraPageSize, list.length);
+  useEffect(() => {
+    setCameraPage((current) => Math.min(current, cameraPageCount - 1));
+  }, [cameraPageCount]);
   const recent = (events.data ?? [])
     .slice()
     .sort((a, b) => b.sequence - a.sequence)
@@ -643,9 +657,9 @@ function Dashboard() {
           />
         ) : (
           <div
-            className={`camera-wall count-${Math.min(4, Math.max(1, list.length))}`}
+            className={`camera-wall count-${Math.min(6, Math.max(1, visibleCameras.length))}`}
           >
-            {list.map((camera) => (
+            {visibleCameras.map((camera) => (
               <CameraTile
                 key={camera.id}
                 camera={camera}
@@ -661,6 +675,29 @@ function Dashboard() {
                 text="از مدیریت دوربین‌ها اولین منبع تصویر را اضافه کنید."
               />
             )}
+          </div>
+        )}
+        {!focusedCameraId && list.length > cameraPageSize && (
+          <div className="camera-pagination" aria-label="صفحه‌بندی دوربین‌ها">
+            <Button
+              variant="ghost"
+              icon={ChevronRight}
+              disabled={activeCameraPage === 0}
+              onClick={() => setCameraPage((current) => Math.max(0, current - 1))}
+            >
+              قبلی
+            </Button>
+            <span>
+              صفحهٔ {activeCameraPage + 1} از {cameraPageCount} · نمایش {cameraPageStart + 1} تا {cameraPageEnd} از {list.length}
+            </span>
+            <Button
+              variant="ghost"
+              icon={ChevronLeft}
+              disabled={activeCameraPage >= cameraPageCount - 1}
+              onClick={() => setCameraPage((current) => Math.min(cameraPageCount - 1, current + 1))}
+            >
+              بعدی
+            </Button>
           </div>
         )}
       </section>
@@ -783,9 +820,9 @@ function CameraTile({
     <article className={`camera-tile ${running ? "camera-running" : "camera-stopped"}`}>
       <button className="camera-tile-open" onClick={onOpen} aria-label={`باز کردن ${camera.name}`}>
         {camera.captureBackend?.toLocaleLowerCase() === "mediamtx" ? (
-          <RawMediaMtxStream cameraId={camera.id} enabled={running} />
+          <RawMediaMtxStream cameraId={camera.id} enabled={running} overlayIntervalMs={400} />
         ) : (
-          <SnapshotImage cameraId={camera.id} alt={camera.name} />
+          <SnapshotImage cameraId={camera.id} alt={camera.name} enabled={running} refreshDelayMs={400} />
         )}
       </button>
       <div className="camera-tile-toolbar">
@@ -1138,37 +1175,49 @@ function CameraFullscreen({
 function SnapshotImage({
   cameraId,
   alt,
+  enabled = true,
   className,
   refreshKey,
+  refreshDelayMs = 400,
 }: {
   cameraId: string;
   alt: string;
+  enabled?: boolean;
   className?: string;
   refreshKey?: number;
+  refreshDelayMs?: number;
 }) {
-  const [src, setSrc] = useState(() => api.snapshotUrl(cameraId));
+  const [src, setSrc] = useState(() => (enabled ? api.snapshotUrl(cameraId) : ""));
   const timer = useRef<number>();
+  const pageVisible = usePageVisible();
+  const active = enabled && pageVisible;
   useEffect(() => {
     if (timer.current) window.clearTimeout(timer.current);
+    if (!active) {
+      if (!enabled) setSrc("");
+      return () => undefined;
+    }
     setSrc(api.snapshotUrl(cameraId));
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [cameraId, refreshKey]);
+  }, [active, cameraId, refreshKey]);
   const schedule = () => {
+    if (!active) return;
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(
       () => setSrc(api.snapshotUrl(cameraId)),
-      85,
+      refreshDelayMs,
     );
   };
   return (
     <img
       className={className}
-      src={src}
+      src={src || undefined}
       alt={alt}
       onLoad={schedule}
       onError={() => {
+        if (!active) return;
         if (timer.current) window.clearTimeout(timer.current);
         timer.current = window.setTimeout(
           () => setSrc(api.snapshotUrl(cameraId)),
@@ -1177,6 +1226,18 @@ function SnapshotImage({
       }}
     />
   );
+}
+
+function usePageVisible() {
+  const [visible, setVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible",
+  );
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  return visible;
 }
 
 function Cameras() {
@@ -1725,7 +1786,7 @@ function RuntimeRow({
   );
 }
 
-function useLiveOverlay(cameraId: string, enabled: boolean) {
+function useLiveOverlay(cameraId: string, enabled: boolean, pollDelayMs = 180) {
   const [overlay, setOverlay] = useState<LiveOverlaySnapshot>();
   useEffect(() => {
     let stopped = false;
@@ -1743,7 +1804,7 @@ function useLiveOverlay(cameraId: string, enabled: boolean) {
         // The raw video must remain available even when the overlay endpoint
         // is temporarily unavailable.
       } finally {
-        if (!stopped) timer = window.setTimeout(() => void poll(), 180);
+        if (!stopped) timer = window.setTimeout(() => void poll(), pollDelayMs);
       }
     };
     void poll();
@@ -1751,7 +1812,7 @@ function useLiveOverlay(cameraId: string, enabled: boolean) {
       stopped = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [cameraId, enabled]);
+  }, [cameraId, enabled, pollDelayMs]);
   return overlay;
 }
 
@@ -1906,11 +1967,13 @@ function RawMediaMtxStream({
   cameraId,
   enabled,
   className,
+  overlayIntervalMs = 180,
   onLoadedMetadata,
 }: {
   cameraId: string;
   enabled: boolean;
   className?: string;
+  overlayIntervalMs?: number;
   onLoadedMetadata?: React.ReactEventHandler<HTMLVideoElement>;
 }) {
   const createViewerId = () => {
@@ -1926,7 +1989,9 @@ function RawMediaMtxStream({
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const overlay = useLiveOverlay(cameraId, enabled);
+  const pageVisible = usePageVisible();
+  const active = enabled && pageVisible;
+  const overlay = useLiveOverlay(cameraId, active, overlayIntervalMs);
 
   useEffect(() => {
     let disposed = false;
@@ -1980,7 +2045,7 @@ function RawMediaMtxStream({
     };
 
     const scheduleReconnect = () => {
-      if (disposed || !enabled || connecting || reconnecting || reconnectTimer !== undefined) return;
+      if (disposed || !active || connecting || reconnecting || reconnectTimer !== undefined) return;
       const delay = reconnectDelays[Math.min(reconnectAttempt, reconnectDelays.length - 1)];
       reconnectAttempt = Math.min(reconnectAttempt + 1, reconnectDelays.length - 1);
       setError(`پخش زنده در حال بازیابی است؛ تلاش بعدی تا ${delay / 1000} ثانیه دیگر.`);
@@ -1991,7 +2056,7 @@ function RawMediaMtxStream({
     };
 
     const restart = async () => {
-      if (disposed || !enabled || reconnecting) return;
+      if (disposed || !active || reconnecting) return;
       reconnecting = true;
       setRunning(false);
       closeSession(activeSession);
@@ -2061,7 +2126,7 @@ function RawMediaMtxStream({
     };
 
     async function connect() {
-      if (disposed || !enabled || !cameraId || connecting) return;
+      if (disposed || !active || !cameraId || connecting) return;
       connecting = true;
       const session: ActiveSession = {
         pc: new RTCPeerConnection(),
@@ -2129,7 +2194,7 @@ function RawMediaMtxStream({
       }
     }
 
-    if (enabled && cameraId) {
+    if (active && cameraId) {
       void connect();
       healthTimer = window.setInterval(() => void checkHealth(), 2000);
     }
@@ -2140,7 +2205,7 @@ function RawMediaMtxStream({
       setRunning(false);
       closeSession(activeSession);
     };
-  }, [cameraId, enabled]);
+  }, [active, cameraId]);
 
   return (
     <span className={`media-mtx-stream ${className ?? ""}`}>
