@@ -62,6 +62,9 @@ HshDetectionEngin.Tools/RawModels/
 !HshDetectionEngin.Plate/Models/plate_yolo_fallback.onnx
 !HshDetectionEngin.Plate/Models/ocr_crnn.onnx
 !HshDetectionEngin.Plate/Models/ocr_cnn.onnx
+!HshDetectionEngin.Plate/Models/chars_best_v26.onnx
+!HshDetectionEngin.Plate/Models/chars_best_v26_int8.onnx
+!HshDetectionEngin.Plate/Models/chars_best_v26.labels.json
 
 # Model packages over GitHub's regular 100 MB file limit.
 HshDetectionEngin.Plate/Models/best.hshmodel

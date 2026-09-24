@@ -119,6 +119,8 @@ export interface ModelInfo {
   relativePath: string;
   module: string;
   capability?: string;
+  ocrDecoder?: string;
+  ocrAlphabet?: string;
   inputSizes?: number[];
   packaged: boolean;
 }

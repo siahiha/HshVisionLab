@@ -9,6 +9,7 @@
 - solution هشت‌پروژه‌ای با UI، Engine، Abstractions، Plate، Face، Licensing، LicenseRequest و LicenseIssuer.
 - چنددوربینه، RTSP/Webcam/file، reconnect، newest-frame capture، ROI چندضلعی و Motion Gate.
 - Plate با YOLO، OCR ایرانی، tracker، overlay و history.
+- Plate با detector و OCR مستقل: مدل کادر از `ModelFile` و مدل OCR از `CharacterModelFile` انتخاب می‌شود. مدل‌های OCR با manifest استاندارد `.ocr.json` در catalog مشترک وب و WinForms ثبت می‌شوند و CRNN، CNN و YOLO character به خروجی `PlateOcrResult` مشترک normalize می‌شوند.
 - Face با YuNet، IoU tracking، preprocessing مستقل، SFace اختیاری و FaceDatabase؛ Unknownهای runtime به‌صورت افراد `Unknown #NNNN` با crop و embedding در database دائمی ذخیره می‌شوند و برای هر نفر حداکثر ۱۰ نمونه ثبت می‌شود.
 - Face database پیشرفته با SQLite، ذخیرهٔ BLOB تصویر crop‌شده و embedding، تاریخ ایجاد، `PersonNumber` مشترک، سقف 10 نمونه برای هر نفر، گرید تصویری، ورود پوشه‌ای، بررسی تشابه، ادغام اشخاص و export تصاویر جفت‌شده/گزارش CSV.
 - settings چنددوربینه با ROIهای نام‌گذاری‌شده و فهرست مستقل `NamedRoi.Processing` برای هر دوربین.

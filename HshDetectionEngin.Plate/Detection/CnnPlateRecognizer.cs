@@ -200,16 +200,17 @@ internal sealed class CnnPlateRecognizer : IPlateTextRecognizer
             if (letterBest - digitBest > bestMargin) { bestMargin = letterBest - digitBest; letterPosition = i; }
         }
 
-        var chars = new List<string>(probabilities.Count);
-        var confidences = new List<float>(probabilities.Count);
+        var characters = new List<PlateOcrCharacter>(probabilities.Count);
         for (int i = 0; i < probabilities.Count; i++)
         {
             int[] pool = i == letterPosition ? letters : digits;
             int best = pool.MaxBy(index => probabilities[i][index]);
-            chars.Add(_labels[best]);
-            confidences.Add(probabilities[i][best]);
+            characters.Add(new PlateOcrCharacter(_labels[best], probabilities[i][best]));
         }
-        return new PlateOcrResult(string.Concat(chars), confidences.Count == 0 ? 0 : confidences.Average());
+        return new PlateOcrResult(
+            string.Concat(characters.Select(character => character.Symbol)),
+            characters.Count == 0 ? 0 : characters.Average(character => character.Confidence),
+            characters);
     }
 
     private static string[] LoadLabels(string modelPath)

@@ -1063,8 +1063,7 @@ public sealed class CameraSettingsForm : Form
                     : Path.GetFileName(path))
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Where(name => !name!.StartsWith("face_", StringComparison.OrdinalIgnoreCase))
-                .Where(name => !name!.Contains("ocr", StringComparison.OrdinalIgnoreCase) &&
-                               !name!.Contains("char", StringComparison.OrdinalIgnoreCase))
+                .Where(name => !PlateOcrModelCatalog.IsOcrModel(name!))
                 .Where(name => !name!.EndsWith("_ort_optimized.onnx", StringComparison.OrdinalIgnoreCase))
                 .Where(name => !name!.Contains("_int8_dynamic", StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1091,15 +1090,7 @@ public sealed class CameraSettingsForm : Form
     private void LoadCharacterModels()
     {
         string[] modelDirectories = GetModelDirectories("Plate", "HshDetectionEngin.Plate");
-        string[] modelNames = modelDirectories
-            .Where(Directory.Exists)
-            .SelectMany(directory => Directory.EnumerateFiles(directory, "*.onnx"))
-            .Select(path => Path.GetFileName(path) ?? string.Empty)
-            .Where(name => name.Contains("ocr", StringComparison.OrdinalIgnoreCase) ||
-                           name.Contains("char", StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-            .ToArray()!;
+        string[] modelNames = PlateOcrModelCatalog.EnumerateModelNames(modelDirectories).ToArray();
         if (modelNames.Length == 0) modelNames = ["ocr_crnn.onnx"];
         _cmbCharacterModel.Items.Clear();
         _cmbCharacterModel.Items.AddRange(modelNames);

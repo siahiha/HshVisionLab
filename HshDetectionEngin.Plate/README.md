@@ -21,7 +21,45 @@
 Models\\Plate\\<ModelFile>.hshmodel
 ```
 
-برای نصب ساده‌تر، می‌توان همهٔ packageها را به‌صورت flat در `Models\\` کنار executable نیز قرار داد. مسیر قدیمی `Modules\\Plate\\Models` فقط برای سازگاری بررسی می‌شود. در اجرای Debug/Visual Studio، `HshDetectionEngin.Plate\\Models` نیز fallback است تا مدل‌های repository بدون کپی‌شدن به `bin` قابل تست باشند. اگر package وجود نداشته باشد، مسیر خام `Models\\<ModelFile>` به‌عنوان fallback بررسی می‌شود. نام منطقی پیش‌فرض در تنظیمات `best.onnx` است؛ مدل‌ها هنگام build خودکار کپی نمی‌شوند.
+برای نصب ساده‌تر، می‌توان همهٔ packageها را به‌صورت flat در `Models\\` کنار executable نیز قرار داد. مسیر قدیمی `Modules\\Plate\\Models` فقط برای سازگاری بررسی می‌شود. در اجرای Debug/Visual Studio، `HshDetectionEngin.Plate\\Models` نیز fallback است تا مدل‌های repository بدون کپی‌شدن به `bin` قابل تست باشند. اگر package وجود نداشته باشد، مسیر خام `Models\\<ModelFile>` به‌عنوان fallback بررسی می‌شود. مدل‌های ONNX و manifestهای OCR که در project ثبت شده‌اند هنگام build به خروجی کپی می‌شوند؛ مدل‌های package بزرگ باید جداگانه در deployment قرار گیرند. نام منطقی پیش‌فرض detector در تنظیمات `best.onnx` است.
+
+### قرارداد استاندارد OCR
+
+هر مدل OCR کنار فایل ONNX یک manifest با پسوند `.ocr.json` دارد. این manifest
+نوع decoder، alphabet و اندازهٔ ورودی را اعلام می‌کند؛ نمونه:
+
+```json
+{
+  "task": "plate_ocr",
+  "decoder": "yolo_character",
+  "alphabet": "persian_plate",
+  "inputWidth": 416,
+  "inputHeight": 416
+}
+```
+
+خروجی همهٔ decoderها به `PlateOcrResult` مشترک تبدیل می‌شود. decoderهای فعلی
+`crnn_ctc`، `cnn_glyph` و `yolo_character` هستند. بنابراین مدل تشخیص کادر
+(`ModelFile`) و مدل OCR (`CharacterModelFile`) کاملاً مستقل انتخاب می‌شوند؛
+اضافه‌کردن یک خانوادهٔ جدید فقط به ثبت decoder آن خانواده نیاز دارد.
+
+### chars_best_v26
+
+مدل `chars_best_v26` از [مخزن عمومی Persian Plate Recognition](https://github.com/shahabbai/Persian_Plate_Recognition)
+به پروژه اضافه شده است.
+این مدل فقط روی crop پلاک اجرا می‌شود و خروجی end-to-end مدل YOLO26 را با شکل
+`[1, 300, 6]` پردازش می‌کند؛ هر ردیف شامل مختصات `xyxy`، confidence و class است.
+دو نسخهٔ قابل انتخاب وجود دارد:
+
+```text
+Models\\Plate\\chars_best_v26.onnx       # FP32، دقت مرجع
+Models\\Plate\\chars_best_v26_int8.onnx # INT8، حجم و مصرف حافظه کمتر
+```
+
+نسخهٔ INT8 با calibration نمونه‌های crop پلاک ساخته شده و برای مقایسهٔ سرعت/دقت
+ارائه می‌شود؛ مدل پیش‌فرض پروژه همچنان `ocr_crnn.onnx` باقی می‌ماند تا پس از تست
+روی دیتاست دوربین، بهترین گزینه انتخاب شود.
+
 
 فایل‌های `.hshmodel` با سرآیند `HSHM0001` و AES رمزگذاری شده‌اند. برای ایجاد نشست ONNX، محتوای مدل موقتاً روی دیسک باز می‌شود و پس از ساخت نشست حذف می‌گردد. کلید توسعه از `HSH_DETECTION_LICENSE` خوانده می‌شود و فقط برای توسعه fallback دارد؛ آن را راهکار امنیتی کامل تلقی نکنید.
 

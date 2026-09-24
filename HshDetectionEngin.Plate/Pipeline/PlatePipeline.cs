@@ -52,9 +52,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
             ?? throw new FileNotFoundException($"Plate recognition model was not found: {options.CharacterModelFile}");
         if (ocrPath.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The selected plate recognition model must be an ONNX OCR model with a .labels.json sidecar.");
-        _ocr = Path.GetFileNameWithoutExtension(ocrPath).Contains("cnn", StringComparison.OrdinalIgnoreCase)
-            ? new CnnPlateRecognizer(ocrPath, threads)
-            : new CrnnPlateRecognizer(ocrPath, threads);
+        _ocr = PlateOcrRecognizerFactory.Create(ocrPath, threads, options.CharacterConfidence);
     }
 
     public PipelineResult Process(ProcessingContext context)
@@ -91,6 +89,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
         foreach (var item in plateCrops)
         {
             List<PlateDetection> inside = [];
+            IReadOnlyList<PlateOcrCharacter> recognizedCharacters = Array.Empty<PlateOcrCharacter>();
             string text;
             float recognitionConfidence = 0;
             if (_ocr is not null)
@@ -98,6 +97,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
                 PlateOcrResult recognition = ReadOcr(context.Image, item.Bounds, item.TrackId, now);
                 text = recognition.Text;
                 recognitionConfidence = recognition.Confidence;
+                recognizedCharacters = recognition.Characters;
             }
             else
             {
@@ -108,20 +108,37 @@ internal sealed class PlatePipeline : IProcessingPipeline
             bool accepted = item.Detection.Score >= _options.Confidence &&
                 (_ocr is null || recognitionConfidence >= _options.CharacterConfidence) &&
                 PersianPlate.IsValidIranianPlate(text);
-            var characterDetails = inside.Select((character, index) => new Dictionary<string, object?>
-            {
-                ["index"] = index,
-                ["classId"] = character.ClassId,
-                ["symbol"] = PersianPlate.CharOf(character.Label, character.ClassId),
-                ["confidence"] = character.Score,
-                ["bounds"] = new Dictionary<string, object?>
+            List<Dictionary<string, object?>> characterDetails = _ocr is not null
+                ? recognizedCharacters.Select((character, index) => new Dictionary<string, object?>
                 {
-                    ["x"] = character.X + context.SourceBounds.X,
-                    ["y"] = character.Y + context.SourceBounds.Y,
-                    ["width"] = character.Width,
-                    ["height"] = character.Height
-                }
-            }).ToList();
+                    ["index"] = index,
+                    ["classId"] = null,
+                    ["symbol"] = character.Symbol,
+                    ["confidence"] = character.Confidence,
+                    ["bounds"] = character.Bounds is RectangleF bounds
+                        ? new Dictionary<string, object?>
+                        {
+                            ["x"] = item.Bounds.Left + bounds.X + context.SourceBounds.X,
+                            ["y"] = item.Bounds.Top + bounds.Y + context.SourceBounds.Y,
+                            ["width"] = bounds.Width,
+                            ["height"] = bounds.Height
+                        }
+                        : null
+                }).ToList()
+                : inside.Select((character, index) => new Dictionary<string, object?>
+                {
+                    ["index"] = index,
+                    ["classId"] = character.ClassId,
+                    ["symbol"] = PersianPlate.CharOf(character.Label, character.ClassId),
+                    ["confidence"] = character.Score,
+                    ["bounds"] = new Dictionary<string, object?>
+                    {
+                        ["x"] = character.X + context.SourceBounds.X,
+                        ["y"] = character.Y + context.SourceBounds.Y,
+                        ["width"] = character.Width,
+                        ["height"] = character.Height
+                    }
+                }).ToList();
 
             results.Add(new AnalysisDetection(
                 AnalysisKind.Plate,

@@ -8,8 +8,6 @@ using Microsoft.ML.OnnxRuntime;
 
 namespace HshDetectionEngin.Plate;
 
-internal sealed record PlateOcrResult(string Text, float Confidence);
-
 internal interface IPlateTextRecognizer : IDisposable
 {
     double LastInferenceMs { get; }
@@ -103,8 +101,7 @@ internal sealed class CrnnPlateRecognizer : IPlateTextRecognizer
             return new PlateOcrResult(string.Empty, 0);
 
         int timesteps = logits.Length / classes;
-        var chars = new List<string>(10);
-        var confidences = new List<float>(10);
+        var characters = new List<PlateOcrCharacter>(10);
         int previous = -1;
         for (int t = 0; t < timesteps; t++)
         {
@@ -122,13 +119,15 @@ internal sealed class CrnnPlateRecognizer : IPlateTextRecognizer
             float probability = sum <= 0 ? 0 : MathF.Exp(logits[offset + index] - max) / sum;
             if (index != _blank && index != previous && index < _labels.Length)
             {
-                chars.Add(_labels[index]);
-                confidences.Add(probability);
+                characters.Add(new PlateOcrCharacter(_labels[index], probability));
             }
             previous = index;
         }
 
-        return new PlateOcrResult(string.Concat(chars), confidences.Count == 0 ? 0 : confidences.Average());
+        return new PlateOcrResult(
+            string.Concat(characters.Select(character => character.Symbol)),
+            characters.Count == 0 ? 0 : characters.Average(character => character.Confidence),
+            characters);
     }
 
     private static string[] LoadLabels(string modelPath)

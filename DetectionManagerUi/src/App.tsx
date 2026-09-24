@@ -3070,14 +3070,19 @@ function TaskEditor({
   const set = (key: string, value: unknown) =>
     onChange(setOption(task, key, value));
   const setModel = (value: string, capability: "plate" | "plateRecognition" | "faceDetection") => {
-    let next = setOption(task, "modelFile", value);
+    // Detection and OCR are two independent stages. The OCR combo must only
+    // update CharacterModelFile; changing it must never replace the plate
+    // detector selected in ModelFile.
+    const optionKey = capability === "plateRecognition" ? "characterModelFile" : "modelFile";
+    let next = setOption(task, optionKey, value);
     const selected = modelFamilyModels(models, capability).find(
       (model) => model.name === value || model.relativePath === value,
     );
     const declaredSize = selected?.inputSizes?.find(
       (size) => Number.isInteger(size) && size > 0,
     );
-    if (declaredSize) next = setOption(next, "inputSize", declaredSize);
+    if (capability !== "plateRecognition" && declaredSize)
+      next = setOption(next, "inputSize", declaredSize);
     onChange(next);
   };
   return (

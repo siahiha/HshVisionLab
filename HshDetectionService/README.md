@@ -92,3 +92,11 @@ GET /api/v1/streams/{cameraId}/overlay → Browser SVG overlay (`LiveOverlaySvg`
 ## نصب Windows Service
 
 پس از publish self-contained یا framework-dependent، فایل خروجی را در مسیر deployment قرار دهید و با `sc.exe create` یا ابزار نصب سازمانی ثبت کنید. اجرای سرویس باید با حسابی انجام شود که به streamهای RTSP، مدل‌ها، license و data root دسترسی داشته باشد.
+### استقلال مدل‌های Plate
+
+در event، تشخیص کادر و OCR دو مرحلهٔ مستقل هستند. `ModelFile` فقط مدل تشخیص
+کادر را تعیین می‌کند و `CharacterModelFile` مدل OCR را روی crop هر کادر تعیین
+می‌کند. مدل‌های OCR از طریق manifest هم‌نام `.ocr.json` و decoderهای ثبت‌شده
+در catalog سرویس شناسایی می‌شوند؛ خروجی CRNN، CNN و YOLO character به قرارداد
+استاندارد مشترک تبدیل می‌شود و characterها با confidence و bounds قابل ارائه
+هستند.

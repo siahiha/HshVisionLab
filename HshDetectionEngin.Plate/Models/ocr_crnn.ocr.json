@@ -1,0 +1,7 @@
+{
+  "task": "plate_ocr",
+  "decoder": "crnn_ctc",
+  "alphabet": "persian_plate",
+  "inputWidth": 128,
+  "inputHeight": 32
+}

@@ -56,12 +56,7 @@ public static class ServiceApi
                 {
                     string name = Path.ChangeExtension(Path.GetFileName(item.path), ".onnx");
                     string capability = item.module == "Plate"
-                        ? (item.path.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase) &&
-                           (name.Contains("ocr", StringComparison.OrdinalIgnoreCase) ||
-                           name.Contains("char", StringComparison.OrdinalIgnoreCase)
-                           )
-                            ? "PlateRecognition"
-                            : "Plate")
+                        ? (PlateOcrModelCatalog.IsOcrModel(item.path) ? "PlateRecognition" : "Plate")
                         : name.Contains("sface", StringComparison.OrdinalIgnoreCase)
                             ? "FaceRecognition"
                             : name.Contains("yunet", StringComparison.OrdinalIgnoreCase)
@@ -84,12 +79,15 @@ public static class ServiceApi
                     {
                         inputSizes = [];
                     }
+                    PlateOcrModelCatalog.TryDescribe(item.path, out PlateOcrModelDescriptor? ocrDescriptor);
                     return new
                     {
                         name,
                         relativePath = Path.GetRelativePath(AppContext.BaseDirectory, item.path).Replace('\\', '/'),
                         module = item.module,
                         capability,
+                        ocrDecoder = ocrDescriptor?.Decoder,
+                        ocrAlphabet = ocrDescriptor?.Alphabet,
                         inputSizes,
                         packaged = true
                     };

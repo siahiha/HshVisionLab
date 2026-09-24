@@ -98,3 +98,14 @@ timer فعال نگه نمی‌دارند. این محدودسازی فقط مص
 - صف event ذخیره‌سازی bounded است و ظرفیت آن از `Service.Runtime.MaxEventQueueLength` می‌آید. در صورت پرشدن صف، artifactهای رخداد جدید آزاد و شمارندهٔ `droppedEventCount` افزایش می‌یابد تا فشار ذخیره‌سازی باعث رشد بی‌نهایت حافظه نشود.
 - سه سطح cooldown از هم مستقل‌اند: `EventCooldownSeconds` در هر processing item برای ثبت canonical history، `ClientSubscription.CooldownSeconds` برای فیلتر replay/live همان اتصال، و `TriggerDefinition.CooldownSeconds` برای اجرای همان تریگر. برای سطح اول، `DetectionHistory(HistoryKey, OccurredAtUtc)` با ایندکس lookup بررسی می‌شود و در صورت تکراری‌بودن، `DetectionEvents` جدید ساخته نمی‌شود؛ برای سطح trigger، `TriggerHistory(TriggerId, TriggerKey, OccurredAtUtc)` فقط رکوردهای موفق همان تریگر را بررسی می‌کند. هر دو ردیف در transaction رخداد ثبت و هنگام حذف رخداد پاک می‌شوند.
 - لایسنس featureمحور جلوی ساخت detector/Pipeline غیرمجاز را می‌گیرد، اما مانع مطلق مهندسی معکوس روی دستگاه مشتری نیست.
+### استقلال detector پلاک و OCR
+
+در pipeline پلاک، `ModelFile` فقط مسئول یافتن کادر پلاک است. در صورت فعال‌بودن
+`CharacterRecognitionEnabled`، crop هر کادر به مدل مستقل `CharacterModelFile`
+داده می‌شود. این دو انتخاب در UI وب و WinForms مستقل هستند و تغییر مدل OCR مدل
+detector یا `InputSize` آن را تغییر نمی‌دهد.
+
+مدل OCR با manifest هم‌نام `.ocr.json` در catalog مشترک ثبت می‌شود. manifest
+نوع decoder و مشخصات ورودی را اعلام می‌کند و factory خروجی decoder را به
+`PlateOcrResult` استاندارد شامل متن، confidence، کاراکترها و bounds اختیاری
+تبدیل می‌کند. decoderهای فعلی `crnn_ctc`، `cnn_glyph` و `yolo_character` هستند.

@@ -1,0 +1,7 @@
+{
+  "task": "plate_ocr",
+  "decoder": "yolo_character",
+  "alphabet": "persian_plate",
+  "inputWidth": 416,
+  "inputHeight": 416
+}

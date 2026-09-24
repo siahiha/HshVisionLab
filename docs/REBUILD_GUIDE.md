@@ -109,9 +109,29 @@ Store را برای همان trigger و هویت‌های لازم بررسی م
 
 ## 5. قابلیت Plate
 
-مدل منطقی تنظیمات مانند `best.onnx` است. Runtime ابتدا package هم‌نام `.hshmodel` را از `Models/Plate` و سپس از `Models` کنار executable می‌خواند؛ برای سازگاری، مسیر قدیمی `Modules/Plate/Models` نیز بررسی می‌شود. در اجرای Debug/Visual Studio، اگر مدل خارجی پیدا نشود، پوشهٔ `HshDetectionEngin.Plate/Models` نیز به‌عنوان fallback بررسی می‌شود تا build بدون کپی مدل‌ها قابل تست باشد. اگر package پیدا نشود، مسیر خام `Models/<ModelFile>` نیز بررسی می‌شود. فایل‌های مدل هنگام build به‌صورت خودکار کپی نمی‌شوند؛ در Release باید مدل‌های موردنیاز جداگانه کنار executable قرار گیرند.
+مدل منطقی تنظیمات مانند `best.onnx` است. Runtime ابتدا package هم‌نام `.hshmodel` را از `Models/Plate` و سپس از `Models` کنار executable می‌خواند؛ برای سازگاری، مسیر قدیمی `Modules/Plate/Models` نیز بررسی می‌شود. در اجرای Debug/Visual Studio، اگر مدل خارجی پیدا نشود، پوشهٔ `HshDetectionEngin.Plate/Models` نیز به‌عنوان fallback بررسی می‌شود. فایل‌های ONNX و manifestهای OCR ثبت‌شده در project هنگام build به خروجی کپی می‌شوند؛ packageهای بزرگ مدل detector در Release باید جداگانه کنار executable قرار گیرند. اگر package پیدا نشود، مسیر خام `Models/<ModelFile>` نیز بررسی می‌شود.
 
-برای هر ROI، detector روی تصویر mask‌شده اجرا می‌شود. detectionها deduplicate می‌شوند، tracker برای پلاک `TrackId` می‌سازد و OCR کاراکترهای داخل کادر را به ترتیب پلاک ایرانی تبدیل می‌کند. در preprocessing غیر `None`، crop پلاک دوباره برای خواندن کاراکترها پردازش می‌شود.
+برای هر ROI، detector روی تصویر mask‌شده اجرا می‌شود. detectionها deduplicate می‌شوند و tracker برای پلاک `TrackId` می‌سازد. اگر `CharacterRecognitionEnabled` فعال باشد، هر crop کادر پلاک جداگانه و با `CharacterModelFile` انتخاب‌شده به OCR داده می‌شود؛ در غیر این صورت detector می‌تواند character detectionهای داخل کادر را مصرف کند. انتخاب detector و OCR مستقل است. مدل‌های OCR با manifest هم‌نام `.ocr.json` ثبت می‌شوند و decoderهای مختلف نتیجهٔ خود را به `PlateOcrResult` مشترک تبدیل می‌کنند. در preprocessing غیر `None`، crop پلاک دوباره برای خواندن کاراکترها پردازش می‌شود.
+
+### قرارداد manifest مدل OCR
+
+در کنار هر فایل ONNX OCR، یک فایل با همان نام و پسوند `.ocr.json` قرار می‌گیرد:
+
+```json
+{
+  "task": "plate_ocr",
+  "decoder": "yolo_character",
+  "alphabet": "persian_plate",
+  "inputWidth": 416,
+  "inputHeight": 416
+}
+```
+
+مقادیر `decoder` فعلی عبارت‌اند از `crnn_ctc`، `cnn_glyph` و
+`yolo_character`. catalog مشترک سرویس، UI وب و برنامهٔ WinForms فقط manifestهای
+معتبر را در ComboBox OCR نشان می‌دهد. برای اضافه‌کردن خانوادهٔ مدل جدید باید
+decoder آن در `PlateOcrRecognizerFactory` ثبت شود؛ pipeline و UI از خروجی
+استاندارد مستقل از معماری مدل استفاده می‌کنند.
 
 پلاک پذیرفته‌شده باید confidence کافی و فرمت معتبر ایرانی `NNLNNNNN` داشته باشد؛ یعنی دو رقم، یک حرف فارسی و پنج رقم، در مجموع ۸ کاراکتر. مقدار `Accepted=false` برای متن نامعتبر authoritative است و چنین پلاکی وارد event history، trigger یا ارسال client نمی‌شود؛ فقط می‌تواند به‌صورت کاندید قرمز برای بازخورد تصویری overlay دیده شود. Overlay حدود 2.5 ثانیه باقی می‌ماند. deduplication داخلی history دوربین برای متن یکسان در همان ROI و processing item کمتر از 5 ثانیه انجام می‌شود؛ UI ثبت دوبارهٔ همان متن را برای همان ROI و processing item همان دوربین تا 30 ثانیه suppress می‌کند. Runtime فقط ۱۵ رخداد تازهٔ هر دوربین/قابلیت را در حافظه نگه می‌دارد؛ موارد خارج‌شده در `history-archive.json` کنار executable با crop تصویر ذخیره می‌شوند و هنگام بازسازی history همراه رخدادهای حافظه تا سقف ۱۰۰ کارت نمایش داده می‌شوند.
 
