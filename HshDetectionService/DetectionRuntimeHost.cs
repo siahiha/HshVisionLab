@@ -642,12 +642,6 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             string cropType = component.Detection.Kind == AnalysisKind.Face ? "DetectionCrop" : "PlateCrop";
             envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, cropType, component.Crop, component.SourceFrameSequence, retention));
 
-            CameraSettings artifactCamera = _settings.Cameras.FirstOrDefault(item => item.Id.Equals(work.CameraId, StringComparison.OrdinalIgnoreCase))
-                ?? new CameraSettings { Id = work.CameraId };
-            using Bitmap? roi = CropForDetection(component.FullFrame, component.Detection, artifactCamera);
-            if (roi is not null)
-                envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, "RoiRaw", roi, component.SourceFrameSequence, retention));
-
             if (TryGetMetadataBytes(component.Detection, "AlignedFaceJpeg", out byte[]? alignedFace) && alignedFace is not null)
             {
                 using var stream = new MemoryStream(alignedFace, writable: false);
@@ -773,28 +767,6 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         }
 
         return component;
-    }
-
-    private static Bitmap? CropForDetection(Bitmap source, AnalysisDetection? detection, CameraSettings camera)
-    {
-        string? roiName = GetMetadataString(detection, "RoiName");
-        NamedRoi? roi = camera.Rois.FirstOrDefault(item => item.Enabled &&
-            !string.IsNullOrWhiteSpace(roiName) && item.Name.Equals(roiName, StringComparison.OrdinalIgnoreCase));
-        Rectangle area = roi is not null && roi.Points.Count >= 3
-            ? PolygonBounds(roi.Points, source.Size)
-            : detection?.Bounds ?? new Rectangle(0, 0, source.Width, source.Height);
-        area = Rectangle.Intersect(area, new Rectangle(0, 0, source.Width, source.Height));
-        if (area.Width <= 0 || area.Height <= 0) return null;
-        return source.Clone(area, PixelFormat.Format24bppRgb);
-    }
-
-    private static Rectangle PolygonBounds(IReadOnlyList<RoiPoint> points, Size size)
-    {
-        int left = (int)Math.Floor(points.Min(point => Math.Clamp(point.X, 0, 1) * size.Width));
-        int top = (int)Math.Floor(points.Min(point => Math.Clamp(point.Y, 0, 1) * size.Height));
-        int right = (int)Math.Ceiling(points.Max(point => Math.Clamp(point.X, 0, 1) * size.Width));
-        int bottom = (int)Math.Ceiling(points.Max(point => Math.Clamp(point.Y, 0, 1) * size.Height));
-        return Rectangle.FromLTRB(left, top, right, bottom);
     }
 
     private static bool MatchesTrigger(TriggerDefinition trigger, string cameraId, string taskId, string kind, string label, float confidence, AnalysisDetection? detection = null)

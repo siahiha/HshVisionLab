@@ -75,6 +75,7 @@ import {
   saveClientSubscription,
 } from "./hooks";
 import type {
+  Artifact,
   CameraSettings,
   CameraStatus,
   ClientSubscription,
@@ -227,18 +228,80 @@ function fmt(v: unknown, digits = 1) {
   return typeof v === "number" ? v.toFixed(digits) : "—";
 }
 function eventTitle(event: DetectionEvent) {
+  const hasFace = Boolean(event.components.face);
+  const hasPlate = Boolean(event.components.plate);
+  if (hasFace && hasPlate) return "چهره و پلاک";
   return s(
     event.components.face?.label,
     s(event.components.plate?.plateText, event.eventType),
   );
 }
-function eventConfidence(event: DetectionEvent) {
-  const component = Object.values(event.components).find(
-    (value) => typeof value.confidence === "number",
-  );
-  const confidence = component?.confidence;
-  if (typeof confidence !== "number" || !Number.isFinite(confidence)) return "—";
-  return `${Math.round(confidence <= 1 ? confidence * 100 : confidence)}%`;
+function confidenceText(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  if (value <= 1) return value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return `${Math.round(value)}%`;
+}
+function objectValue(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+}
+function eventDetailRows(event: DetectionEvent) {
+  const rows: Array<{
+    kind: "face" | "plate";
+    label: string;
+    value: string;
+    confidence: string;
+  }> = [];
+  const plate = event.components.plate;
+  if (plate) {
+    rows.push({
+      kind: "plate",
+      label: "پلاک",
+      value: s(plate.plateText, s(plate.label, "پلاک")),
+      confidence: confidenceText(plate.confidence),
+    });
+  }
+  const face = event.components.face;
+  if (face) {
+    const recognition = objectValue(face.recognition);
+    rows.push({
+      kind: "face",
+      label: "چهره",
+      value: s(recognition.name, s(face.label, "چهره")),
+      confidence: confidenceText(face.confidence),
+    });
+  }
+  return rows;
+}
+function eventPreviewArtifacts(event: DetectionEvent) {
+  const findArtifact = (types: string[]) =>
+    types
+      .map((type) =>
+        event.artifacts.find((artifact) => artifact.type.toLocaleLowerCase() === type),
+      )
+      .find(Boolean);
+  const previews = [
+    event.components.plate
+      ? findArtifact(["platecrop", "detectioncrop"])
+      : undefined,
+    event.components.face
+      ? findArtifact(["facealignedcrop", "detectioncrop"])
+      : undefined,
+  ].filter((artifact, index, items): artifact is Artifact => {
+    if (!artifact) return false;
+    return items.findIndex((item) => item?.artifactId === artifact.artifactId) === index;
+  });
+  if (previews.length) return previews;
+  const fallback = findArtifact([
+    "detectioncrop",
+    "platecrop",
+    "facealignedcrop",
+    "roiannotated",
+    "associatedframeraw",
+    "fullframeraw",
+  ]);
+  return fallback ? [fallback] : [];
 }
 
 function App() {
@@ -319,7 +382,7 @@ function App() {
               <Zap size={20} />
             </div>
             <div>
-              <b>HSH VISION</b>
+              <b>Vision Engine</b>
               <span>DETECTION MANAGER</span>
             </div>
             <button
@@ -376,7 +439,7 @@ function App() {
                 <Menu size={19} />
               </button>
               <Server size={16} />
-              <span>HSH Vision /</span>
+              <span>Vision Engine /</span>
               <PageTitle />
             </div>
             <div className="topbar-actions">
@@ -629,22 +692,6 @@ function Dashboard() {
   };
   return (
     <>
-      <section className="panel dashboard-commandbar">
-        <div className="commandbar-title">
-          <div className="commandbar-icon"><LayoutDashboard size={17} /></div>
-          <div>
-            <strong>مرکز کنترل دوربین‌ها</strong>
-            <span>نمای شبکه و کنترل سریع سرویس</span>
-          </div>
-        </div>
-        <div className="commandbar-actions">
-          <Button variant="soft" icon={LayoutDashboard}>نمای شبکه</Button>
-          <Button icon={Play} disabled={commandBusy || !list.length} onClick={() => void runForAll("start")}>شروع همه</Button>
-          <Button variant="danger" icon={Pause} disabled={commandBusy || !list.length} onClick={() => void runForAll("stop")}>توقف همه</Button>
-          <Button variant="ghost" icon={RefreshCw} onClick={() => void cameras.refetch()}>تازه‌سازی</Button>
-          <Button variant="ghost" icon={Settings} onClick={() => navigate("/settings")}>تنظیمات</Button>
-        </div>
-      </section>
       <section className="hero-card">
         <div className="hero-copy">
           <Badge tone={status.data?.ready ? "green" : "amber"}>
@@ -712,16 +759,27 @@ function Dashboard() {
           tone="amber"
         />
       </div>
+      <section className="panel dashboard-commandbar">
+        <div className="commandbar-title">
+          <div className="commandbar-icon"><LayoutDashboard size={17} /></div>
+          <div>
+            <strong>مرکز کنترل دوربین‌ها</strong>
+            <span>نمای شبکه و کنترل سریع سرویس</span>
+          </div>
+        </div>
+        <div className="commandbar-actions">
+          <Button variant="soft" icon={LayoutDashboard}>نمای شبکه</Button>
+          <Button icon={Play} disabled={commandBusy || !list.length} onClick={() => void runForAll("start")}>شروع همه</Button>
+          <Button variant="danger" icon={Pause} disabled={commandBusy || !list.length} onClick={() => void runForAll("stop")}>توقف همه</Button>
+          <Button variant="ghost" icon={RefreshCw} onClick={() => void cameras.refetch()}>تازه‌سازی</Button>
+          <Button variant="ghost" icon={Settings} onClick={() => navigate("/settings")}>تنظیمات</Button>
+        </div>
+      </section>
       <div className="dashboard-live-layout">
       <section className="panel dashboard-workspace">
         <div className="panel-head">
           <div>
             <h3>{focusedCameraId ? "پیش‌نمایش متمرکز دوربین" : "نمای زندهٔ همهٔ دوربین‌ها"}</h3>
-            <span>
-              {focusedCameraId
-                ? "در این حالت فقط تصویر همین دوربین نمایش داده می‌شود و ROIها قابل ویرایش هستند."
-                : "همان الگوی چنددوربینهٔ HshVisionLab؛ برای بزرگ‌نمایی روی تصویر کلیک کنید."}
-            </span>
           </div>
           <Button
             variant="soft"
@@ -858,24 +916,37 @@ function DetectionHistoryPanel({
       ) : (
         <div className="detected-events-list">
           {events.map((event) => {
-            const crop = event.artifacts.find((artifact) => {
-              const type = artifact.type.toLocaleLowerCase();
-              return type.includes("platecrop") || type.includes("detectioncrop") || type.includes("facealignedcrop") || type.includes("roiraw") || type.includes("roiannotated");
-            });
+            const previews = eventPreviewArtifacts(event);
+            const details = eventDetailRows(event);
             const camera = s(event.source.cameraName, s(event.source.cameraId, "دوربین نامشخص"));
+            const roi = s(event.source.roiName, s(event.scenario, "بدون ROI"));
             return (
               <button className="detected-event-card" key={event.eventId} onClick={() => onOpenEvent(event.eventId)}>
-                <div className="detected-event-image">
-                  {crop ? <img src={serviceUrl(crop.downloadUrl)} alt={crop.type} /> : <Database size={28} />}
-                </div>
                 <div className="detected-event-copy">
-                  <span className="detected-event-camera">{camera}</span>
-                  <strong>{eventTitle(event)}</strong>
-                  <span>Confidence: {eventConfidence(event)}</span>
-                  <small>{fmtDate(event.occurredAtUtc)}</small>
-                  <em>{s(event.source.roiName, event.scenario)}</em>
+                  <div className="detected-event-title">
+                    <span className="detected-event-camera">{camera}</span>
+                    <span className="detected-event-roi">{roi}</span>
+                  </div>
+                  <div className={`detected-event-images count-${Math.min(previews.length, 2)}`}>
+                    {previews.length ? previews.map((artifact) => (
+                      <div className="detected-event-image" key={artifact.artifactId}>
+                        <img src={serviceUrl(artifact.downloadUrl)} alt={artifact.type} />
+                      </div>
+                    )) : (
+                      <div className="detected-event-image"><Database size={28} /></div>
+                    )}
+                  </div>
+                  <div className="detected-event-details">
+                    {details.map((detail) => (
+                      <div className={`detected-event-detail ${detail.kind}`} key={detail.kind}>
+                        <span className="detected-event-detail-label">{detail.label}</span>
+                        <b className="detected-event-detail-value">{detail.value}</b>
+                        <small dir="ltr">conf: {detail.confidence}</small>
+                      </div>
+                    ))}
+                    {!details.length && <span className="detected-event-no-details">جزئیات تشخیص موجود نیست</span>}
+                  </div>
                 </div>
-                <ChevronLeft className="detected-event-arrow" size={15} />
               </button>
             );
           })}
@@ -4191,62 +4262,62 @@ function Events() {
     "30days": "حذف ۳۰ روز",
     custom: "حذف بازه",
   };
+  const eventsActions = (
+    <div className="page-actions">
+      <div className="search-box">
+        <Search size={17} />
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="پلاک، نام، دوربین..."
+        />
+      </div>
+      <select
+        className="toolbar-select"
+        value={scenario}
+        onChange={(e) => setScenario(e.target.value)}
+      >
+        <option value="">همهٔ سناریوها</option>
+        <option value="PlateOnly">پلاک</option>
+        <option value="FaceRecognition">چهره</option>
+        <option value="PlateFaceAssociation">پلاک + چهره</option>
+      </select>
+      <div className="event-delete-tools">
+        <select
+          className="toolbar-select"
+          value={deleteMode}
+          onChange={(e) => {
+            setDeleteMode(e.target.value as DeleteMode);
+            setDeleteError("");
+            setDeleteNotice("");
+          }}
+          aria-label="بازه حذف تاریخچه"
+        >
+          <option value="all">همهٔ تاریخچه</option>
+          <option value="today">امروز</option>
+          <option value="7days">۷ روز اخیر</option>
+          <option value="30days">۳۰ روز اخیر</option>
+          <option value="custom">بازهٔ سفارشی</option>
+        </select>
+        {deleteMode === "custom" && (
+          <>
+            <input className="toolbar-select event-date-input" type="date" value={deleteFrom} onChange={(e) => setDeleteFrom(e.target.value)} aria-label="از تاریخ" />
+            <input className="toolbar-select event-date-input" type="date" value={deleteTo} onChange={(e) => setDeleteTo(e.target.value)} aria-label="تا تاریخ" />
+          </>
+        )}
+        <Button variant="danger" icon={Trash2} disabled={deleteEvents.isPending} onClick={runDelete}>
+          {deleteEvents.isPending ? "در حال حذف..." : deleteLabel[deleteMode]}
+        </Button>
+        {(deleteError || deleteNotice) && <small className={deleteError ? "event-delete-error" : "event-delete-notice"}>{deleteError || deleteNotice}</small>}
+      </div>
+    </div>
+  );
   return (
     <>
       <PageHead
         className="events-page-head"
         title="تاریخچه تشخیص و evidence"
         description="رخدادها پایدار ذخیره می‌شوند؛ با قطع UI eventها از دست نمی‌روند و پس از اتصال مجدد replay می‌شوند."
-        action={
-          <div className="page-actions">
-            <div className="search-box">
-              <Search size={17} />
-              <input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="پلاک، نام، دوربین..."
-              />
-            </div>
-            <select
-              className="toolbar-select"
-              value={scenario}
-              onChange={(e) => setScenario(e.target.value)}
-            >
-              <option value="">همهٔ سناریوها</option>
-              <option value="PlateOnly">پلاک</option>
-              <option value="FaceRecognition">چهره</option>
-              <option value="PlateFaceAssociation">پلاک + چهره</option>
-            </select>
-            <div className="event-delete-tools">
-              <select
-                className="toolbar-select"
-                value={deleteMode}
-                onChange={(e) => {
-                  setDeleteMode(e.target.value as DeleteMode);
-                  setDeleteError("");
-                  setDeleteNotice("");
-                }}
-                aria-label="بازه حذف تاریخچه"
-              >
-                <option value="all">همهٔ تاریخچه</option>
-                <option value="today">امروز</option>
-                <option value="7days">۷ روز اخیر</option>
-                <option value="30days">۳۰ روز اخیر</option>
-                <option value="custom">بازهٔ سفارشی</option>
-              </select>
-              {deleteMode === "custom" && (
-                <>
-                  <input className="toolbar-select event-date-input" type="date" value={deleteFrom} onChange={(e) => setDeleteFrom(e.target.value)} aria-label="از تاریخ" />
-                  <input className="toolbar-select event-date-input" type="date" value={deleteTo} onChange={(e) => setDeleteTo(e.target.value)} aria-label="تا تاریخ" />
-                </>
-              )}
-              <Button variant="danger" icon={Trash2} disabled={deleteEvents.isPending} onClick={runDelete}>
-                {deleteEvents.isPending ? "در حال حذف..." : deleteLabel[deleteMode]}
-              </Button>
-              {(deleteError || deleteNotice) && <small className={deleteError ? "event-delete-error" : "event-delete-notice"}>{deleteError || deleteNotice}</small>}
-            </div>
-          </div>
-        }
       />
       <div className={`events-layout ${selected ? "has-selection" : "empty-selection"}`}>
         <section className="event-side event-preview-top">
@@ -4269,13 +4340,16 @@ function Events() {
               <h3>Event Store</h3>
               <span>{previewList.length} رخداد در محدودهٔ حذف · {list.length} رخداد بارگذاری‌شده</span>
             </div>
-            <Button
-              variant="soft"
-              icon={RefreshCw}
-              onClick={() => void events.refetch()}
-            >
-              تازه‌سازی
-            </Button>
+            <div className="events-panel-head-actions">
+              {eventsActions}
+              <Button
+                variant="soft"
+                icon={RefreshCw}
+                onClick={() => void events.refetch()}
+              >
+                تازه‌سازی
+              </Button>
+            </div>
           </div>
           <div className="event-table">
             <div className="table-row table-head">
@@ -4343,36 +4417,35 @@ function EventPreview({ id }: { id: string }) {
     );
   if (!event.data) return <ErrorBox />;
   const item = event.data;
+  const details = eventDetailRows(item);
   return (
     <div className="panel event-preview">
-      <div className="panel-head compact">
-        <div>
-          <h3>{eventTitle(item)}</h3>
-          <span>
-            Sequence #{item.sequence} · {fmtDate(item.occurredAtUtc)}
-          </span>
-        </div>
-        <Badge tone={Boolean(item.trigger.matched) ? "green" : "blue"}>
-          {item.scenario}
-        </Badge>
-      </div>
       <div className="event-record-meta">
-        <span><b>رخداد</b>{item.eventType}</span>
         <span><b>دوربین</b>{s(item.source.cameraName, s(item.source.cameraId, "—"))}</span>
         <span><b>ROI</b>{s(item.source.roiName, "—")}</span>
-        <span><b>Sequence</b>#{item.sequence}</span>
         <span><b>زمان</b>{fmtDate(item.occurredAtUtc)}</span>
-        <span><b>Trigger</b>{Boolean(item.trigger.matched) ? "matched" : "stored"}</span>
-        {Object.entries(item.components).map(([key, value]) => (
-          <span key={key}>
-            <b>{key}</b>
-            {s(value.label, s(value.plateText, "جزئیات در payload"))}
-            <small>confidence {fmt(value.confidence, 3)}</small>
+        {details.map((detail) => (
+          <span key={detail.kind}>
+            <b>{detail.label}</b>
+            {detail.value}
+            <small>conf: {detail.confidence}</small>
           </span>
         ))}
+        <span><b>Sequence</b>#{item.sequence}</span>
+        <span><b>Trigger</b>{Boolean(item.trigger.matched) ? "matched" : "stored"}</span>
+        <div className="event-record-meta-actions">
+          <Button
+            variant="soft"
+            icon={FileJson}
+            aria-expanded={payloadOpen}
+            onClick={() => setPayloadOpen((open) => !open)}
+          >
+            {payloadOpen ? "بستن payload" : "نمایش payload"}
+          </Button>
+        </div>
       </div>
       <div className="artifact-grid">
-        {item.artifacts.map((artifact) => (
+        {item.artifacts.filter((artifact) => artifact.type.toLocaleLowerCase() !== "roiraw").map((artifact) => (
           <a
             className="artifact"
             key={artifact.artifactId}
@@ -4385,16 +4458,6 @@ function EventPreview({ id }: { id: string }) {
             </span>
           </a>
         ))}
-      </div>
-      <div className="event-payload-actions">
-        <Button
-          variant="soft"
-          icon={FileJson}
-          aria-expanded={payloadOpen}
-          onClick={() => setPayloadOpen((open) => !open)}
-        >
-          {payloadOpen ? "بستن payload" : "نمایش payload"}
-        </Button>
       </div>
       {payloadOpen && (
         <div className="json-block">
