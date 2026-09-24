@@ -903,7 +903,11 @@ function CameraTile({
         {camera.captureBackend?.toLocaleLowerCase() === "mediamtx" ? (
           <RawMediaMtxStream cameraId={camera.id} enabled={running} overlayIntervalMs={400} />
         ) : (
-          <SnapshotImage cameraId={camera.id} alt={camera.name} enabled={running} refreshDelayMs={400} />
+          <CompositeWebRtcStream
+            cameraId={camera.id}
+            enabled={running}
+            className="camera-live-video"
+          />
         )}
       </button>
       <div className="camera-tile-toolbar">
@@ -1059,7 +1063,8 @@ function CameraFocusWorkspace({
           cameraId={cameraId}
           roi={displayedRoi}
           className="camera-focus-roi"
-          live={draft.captureBackend === "MediaMTX"}
+          live={Boolean(status?.running)}
+          streamBackend={draft.captureBackend}
           editable={roiMode !== "view"}
           onChange={updateRoiDraft}
         />
@@ -1206,7 +1211,8 @@ function CameraFullscreen({
               cameraId={cameraId}
               roi={roi}
               className="fullscreen-roi"
-              live={draft.captureBackend === "MediaMTX"}
+              live={Boolean(status?.running)}
+              streamBackend={draft.captureBackend}
               onChange={(points) => roi && updateRoi({ ...roi, points })}
             />
           </div>
@@ -2354,6 +2360,22 @@ function CompositeWebRtcStream({
       setError("");
       const connection = new RTCPeerConnection();
       connectionRef.current = connection;
+      const waitForIce = async () => {
+        if (connection.iceGatheringState === "complete") return;
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            if (connection.iceGatheringState === "complete") {
+              connection.removeEventListener("icegatheringstatechange", done);
+              resolve();
+            }
+          };
+          connection.addEventListener("icegatheringstatechange", done);
+          window.setTimeout(() => {
+            connection.removeEventListener("icegatheringstatechange", done);
+            resolve();
+          }, 1500);
+        });
+      };
       connection.addTransceiver("video", { direction: "recvonly" });
       connection.ontrack = (event) => {
         if (!disposed && videoRef.current && event.track.kind === "video")
@@ -2362,6 +2384,7 @@ function CompositeWebRtcStream({
       try {
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
+        await waitForIce();
         const answer = await api.webRtcOffer(cameraId, {
           type: "offer",
           sdp: offer.sdp ?? "",
@@ -2411,6 +2434,7 @@ function RoiCanvas({
   roi,
   className,
   live = false,
+  streamBackend,
   editable = true,
   onChange,
 }: {
@@ -2418,6 +2442,7 @@ function RoiCanvas({
   roi?: NamedRoi;
   className?: string;
   live?: boolean;
+  streamBackend?: string;
   editable?: boolean;
   onChange: (points: { x: number; y: number }[]) => void;
 }) {
@@ -2462,8 +2487,19 @@ function RoiCanvas({
           className="roi-image-stage"
           style={{ aspectRatio: `${imageSize.width} / ${imageSize.height}` }}
         >
-          {live ? (
+          {live ? streamBackend?.toLocaleLowerCase() === "mediamtx" ? (
             <RawMediaMtxStream
+              cameraId={cameraId}
+              enabled
+              onLoadedMetadata={(event) =>
+                setImageSize({
+                  width: event.currentTarget.videoWidth || 16,
+                  height: event.currentTarget.videoHeight || 9,
+                })
+              }
+            />
+          ) : (
+            <CompositeWebRtcStream
               cameraId={cameraId}
               enabled
               onLoadedMetadata={(event) =>
