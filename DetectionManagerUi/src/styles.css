@@ -735,3 +735,42 @@ html[data-language="en"] .preview-toolbar span { margin-left: auto; margin-right
   html[data-language="en"] .sidebar { left: -280px; right: auto; }
   html[data-language="en"] .sidebar.open { left: 0; right: auto; }
 }
+/* Generic invocation management --------------------------------------- */
+.invocations-layout { display: grid; grid-template-columns: 285px minmax(0, 1fr); gap: 12px; margin-bottom: 12px; }
+.invocation-list-panel { min-height: 570px; overflow: hidden; }
+.invocation-list { padding: 7px; display: grid; gap: 3px; align-content: start; }
+.invocation-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px; border: 0; border-radius: 6px; color: var(--text); background: transparent; text-align: right; cursor: pointer; }
+.invocation-row:hover, .invocation-row.selected { background: rgba(0,120,212,.19); }
+.invocation-row > div { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.invocation-row b { color: #e3edf7; font-size: 11px; }
+.invocation-row small { overflow: hidden; color: #8298ad; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; direction: ltr; text-align: right; }
+.invocation-type { display: grid; place-items: center; width: 33px; height: 28px; border-radius: 4px; color: #75caff; background: rgba(0,120,212,.18); font: 8px Consolas, monospace; }
+.invocation-editor { min-width: 0; }
+.invocation-editor .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.invocation-form { padding: 16px 18px 20px; display: grid; gap: 15px; }
+.invocation-test-result { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid rgba(76, 225, 174, .28); border-radius: 8px; background: rgba(38, 211, 153, .08); color: #a5d8c3; font-size: 10px; }
+.invocation-test-result.failure { border-color: rgba(255, 106, 120, .3); background: rgba(255, 106, 120, .08); color: #ffabb3; }
+.invocation-test-result code { min-width: 0; overflow: hidden; color: #8eb3d0; font: 9px Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; direction: ltr; }
+.invocation-test-debug { display: grid; gap: 9px; padding: 11px 12px; border: 1px solid rgba(255, 106, 120, .24); border-radius: 8px; background: rgba(4, 12, 22, .55); }
+.invocation-test-debug > div { display: grid; gap: 5px; min-width: 0; }
+.invocation-test-debug b { color: #ffabb3; font-size: 10px; }
+.invocation-test-debug code, .invocation-test-debug pre { margin: 0; overflow: auto; color: #a9c8df; font: 10px/1.6 Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.invocation-destination { padding-top: 13px; border-top: 1px solid var(--border); }
+.invocation-destination h4 { margin: 0 0 11px; color: #cae2f4; font-size: 11px; }
+.camera-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0 0 13px; color: #8498ab; font-size: 10px; }
+.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.section-title-row h4 { margin-bottom: 4px; }
+.section-title-row small { color: #71879b; font-size: 9px; }
+.mapping-list { display: grid; gap: 7px; }
+.mapping-row { display: grid; grid-template-columns: minmax(105px, .8fr) 18px minmax(180px, 1.4fr) minmax(95px, .7fr) auto 29px; align-items: center; gap: 6px; }
+.mapping-row > span { color: #5a9dce; text-align: center; }
+.mapping-row label { display: flex; align-items: center; gap: 4px; color: #8299ad; font-size: 9px; white-space: nowrap; }
+.mapping-source-control { display: grid; gap: 4px; min-width: 0; }
+.mapping-source-control select, .mapping-source-control input { width: 100%; min-width: 0; }
+.invocation-log-panel { overflow: hidden; }
+.invocation-log-list { display: grid; gap: 1px; max-height: 450px; overflow: auto; }
+.invocation-log-row { display: grid; grid-template-columns: 78px minmax(115px, .8fr) 52px 125px 55px minmax(160px, 1.7fr) auto; align-items: center; gap: 10px; padding: 9px 17px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.invocation-log-row b { color: #d8e8f5; font-size: 10px; }
+.invocation-log-row span, .invocation-log-row small { color: #8297aa; font-size: 9px; }
+.invocation-log-row code { overflow: hidden; color: #7eabc9; font: 9px Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; direction: ltr; }
+@media (max-width: 900px) { .invocations-layout { grid-template-columns: 1fr; }.invocation-list-panel { min-height: 0; }.mapping-row { grid-template-columns: 1fr 18px 1fr; }.invocation-log-row { grid-template-columns: 75px 1fr 70px; }.invocation-log-row small, .invocation-log-row code { display: none; } }

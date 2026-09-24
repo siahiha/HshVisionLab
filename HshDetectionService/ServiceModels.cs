@@ -5,7 +5,7 @@ namespace HshDetectionService;
 
 public sealed class ServiceSettingsDocument
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public long Revision { get; set; }
     public string ServiceNodeId { get; set; } = Guid.NewGuid().ToString("N");
     public ServiceHttpSettings Http { get; set; } = new();
@@ -14,6 +14,7 @@ public sealed class ServiceSettingsDocument
     public ServiceAssociationSettings Association { get; set; } = new();
     public ServiceRetentionSettings Retention { get; set; } = new();
     public List<TriggerDefinition> Triggers { get; set; } = [];
+    public List<InvocationDefinition> Invocations { get; set; } = [];
 }
 
 public sealed class ServiceHttpSettings
@@ -48,6 +49,100 @@ public sealed class ServiceRetentionSettings
     public int ArtifactDays { get; set; } = 7;
     public int WebhookRetryDays { get; set; } = 3;
 }
+
+/// <summary>
+/// A generic outbound invocation. It intentionally is not named Webhook because
+/// the same event can be delivered to an HTTP API or an external SQL command.
+/// </summary>
+public sealed class InvocationDefinition
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "Invocation";
+    public bool Enabled { get; set; } = true;
+    public string Type { get; set; } = "Web"; // Web or Sql
+    public string WorkflowId { get; set; } = string.Empty;
+    public int StepOrder { get; set; }
+    public bool DependsOnPrevious { get; set; }
+    public List<string> CameraIds { get; set; } = [];
+    public List<string> EventTypes { get; set; } = [];
+    public bool? Triggered { get; set; }
+    public List<string> TriggerIds { get; set; } = [];
+    public float? MinimumConfidence { get; set; }
+    public string? PlateTextEquals { get; set; }
+    public int TimeoutSeconds { get; set; } = 15;
+    public int MaxRetries { get; set; } = 3;
+    public int RetryDelaySeconds { get; set; } = 30;
+    public InvocationWebSettings Web { get; set; } = new();
+    public InvocationSqlSettings Sql { get; set; } = new();
+    public List<InvocationMapping> Mappings { get; set; } = [];
+}
+
+public sealed class InvocationWebSettings
+{
+    public string Url { get; set; } = string.Empty;
+    public string Method { get; set; } = "POST";
+    public string ContentType { get; set; } = "application/json";
+    public string AuthenticationType { get; set; } = "None";
+    public string AuthenticationValue { get; set; } = string.Empty;
+    public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class InvocationSqlSettings
+{
+    public string Provider { get; set; } = "Sqlite"; // Sqlite or SqlServer
+    public string ConnectionString { get; set; } = string.Empty;
+    public string CommandText { get; set; } = string.Empty;
+    public string CommandType { get; set; } = "Text"; // Text or StoredProcedure
+}
+
+public sealed class InvocationMapping
+{
+    public string Target { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string? DefaultValue { get; set; }
+}
+
+public sealed record InvocationJobRecord(
+    long JobId,
+    long EventSequence,
+    string EventId,
+    string InvocationId,
+    string Status,
+    int AttemptCount,
+    DateTime? NextAttemptUtc,
+    string? LastError,
+    DateTime CreatedAtUtc,
+    DateTime? UpdatedAtUtc);
+
+public sealed record InvocationLogRecord(
+    long LogId,
+    long JobId,
+    long EventSequence,
+    string EventId,
+    string InvocationId,
+    string InvocationName,
+    int StepOrder,
+    string Status,
+    int Attempt,
+    DateTime StartedAtUtc,
+    DateTime? CompletedAtUtc,
+    string Method,
+    string Target,
+    string? RequestPayload,
+    int? ResponseStatusCode,
+    string? ResponseBody,
+    string? Error);
+
+public sealed record InvocationTestResult(
+    bool Success,
+    string InvocationId,
+    string InvocationName,
+    string Method,
+    string Target,
+    int? ResponseStatusCode,
+    string? ResponseBody,
+    string? Error,
+    string? RequestPayload);
 
 public sealed class TriggerDefinition
 {

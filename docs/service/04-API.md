@@ -165,6 +165,25 @@ POST   /api/v1/face/database/restore
 
 ## 8. Trigger و Webhook
 
+پیاده‌سازی فعلی ارسال بیرونی را با نام عمومی **Invocation** انجام می‌دهد و مقصد
+می‌تواند Web یا SQL باشد. routeهای واقعی مدیریت آن عبارت‌اند از:
+
+```text
+GET    /api/v1/invocations
+POST   /api/v1/invocations
+PATCH  /api/v1/invocations/{invocationId}
+DELETE /api/v1/invocations/{invocationId}
+GET    /api/v1/invocations/logs
+POST   /api/v1/invocations/{invocationId}/test
+POST   /api/v1/invocations/jobs/{jobId}/retry
+```
+
+جزئیات مدل `InvocationDefinition`، فیلتر event، روندهای وابسته، mapping
+تصاویر، تفاوت JSON و multipart، retry، لاگ و تست در
+[08-INVOCATIONS.md](08-INVOCATIONS.md) مستند شده است. مدیریت Triggerهای واقعی
+سرویس نیز با routeهای زیر انجام می‌شود؛ routeهای جداگانهٔ `webhooks` پایین‌تر
+در این implementation وجود ندارند و نباید توسط client فراخوانی شوند:
+
 ```text
 GET    /api/v1/triggers
 POST   /api/v1/triggers

@@ -19,6 +19,7 @@
     <ProjectReference Include="..\HshDetectionEngin.Plate\HshDetectionEngin.Plate.csproj" />
     <ProjectReference Include="..\HshDetectionEngin.Licensing\HshDetectionEngin.Licensing.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
     <PackageReference Include="SIPSorcery" Version="10.0.16" />
     <PackageReference Include="SIPSorcery.VP8" Version="10.0.16" />

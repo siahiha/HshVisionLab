@@ -39,6 +39,7 @@ export interface NamedRoi {
 export interface CameraSettings {
   id: Id;
   name: string;
+  cameraCode?: string;
   sourceUrl: string;
   modelFile: string;
   plateEnabled: boolean;
@@ -104,6 +105,7 @@ export interface ServiceSettings {
     webhookRetryDays: number;
   };
   triggers: TriggerDefinition[];
+  invocations: InvocationDefinition[];
 }
 export interface SettingsResponse {
   revision: number;
@@ -142,6 +144,63 @@ export interface TriggerDefinition {
   minimumConfidence?: number;
   cooldownSeconds: number;
   actions: TriggerAction[];
+}
+export interface InvocationMapping {
+  target: string;
+  source: string;
+  defaultValue?: string;
+}
+export interface InvocationDefinition {
+  id: Id;
+  name: string;
+  enabled: boolean;
+  type: "Web" | "Sql" | string;
+  workflowId: string;
+  stepOrder: number;
+  dependsOnPrevious: boolean;
+  cameraIds: string[];
+  eventTypes: string[];
+  triggered?: boolean | null;
+  triggerIds: string[];
+  minimumConfidence?: number | null;
+  plateTextEquals?: string | null;
+  timeoutSeconds: number;
+  maxRetries: number;
+  retryDelaySeconds: number;
+  web: {
+    url: string;
+    method: "GET" | "POST" | string;
+    contentType: string;
+    authenticationType: string;
+    authenticationValue: string;
+    headers: Record<string, string>;
+  };
+  sql: {
+    provider: string;
+    connectionString: string;
+    commandText: string;
+    commandType: string;
+  };
+  mappings: InvocationMapping[];
+}
+export interface InvocationLog {
+  logId: number;
+  jobId: number;
+  eventSequence: number;
+  eventId: string;
+  invocationId: string;
+  invocationName: string;
+  stepOrder: number;
+  status: string;
+  attempt: number;
+  startedAtUtc: string;
+  completedAtUtc?: string;
+  method: string;
+  target: string;
+  requestPayload?: string;
+  responseStatusCode?: number;
+  responseBody?: string;
+  error?: string;
 }
 export interface ClientSubscription {
   mode: "All" | "Plate" | "KnownFace";

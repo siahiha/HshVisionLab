@@ -40,7 +40,9 @@ public sealed class ServiceSettingsStore
             _service.Association ??= new ServiceAssociationSettings();
             _service.Retention ??= new ServiceRetentionSettings();
             _service.Triggers ??= [];
+            _service.Invocations ??= [];
             NormalizeTriggers(_service.Triggers);
+            NormalizeInvocations(_service.Invocations);
             if (string.IsNullOrWhiteSpace(_service.ServiceNodeId)) _service.ServiceNodeId = Guid.NewGuid().ToString("N");
             if (string.IsNullOrWhiteSpace(_service.Security.ApiKey)) _service.Security.ApiKey = Guid.NewGuid().ToString("N");
 
@@ -90,7 +92,9 @@ public sealed class ServiceSettingsStore
             settings.Runtime ??= new ServiceRuntimeSettings();
             settings.Retention ??= new ServiceRetentionSettings();
             settings.Triggers ??= [];
+            settings.Invocations ??= [];
             NormalizeTriggers(settings.Triggers);
+            NormalizeInvocations(settings.Invocations);
             _service = settings;
             SaveServiceUnsafe();
         }
@@ -143,6 +147,32 @@ public sealed class ServiceSettingsStore
             trigger.Kinds ??= [];
             trigger.Actions ??= [];
             trigger.CooldownSeconds = Math.Clamp(trigger.CooldownSeconds, 0, 3600);
+        }
+    }
+
+    private static void NormalizeInvocations(IList<InvocationDefinition> invocations)
+    {
+        foreach (InvocationDefinition item in invocations)
+        {
+            item.Id = string.IsNullOrWhiteSpace(item.Id) ? Guid.NewGuid().ToString("N") : item.Id;
+            item.Name = string.IsNullOrWhiteSpace(item.Name) ? "Invocation" : item.Name.Trim();
+            item.Type = item.Type.Equals("Sql", StringComparison.OrdinalIgnoreCase) ? "Sql" : "Web";
+            item.WorkflowId = item.WorkflowId?.Trim() ?? string.Empty;
+            item.CameraIds ??= [];
+            item.EventTypes ??= [];
+            item.TriggerIds ??= [];
+            item.Mappings ??= [];
+            item.Web ??= new InvocationWebSettings();
+            item.Sql ??= new InvocationSqlSettings();
+            item.Web.Headers ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            item.TimeoutSeconds = Math.Clamp(item.TimeoutSeconds, 1, 300);
+            item.MaxRetries = Math.Clamp(item.MaxRetries, 0, 20);
+            item.RetryDelaySeconds = Math.Clamp(item.RetryDelaySeconds, 1, 86_400);
+            item.Web.Method = item.Web.Method.Equals("GET", StringComparison.OrdinalIgnoreCase) ? "GET" : "POST";
+            item.Web.ContentType = string.IsNullOrWhiteSpace(item.Web.ContentType)
+                ? "application/json"
+                : item.Web.ContentType.Trim();
+            item.Mappings.RemoveAll(mapping => string.IsNullOrWhiteSpace(mapping.Target) || string.IsNullOrWhiteSpace(mapping.Source));
         }
     }
 }

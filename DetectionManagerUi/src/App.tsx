@@ -64,6 +64,9 @@ import {
   useDetectionStream,
   useEvent,
   useEvents,
+  useInvocationLogs,
+  useInvocationMutation,
+  useInvocations,
   useModels,
   usePeople,
   usePersonSamples,
@@ -93,6 +96,8 @@ import type {
   SettingsResponse,
   TriggerAction,
   TriggerDefinition,
+  InvocationDefinition,
+  InvocationMapping,
 } from "./types";
 
 const navItems = [
@@ -101,6 +106,7 @@ const navItems = [
   { to: "/faces", label: "پایگاه چهره", icon: UsersRound },
   { to: "/events", label: "تاریخچه تشخیص", icon: Archive },
   { to: "/triggers", label: "تریگرها و کلاینت‌ها", icon: BellRing },
+  { to: "/invocations", label: "فراخوانی‌ها", icon: Zap },
   { to: "/settings", label: "تنظیمات سرویس", icon: Settings },
 ];
 const n = (v: unknown, fallback = 0) =>
@@ -131,6 +137,7 @@ function normalizeCameraSettings(value: CameraSettings): CameraSettings {
   const rois = Array.isArray(raw.rois) ? raw.rois : [];
   return {
     ...raw,
+    cameraCode: s(raw.cameraCode).trim(),
     processingSchemaVersion: 3,
     rois: rois.map((item, index) => {
       const roi = item as Partial<NamedRoi>;
@@ -470,6 +477,7 @@ function App() {
               <Route path="/events" element={<Events />} />
               <Route path="/events/:eventId" element={<EventDetail />} />
               <Route path="/triggers" element={<Triggers />} />
+              <Route path="/invocations" element={<Invocations />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </div>
@@ -1517,6 +1525,7 @@ function CreateCamera({
   pending: boolean;
 }) {
   const [name, setName] = useState("Camera 1");
+  const [cameraCode, setCameraCode] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   return (
     <section className="panel create-card">
@@ -1532,6 +1541,9 @@ function CreateCamera({
       <div className="form-grid">
         <Field label="نام">
           <input value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="کد دوربین" hint="اختیاری و مناسب سامانه‌های بیرونی">
+          <input dir="ltr" value={cameraCode} onChange={(e) => setCameraCode(e.target.value)} placeholder="CAM-01" />
         </Field>
         <Field label="Source URL" wide>
           <input
@@ -1549,7 +1561,7 @@ function CreateCamera({
         <Button
           icon={Plus}
           disabled={pending || !name.trim() || !sourceUrl.trim()}
-          onClick={() => onCreate({ name, sourceUrl })}
+          onClick={() => onCreate({ name, cameraCode, sourceUrl })}
         >
           ساخت دوربین
         </Button>
@@ -2673,6 +2685,14 @@ function GeneralSettings({
             <input
               value={draft.name}
               onChange={(e) => update("name", e.target.value)}
+            />
+          </Field>
+          <Field label="کد دوربین" hint="اختیاری؛ برای Mapping از source.cameraCode استفاده کنید">
+            <input
+              dir="ltr"
+              value={draft.cameraCode ?? ""}
+              onChange={(e) => update("cameraCode", e.target.value)}
+              placeholder="CAM-01"
             />
           </Field>
           <Field label="Source URL" wide>
@@ -4865,6 +4885,207 @@ function TriggerEditor({
         </Button>
       </div>
     </section>
+  );
+}
+
+type InvocationSourceOption = readonly [value: string, label: string];
+
+const invocationSourceGroups: { label: string; options: InvocationSourceOption[] }[] = [
+  {
+    label: "اطلاعات رکورد",
+    options: [
+      ["eventId", "شناسه رکورد"],
+      ["sequence", "شماره ترتیبی رکورد"],
+      ["eventType", "نوع رخداد"],
+      ["scenario", "سناریو"],
+      ["occurredAtUtc", "زمان وقوع (UTC)"],
+      ["occurredAtLocal", "زمان وقوع (محلی)"],
+      ["receivedAtUtc", "زمان ثبت (UTC)"],
+      ["receivedAtLocal", "زمان ثبت (محلی)"],
+    ],
+  },
+  {
+    label: "دوربین و منبع",
+    options: [
+      ["source.cameraId", "شناسه دوربین"],
+      ["source.cameraCode", "کد دوربین"],
+      ["source.cameraName", "نام دوربین"],
+      ["source.serviceNodeId", "شناسه نود سرویس"],
+      ["source.taskId", "شناسه پردازش"],
+      ["source.taskName", "نام پردازش"],
+      ["source.roiId", "شناسه ناحیه (ROI)"],
+      ["source.roiName", "نام ناحیه (ROI)"],
+      ["source.sourceFrameSequence", "شماره فریم منبع"],
+      ["source.frameWidth", "عرض فریم"],
+      ["source.frameHeight", "ارتفاع فریم"],
+      ["source.associationType", "نوع ارتباط تشخیص‌ها"],
+    ],
+  },
+  {
+    label: "تشخیص پلاک",
+    options: [
+      ["components.plate.plateText", "متن پلاک"],
+      ["components.plate.confidence", "اعتماد تشخیص پلاک"],
+      ["components.plate.plateConfidence", "اعتماد خواندن پلاک"],
+      ["components.plate.plateThreshold", "آستانه پلاک"],
+      ["components.plate.isValidIranianPlate", "پلاک ایرانی معتبر است؟"],
+      ["components.plate.recognitionConfidence", "اعتماد OCR پلاک"],
+      ["components.plate.recognitionModel", "مدل خواندن پلاک"],
+      ["components.plate.label", "برچسب تشخیص پلاک"],
+      ["components.plate.trackId", "شناسه Track پلاک"],
+    ],
+  },
+  {
+    label: "تشخیص چهره",
+    options: [
+      ["components.face.label", "برچسب چهره"],
+      ["components.face.confidence", "اعتماد تشخیص چهره"],
+      ["components.face.recognitionStatus", "وضعیت شناسایی چهره"],
+      ["components.face.recognition.personId", "شناسه فرد"],
+      ["components.face.recognition.name", "نام فرد"],
+      ["components.face.recognition.personNumber", "شماره فرد"],
+      ["components.face.recognition.isUnknown", "فرد ناشناس است؟"],
+      ["components.face.recognition.similarity", "شباهت چهره"],
+      ["components.face.trackId", "شناسه Track چهره"],
+    ],
+  },
+  {
+    label: "تریگر",
+    options: [
+      ["trigger.matched", "تریگر فعال شده است؟"],
+      ["trigger.cooldownApplied", "محدودیت زمانی تریگر اعمال شده؟"],
+      ["trigger.matchingTriggerIds", "شناسه تریگرهای منطبق"],
+    ],
+  },
+  {
+    label: "تصاویر",
+    options: [
+      ["image.frame", "فریم کامل - باینری"],
+      ["image.frame.rawBase64", "فریم کامل - Base64 خام"],
+      ["image.frame.base64", "فریم کامل - Data URI"],
+      ["image.crop.plate", "کراپ پلاک - باینری"],
+      ["image.crop.plate.rawBase64", "کراپ پلاک - Base64 خام"],
+      ["image.crop.plate.base64", "کراپ پلاک - Data URI"],
+      ["image.crop.face", "کراپ چهره - باینری"],
+      ["image.crop.face.rawBase64", "کراپ چهره - Base64 خام"],
+      ["image.crop.face.base64", "کراپ چهره - Data URI"],
+      ["image.faceAlignedCrop", "کراپ تراز شده چهره - باینری"],
+      ["image.faceAlignedCrop.rawBase64", "کراپ تراز شده چهره - Base64 خام"],
+      ["image.faceAlignedCrop.base64", "کراپ تراز شده چهره - Data URI"],
+    ],
+  },
+];
+
+const invocationSourceOptions = invocationSourceGroups.flatMap((group) => group.options);
+
+function InvocationSourceSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const known = invocationSourceOptions.some(([source]) => source === value);
+  return <div className="mapping-source-control">
+    <select value={known ? value : "__custom__"} onChange={(event) => onChange(event.target.value === "__custom__" ? "" : event.target.value)}>
+      <option value="__custom__">انتخاب منبع داده...</option>
+      {invocationSourceGroups.map((group) => <optgroup key={group.label} label={group.label}>
+        {group.options.map(([source, label]) => <option key={source} value={source}>{label}</option>)}
+      </optgroup>)}
+      <option value="__custom__">مسیر سفارشی...</option>
+    </select>
+    {!known && <input dir="ltr" value={value} onChange={(event) => onChange(event.target.value)} placeholder="مثلاً components.custom.value" />}
+  </div>;
+}
+
+function blankInvocation(): InvocationDefinition {
+  return {
+    id: newId(), name: "فراخوانی جدید", enabled: true, type: "Web", workflowId: "", stepOrder: 0,
+    dependsOnPrevious: false, cameraIds: [], eventTypes: [], triggered: null, triggerIds: [],
+    minimumConfidence: null, plateTextEquals: null, timeoutSeconds: 15, maxRetries: 3, retryDelaySeconds: 30,
+    web: { url: "", method: "POST", contentType: "application/json", authenticationType: "None", authenticationValue: "", headers: {} },
+    sql: { provider: "Sqlite", connectionString: "", commandText: "", commandType: "Text" },
+    mappings: [
+      { target: "plateNumber", source: "components.plate.plateText" },
+      { target: "cameraId", source: "source.cameraId" },
+      { target: "detectedAt", source: "occurredAtUtc" },
+      { target: "frame", source: "image.frame" },
+      { target: "plateCrop", source: "image.crop.plate" },
+    ],
+  };
+}
+
+function Invocations() {
+  const invocations = useInvocations();
+  const cameras = useCameras();
+  const logs = useInvocationLogs();
+  const mutation = useInvocationMutation();
+  const client = useQueryClient();
+  const [selectedId, setSelectedId] = useState<string>();
+  const [draft, setDraft] = useState<InvocationDefinition>();
+  const [isNew, setIsNew] = useState(false);
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; latestSequence: number; method: string; target: string; requestPayload?: string; responseStatusCode?: number; responseBody?: string; error?: string }>();
+  const items = invocations.data?.items ?? [];
+
+  useEffect(() => {
+    if (!draft && items[0]) { setSelectedId(items[0].id); setDraft(clone(items[0])); }
+  }, [items, draft]);
+  const select = (item: InvocationDefinition) => { setSelectedId(item.id); setDraft(clone(item)); setIsNew(false); setTestResult(undefined); };
+  const update = (patch: Partial<InvocationDefinition>) => setDraft((value) => value ? { ...value, ...patch } : value);
+  const updateWeb = (patch: Partial<InvocationDefinition["web"]>) => setDraft((value) => value ? { ...value, web: { ...value.web, ...patch } } : value);
+  const updateSql = (patch: Partial<InvocationDefinition["sql"]>) => setDraft((value) => value ? { ...value, sql: { ...value.sql, ...patch } } : value);
+  const save = async () => { if (!draft || !draft.name.trim()) return; await mutation.mutateAsync({ value: { ...draft, name: draft.name.trim() }, create: isNew }); setIsNew(false); };
+  const testLatest = async () => {
+    if (!draft || isNew || testBusy) return;
+    setTestBusy(true); setTestResult(undefined);
+    try {
+      const response = await api.testInvocation(draft.id);
+      setTestResult({ success: response.result.success, latestSequence: response.latestSequence, method: response.result.method, target: response.result.target, requestPayload: response.result.requestPayload, responseStatusCode: response.result.responseStatusCode, responseBody: response.result.responseBody, error: response.result.error });
+    } catch (error) {
+      setTestResult({ success: false, latestSequence: 0, method: "—", target: "—", error: error instanceof Error ? error.message : "خطا در اجرای تست" });
+    } finally { setTestBusy(false); }
+  };
+  const remove = async () => { if (!draft || isNew || !confirm("این فراخوانی حذف شود؟")) return; await api.deleteInvocation(draft.id); setDraft(undefined); setSelectedId(undefined); await client.invalidateQueries({ queryKey: keys.invocations }); };
+  const addMapping = () => update({ mappings: [...(draft?.mappings ?? []), { target: "", source: "" }] });
+  const patchMapping = (index: number, value: Partial<InvocationMapping>) => update({ mappings: (draft?.mappings ?? []).map((item, itemIndex) => itemIndex === index ? { ...item, ...value } : item) });
+  const removeMapping = (index: number) => update({ mappings: (draft?.mappings ?? []).filter((_, itemIndex) => itemIndex !== index) });
+  const toggleCamera = (cameraId: string) => {
+    if (!draft) return;
+    const selected = draft.cameraIds.includes(cameraId) ? draft.cameraIds.filter((item) => item !== cameraId) : [...draft.cameraIds, cameraId];
+    update({ cameraIds: selected });
+  };
+  return (
+    <>
+      <PageHead title="فراخوانی‌ها" description="اتصال رویدادهای تشخیص به Web API یا دستور SQL، با زنجیره، فیلتر و لاگ پایدار" />
+      <div className="invocations-layout">
+        <section className="panel invocation-list-panel">
+          <div className="panel-head compact"><div><h3>تعریف‌ها</h3><span>{items.length} فراخوانی</span></div><Button icon={Plus} onClick={() => { const item = blankInvocation(); setDraft(item); setSelectedId(item.id); setIsNew(true); }}>جدید</Button></div>
+          <div className="invocation-list">
+            {items.map((item) => <button key={item.id} className={`invocation-row ${selectedId === item.id ? "selected" : ""}`} onClick={() => select(item)}><span className="invocation-type">{item.type === "Sql" ? "SQL" : "WEB"}</span><div><b>{item.name}</b><small>{item.workflowId ? `روند ${item.workflowId} · مرحله ${item.stepOrder}` : item.web.url || item.sql.commandText || "بدون مقصد"}</small></div><Badge tone={item.enabled ? "green" : "neutral"}>{item.enabled ? "فعال" : "خاموش"}</Badge></button>)}
+            {!items.length && <Empty icon={Zap} title="فراخوانی تعریف نشده" text="برای شروع یک Web یا SQL بسازید." />}
+          </div>
+        </section>
+        <section className="panel invocation-editor">
+          {!draft ? <Empty icon={Zap} title="یک مورد را انتخاب کنید" text="تنظیمات فراخوانی و Mapping اینجا نمایش داده می‌شود." /> : <>
+            <div className="panel-head"><div><h3>تعریف فراخوانی</h3><span>فیلتر، مقصد، Mapping و روند اجرا</span></div><div className="head-actions"><Button variant="soft" icon={Play} onClick={testLatest} disabled={testBusy || isNew}>{testBusy ? "در حال تست..." : "تست آخرین رکورد"}</Button><Button variant="danger" onClick={remove}>حذف</Button><Button variant="primary" icon={Save} onClick={save} disabled={mutation.isPending}>ذخیره</Button></div></div>
+            <div className="invocation-form">
+              {testResult && <div className={`invocation-test-result ${testResult.success ? "success" : "failure"}`}><Badge tone={testResult.success ? "green" : "red"}>{testResult.success ? "موفق" : "ناموفق"}</Badge><span>آخرین رکورد #{testResult.latestSequence}</span>{testResult.responseStatusCode !== undefined && <span>HTTP {testResult.responseStatusCode}</span>}<code>{testResult.error || testResult.responseBody || "بدون پاسخ متنی"}</code></div>}
+              {testResult && !testResult.success && <div className="invocation-test-debug"><div><b>Request</b><code dir="ltr">{testResult.method} {testResult.target}</code></div><div><b>Payload</b><pre dir="ltr">{testResult.requestPayload || "بدون Payload"}</pre></div>{testResult.responseBody && <div><b>Response</b><pre dir="ltr">{testResult.responseBody}</pre></div>}</div>}
+              <div className="form-grid">
+                <Field label="نام"><input value={draft.name} onChange={(e) => update({ name: e.target.value })} /></Field>
+                <Field label="نوع"><select value={draft.type} onChange={(e) => update({ type: e.target.value })}><option value="Web">Web API</option><option value="Sql">SQL</option></select></Field>
+                <Field label="وضعیت"><Toggle checked={draft.enabled} onChange={(enabled) => update({ enabled })} /></Field>
+                <Field label="روند اجرا" hint="برای زنجیره، مقدار مشترک بدهید"><input dir="ltr" value={draft.workflowId} onChange={(e) => update({ workflowId: e.target.value })} placeholder="workflow-1" /></Field>
+                <Field label="ترتیب مرحله"><input type="number" min="0" value={draft.stepOrder} onChange={(e) => update({ stepOrder: Number(e.target.value) || 0 })} /></Field>
+                <Field label="وابسته به مرحله قبل"><Toggle checked={draft.dependsOnPrevious} onChange={(dependsOnPrevious) => update({ dependsOnPrevious })} /></Field>
+              </div>
+              {draft.type === "Web" ? <div className="invocation-destination">
+                <h4>مقصد Web API</h4><div className="form-grid"><Field label="URL" wide><input dir="ltr" value={draft.web.url} onChange={(e) => updateWeb({ url: e.target.value })} placeholder="https://server/api/detections" /></Field><Field label="متد"><select value={draft.web.method} onChange={(e) => updateWeb({ method: e.target.value })}><option>POST</option><option>GET</option></select></Field><Field label="Content-Type"><select value={draft.web.contentType} onChange={(e) => updateWeb({ contentType: e.target.value })}><option>application/json</option><option>application/x-www-form-urlencoded</option></select></Field><Field label="احراز هویت"><select value={draft.web.authenticationType} onChange={(e) => updateWeb({ authenticationType: e.target.value })}><option>None</option><option>Bearer</option><option>ApiKey</option><option>Basic</option></select></Field><Field label="Token / مقدار"><input dir="ltr" type="password" value={draft.web.authenticationValue} onChange={(e) => updateWeb({ authenticationValue: e.target.value })} /></Field></div>
+              </div> : <div className="invocation-destination"><h4>مقصد SQL</h4><div className="form-grid"><Field label="Provider"><select value={draft.sql.provider} onChange={(e) => updateSql({ provider: e.target.value })}><option>Sqlite</option><option>SqlServer</option></select></Field><Field label="نوع دستور"><select value={draft.sql.commandType} onChange={(e) => updateSql({ commandType: e.target.value })}><option>Text</option><option>StoredProcedure</option></select></Field><Field label="Connection String" wide><input dir="ltr" value={draft.sql.connectionString} onChange={(e) => updateSql({ connectionString: e.target.value })} /></Field><Field label="دستور / نام Procedure" wide><textarea dir="ltr" rows={3} value={draft.sql.commandText} onChange={(e) => updateSql({ commandText: e.target.value })} placeholder="EXEC dbo.SaveDetection @plateNumber, @frameBase64" /></Field></div></div>}
+              <div className="invocation-destination"><h4>فیلتر اجرا</h4><div className="camera-filter"><span>دوربین‌ها:</span>{(cameras.data ?? []).map((camera) => <label key={camera.id} className="scope-chip"><input type="checkbox" checked={draft.cameraIds.includes(camera.id)} onChange={() => toggleCamera(camera.id)} />{camera.name}</label>)}{!(cameras.data ?? []).length && <small>دوربینی پیدا نشد</small>}</div><div className="form-grid"><Field label="فقط تریگر؟"><select value={draft.triggered === null || draft.triggered === undefined ? "all" : draft.triggered ? "yes" : "no"} onChange={(e) => update({ triggered: e.target.value === "all" ? null : e.target.value === "yes" })}><option value="all">همه رکوردها</option><option value="yes">فقط همراه تریگر</option><option value="no">فقط معمولی</option></select></Field><Field label="حداقل Confidence"><input type="number" min="0" max="100" value={draft.minimumConfidence ?? ""} onChange={(e) => update({ minimumConfidence: e.target.value === "" ? null : Number(e.target.value) })} /></Field><Field label="پلاک مشخص"><input dir="ltr" value={draft.plateTextEquals ?? ""} onChange={(e) => update({ plateTextEquals: e.target.value || null })} /></Field><Field label="نوع رخدادها" hint="با کاما جدا کنید"><input dir="ltr" value={draft.eventTypes.join(", ")} onChange={(e) => update({ eventTypes: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} placeholder="PlateDetected, FaceRecognized" /></Field><Field label="شناسه تریگرها" hint="با کاما جدا کنید"><input dir="ltr" value={draft.triggerIds.join(", ")} onChange={(e) => update({ triggerIds: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></Field></div></div>
+              <div className="invocation-destination"><div className="section-title-row"><div><h4>Mapping ورودی</h4><small>منبع داده را از فهرست انتخاب کنید؛ برای DTO دارای byte[]، Content-Type را روی JSON بگذارید تا تصویر به Base64 استاندارد تبدیل شود.</small></div><Button variant="soft" icon={Plus} onClick={addMapping}>فیلد</Button></div><div className="mapping-list">{draft.mappings.map((mapping, index) => <div className="mapping-row" key={`${index}-${mapping.target}`}><input dir="ltr" placeholder="فیلد مقصد" value={mapping.target} onChange={(e) => patchMapping(index, { target: e.target.value })} /><span>←</span><InvocationSourceSelect value={mapping.source} onChange={(source) => patchMapping(index, { source })} /><input placeholder="مقدار پیش‌فرض" value={mapping.defaultValue ?? ""} onChange={(e) => patchMapping(index, { defaultValue: e.target.value })} /><button className="icon-button" onClick={() => removeMapping(index)}><Trash2 size={15} /></button></div>)}</div></div>
+              <div className="form-grid"><Field label="Timeout (ثانیه)"><input type="number" min="1" value={draft.timeoutSeconds} onChange={(e) => update({ timeoutSeconds: Number(e.target.value) || 15 })} /></Field><Field label="تعداد Retry"><input type="number" min="0" value={draft.maxRetries} onChange={(e) => update({ maxRetries: Number(e.target.value) || 0 })} /></Field><Field label="فاصله Retry (ثانیه)"><input type="number" min="1" value={draft.retryDelaySeconds} onChange={(e) => update({ retryDelaySeconds: Number(e.target.value) || 30 })} /></Field></div>
+            </div>
+          </>}
+        </section>
+      </div>
+      <section className="panel invocation-log-panel"><div className="panel-head compact"><div><h3>لاگ نتیجه فراخوانی‌ها</h3><span>درخواست، پاسخ، خطا و تعداد تلاش‌ها در SQLite ذخیره می‌شود.</span></div><Button variant="ghost" icon={RefreshCw} onClick={() => void logs.refetch()}>به‌روزرسانی</Button></div><div className="invocation-log-list">{(logs.data ?? []).slice(0, 30).map((log) => <div className="invocation-log-row" key={log.logId}><Badge tone={log.status === "Succeeded" ? "green" : log.status === "Failed" ? "red" : "amber"}>{log.status}</Badge><b>{log.invocationName}</b><span>{log.method}</span><small>{fmtDate(log.startedAtUtc)}</small><small>تلاش {log.attempt}</small><code title={log.error || log.responseBody || ""}>{log.error || log.responseBody || "بدون پاسخ متنی"}</code>{log.status === "Failed" && <Button variant="ghost" onClick={() => void api.retryInvocationJob(log.jobId).then(() => logs.refetch())}>تلاش مجدد</Button>}</div>)}{!logs.data?.length && <Empty icon={Database} title="لاگی وجود ندارد" text="بعد از ثبت اولین تشخیص، نتیجه اینجا نمایش داده می‌شود." />}</div></section>
+    </>
   );
 }
 

@@ -651,7 +651,10 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             }
         }
 
-        DetectionEventEnvelope stored = _eventStore.Append(envelope, historyKey);
+        // Queue invocation jobs in the same SQLite transaction as the event so
+        // a process crash cannot leave a persisted detection without its
+        // configured outbound work item.
+        DetectionEventEnvelope stored = _eventStore.Append(envelope, historyKey, service.Invocations);
         await DetectionHub.PublishAsync(_hub, stored, cancellationToken);
     }
 
@@ -688,6 +691,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 ["serviceNodeId"] = service.ServiceNodeId,
                 ["cameraId"] = camera.Id,
                 ["cameraName"] = camera.Name,
+                ["cameraCode"] = camera.CameraCode,
                 ["taskId"] = taskId,
                 ["taskName"] = taskName,
                 ["taskIds"] = new JsonArray(work.Components.Select(item => GetMetadataString(item.Detection, "ProcessingItemId")).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Select(value => JsonValue.Create(value)).ToArray()),

@@ -30,6 +30,7 @@
 | [05-CONFIGURATION-DATA.md](05-CONFIGURATION-DATA.md) | محل فایل‌ها، مالکیت داده، migration و concurrency |
 | [06-IMPLEMENTATION-ROADMAP.md](06-IMPLEMENTATION-ROADMAP.md) | مراحل پیشنهادی پیاده‌سازی و معیار پذیرش |
 | [07-DETECTION-EVENT-CONTRACT.md](07-DETECTION-EVENT-CONTRACT.md) | قرارداد کامل رخداد، تصاویر و ارتباط پلاک/چهره |
+| [08-INVOCATIONS.md](08-INVOCATIONS.md) | تعریف فراخوانی‌های Web/SQL، Mapping، تصویر، زنجیره، retry، log و تست |
 
 ## وضعیت پیاده‌سازی
 

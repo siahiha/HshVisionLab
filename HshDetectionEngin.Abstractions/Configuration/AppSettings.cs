@@ -66,6 +66,8 @@ public class CameraSettings
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Camera 1";
+    /// <summary>Optional stable code used by external integrations.</summary>
+    public string CameraCode { get; set; } = string.Empty;
     public string SourceUrl { get; set; } = "rtsp://192.168.1.100:554/stream";
     public string ModelFile { get; set; } = "best.onnx";
     public bool PlateEnabled { get; set; } = true;
@@ -128,6 +130,7 @@ public class CameraSettings
 
     public void EnsureProcessingDefaults()
     {
+        CameraCode = CameraCode?.Trim() ?? string.Empty;
         Processing ??= [];
         Rois ??= [];
         RoiPolygon ??= [];

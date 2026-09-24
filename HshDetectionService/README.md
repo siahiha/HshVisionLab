@@ -52,6 +52,10 @@ POST /api/v1/face/samples/{sampleId}/move
 GET /api/v1/events?afterSequence=0&limit=200
 DELETE /api/v1/events?fromUtc=...&toUtc=...  (هر دو خالی = حذف همه)
 GET /api/v1/events/{eventId}/artifacts/{artifactId}
+GET/POST/PATCH/DELETE /api/v1/invocations
+GET  /api/v1/invocations/logs
+POST /api/v1/invocations/{invocationId}/test
+POST /api/v1/invocations/jobs/{jobId}/retry
 GET /api/v1/triggers
 POST /api/v1/triggers
 GET /api/v1/streams/{cameraId}/overlay

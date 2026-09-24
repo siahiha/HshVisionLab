@@ -29,7 +29,7 @@ public sealed class EventStore : IDisposable
 
     public string DatabasePath { get; }
 
-    public DetectionEventEnvelope Append(DetectionEventEnvelope envelope, string? historyKey = null)
+    public DetectionEventEnvelope Append(DetectionEventEnvelope envelope, string? historyKey = null, IReadOnlyList<InvocationDefinition>? invocations = null)
     {
         lock (_gate)
         {
@@ -79,10 +79,149 @@ public sealed class EventStore : IDisposable
                     history.ExecuteNonQuery();
                 }
             }
+
+            if (invocations is not null)
+            {
+                foreach (InvocationDefinition invocation in invocations.Where(item => item.Enabled))
+                {
+                    using SqliteCommand job = _connection.CreateCommand();
+                    job.Transaction = transaction;
+                    job.CommandText = "INSERT OR IGNORE INTO InvocationJobs(EventSequence, EventId, InvocationId, Status, AttemptCount, CreatedAtUtc) VALUES ($sequence, $eventId, $invocationId, 'Pending', 0, $created);";
+                    Add(job, "$sequence", sequence);
+                    Add(job, "$eventId", envelope.EventId);
+                    Add(job, "$invocationId", invocation.Id);
+                    Add(job, "$created", DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                    job.ExecuteNonQuery();
+                }
+            }
             transaction.Commit();
             return envelope;
         }
     }
+
+    public IReadOnlyList<InvocationJobRecord> ReadPendingInvocationJobs(DateTime utcNow, int limit = 50)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            limit = Math.Clamp(limit, 1, 500);
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "SELECT JobId, EventSequence, EventId, InvocationId, Status, AttemptCount, NextAttemptUtc, LastError, CreatedAtUtc, UpdatedAtUtc FROM InvocationJobs WHERE Status = 'Pending' AND (NextAttemptUtc IS NULL OR NextAttemptUtc <= $now) ORDER BY JobId LIMIT $limit;";
+            Add(command, "$now", utcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            Add(command, "$limit", limit);
+            using SqliteDataReader reader = command.ExecuteReader();
+            var result = new List<InvocationJobRecord>();
+            while (reader.Read()) result.Add(ReadJob(reader));
+            return result;
+        }
+    }
+
+    public InvocationJobRecord? GetInvocationJob(long jobId)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "SELECT JobId, EventSequence, EventId, InvocationId, Status, AttemptCount, NextAttemptUtc, LastError, CreatedAtUtc, UpdatedAtUtc FROM InvocationJobs WHERE JobId = $id;";
+            Add(command, "$id", jobId);
+            using SqliteDataReader reader = command.ExecuteReader();
+            return reader.Read() ? ReadJob(reader) : null;
+        }
+    }
+
+    public void MarkInvocationJob(long jobId, string status, int attemptCount, DateTime? nextAttemptUtc, string? lastError)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "UPDATE InvocationJobs SET Status = $status, AttemptCount = $attempt, NextAttemptUtc = $next, LastError = $error, UpdatedAtUtc = $updated WHERE JobId = $id;";
+            Add(command, "$status", status);
+            Add(command, "$attempt", attemptCount);
+            Add(command, "$next", nextAttemptUtc?.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? (object)DBNull.Value);
+            Add(command, "$error", lastError ?? (object)DBNull.Value);
+            Add(command, "$updated", DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            Add(command, "$id", jobId);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void ResetRunningInvocationJobs()
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "UPDATE InvocationJobs SET Status = 'Pending', NextAttemptUtc = NULL, UpdatedAtUtc = $updated WHERE Status = 'Running';";
+            Add(command, "$updated", DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void AddInvocationLog(InvocationLogRecord log)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "INSERT INTO InvocationLogs(JobId, EventSequence, EventId, InvocationId, InvocationName, StepOrder, Status, Attempt, StartedAtUtc, CompletedAtUtc, Method, Target, RequestPayload, ResponseStatusCode, ResponseBody, Error) VALUES ($job, $sequence, $eventId, $invocationId, $name, $step, $status, $attempt, $started, $completed, $method, $target, $payload, $code, $body, $error);";
+            Add(command, "$job", log.JobId); Add(command, "$sequence", log.EventSequence); Add(command, "$eventId", log.EventId);
+            Add(command, "$invocationId", log.InvocationId); Add(command, "$name", log.InvocationName); Add(command, "$step", log.StepOrder);
+            Add(command, "$status", log.Status); Add(command, "$attempt", log.Attempt); Add(command, "$started", log.StartedAtUtc.ToUniversalTime().ToString("O"));
+            Add(command, "$completed", log.CompletedAtUtc?.ToUniversalTime().ToString("O") ?? (object)DBNull.Value); Add(command, "$method", log.Method);
+            Add(command, "$target", log.Target); Add(command, "$payload", log.RequestPayload ?? (object)DBNull.Value); Add(command, "$code", log.ResponseStatusCode ?? (object)DBNull.Value);
+            Add(command, "$body", log.ResponseBody ?? (object)DBNull.Value); Add(command, "$error", log.Error ?? (object)DBNull.Value);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public IReadOnlyList<InvocationLogRecord> ReadInvocationLogs(int limit = 200, string? invocationId = null, string? status = null)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            limit = Math.Clamp(limit, 1, 1000);
+            var predicates = new List<string>();
+            if (!string.IsNullOrWhiteSpace(invocationId)) predicates.Add("InvocationId = $invocationId");
+            if (!string.IsNullOrWhiteSpace(status)) predicates.Add("Status = $status");
+            string where = predicates.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", predicates);
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = $"SELECT LogId, JobId, EventSequence, EventId, InvocationId, InvocationName, StepOrder, Status, Attempt, StartedAtUtc, CompletedAtUtc, Method, Target, RequestPayload, ResponseStatusCode, ResponseBody, Error FROM InvocationLogs{where} ORDER BY LogId DESC LIMIT $limit;";
+            if (!string.IsNullOrWhiteSpace(invocationId)) Add(command, "$invocationId", invocationId!);
+            if (!string.IsNullOrWhiteSpace(status)) Add(command, "$status", status!);
+            Add(command, "$limit", limit);
+            using SqliteDataReader reader = command.ExecuteReader();
+            var result = new List<InvocationLogRecord>();
+            while (reader.Read()) result.Add(ReadLog(reader));
+            return result;
+        }
+    }
+
+    public string? GetInvocationJobStatus(long eventSequence, string invocationId)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "SELECT Status FROM InvocationJobs WHERE EventSequence = $sequence AND InvocationId = $invocationId LIMIT 1;";
+            Add(command, "$sequence", eventSequence); Add(command, "$invocationId", invocationId);
+            return command.ExecuteScalar() as string;
+        }
+    }
+
+    private static InvocationJobRecord ReadJob(SqliteDataReader reader) => new(
+        reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetInt32(5),
+        ParseDate(reader.IsDBNull(6) ? null : reader.GetString(6)), reader.IsDBNull(7) ? null : reader.GetString(7),
+        ParseDate(reader.GetString(8)) ?? DateTime.UtcNow, ParseDate(reader.IsDBNull(9) ? null : reader.GetString(9)));
+
+    private static InvocationLogRecord ReadLog(SqliteDataReader reader) => new(
+        reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetString(3), reader.GetString(4), reader.GetString(5),
+        reader.GetInt32(6), reader.GetString(7), reader.GetInt32(8), ParseDate(reader.GetString(9)) ?? DateTime.UtcNow,
+        ParseDate(reader.IsDBNull(10) ? null : reader.GetString(10)), reader.GetString(11), reader.GetString(12),
+        reader.IsDBNull(13) ? null : reader.GetString(13), reader.IsDBNull(14) ? null : reader.GetInt32(14),
+        reader.IsDBNull(15) ? null : reader.GetString(15), reader.IsDBNull(16) ? null : reader.GetString(16));
+
+    private static DateTime? ParseDate(string? value) => DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime parsed) ? parsed : null;
 
     public IReadOnlyList<DetectionEventEnvelope> ReadAfter(long afterSequence, int limit, long? maximumSequence = null)
     {
@@ -117,6 +256,21 @@ public sealed class EventStore : IDisposable
             using SqliteCommand command = _connection.CreateCommand();
             command.CommandText = "SELECT Sequence, PayloadJson FROM DetectionEvents WHERE EventId = $id;";
             Add(command, "$id", eventId);
+            using SqliteDataReader reader = command.ExecuteReader();
+            if (!reader.Read()) return null;
+            DetectionEventEnvelope? item = JsonSerializer.Deserialize<DetectionEventEnvelope>(reader.GetString(1), ServiceJson.Options);
+            if (item is not null) item.Sequence = reader.GetInt64(0);
+            return item;
+        }
+    }
+
+    public DetectionEventEnvelope? ReadLatest()
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "SELECT Sequence, PayloadJson FROM DetectionEvents ORDER BY Sequence DESC LIMIT 1;";
             using SqliteDataReader reader = command.ExecuteReader();
             if (!reader.Read()) return null;
             DetectionEventEnvelope? item = JsonSerializer.Deserialize<DetectionEventEnvelope>(reader.GetString(1), ServiceJson.Options);
@@ -256,6 +410,42 @@ public sealed class EventStore : IDisposable
                 FOREIGN KEY(EventSequence) REFERENCES DetectionEvents(Sequence) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS IX_TriggerHistory_Lookup ON TriggerHistory(TriggerId, TriggerKey, OccurredAtUtc);
+            CREATE TABLE IF NOT EXISTS InvocationJobs(
+                JobId INTEGER PRIMARY KEY AUTOINCREMENT,
+                EventSequence INTEGER NOT NULL,
+                EventId TEXT NOT NULL,
+                InvocationId TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                AttemptCount INTEGER NOT NULL DEFAULT 0,
+                NextAttemptUtc TEXT NULL,
+                LastError TEXT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                UpdatedAtUtc TEXT NULL,
+                UNIQUE(EventSequence, InvocationId),
+                FOREIGN KEY(EventSequence) REFERENCES DetectionEvents(Sequence) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS IX_InvocationJobs_Pending ON InvocationJobs(Status, NextAttemptUtc);
+            CREATE TABLE IF NOT EXISTS InvocationLogs(
+                LogId INTEGER PRIMARY KEY AUTOINCREMENT,
+                JobId INTEGER NOT NULL,
+                EventSequence INTEGER NOT NULL,
+                EventId TEXT NOT NULL,
+                InvocationId TEXT NOT NULL,
+                InvocationName TEXT NOT NULL,
+                StepOrder INTEGER NOT NULL,
+                Status TEXT NOT NULL,
+                Attempt INTEGER NOT NULL,
+                StartedAtUtc TEXT NOT NULL,
+                CompletedAtUtc TEXT NULL,
+                Method TEXT NOT NULL,
+                Target TEXT NOT NULL,
+                RequestPayload TEXT NULL,
+                ResponseStatusCode INTEGER NULL,
+                ResponseBody TEXT NULL,
+                Error TEXT NULL,
+                FOREIGN KEY(JobId) REFERENCES InvocationJobs(JobId) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS IX_InvocationLogs_Lookup ON InvocationLogs(InvocationId, Status, LogId);
             """;
         command.ExecuteNonQuery();
     }

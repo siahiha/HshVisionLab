@@ -3,8 +3,8 @@ import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr'
 import { useEffect, useState } from 'react'
 import { api, serviceUrl } from './api'
 import type { EventDeletionRange } from './api'
-import type { CameraSettings, ClientSubscription, DetectionEvent, TriggerDefinition } from './types'
-export const keys = { status: ['status'], cameras: ['cameras'], settings: ['settings'], capabilities: ['capabilities'], models: ['models'], people: ['people'], triggers: ['triggers'], events: ['events'] }
+import type { CameraSettings, ClientSubscription, DetectionEvent, InvocationDefinition, TriggerDefinition } from './types'
+export const keys = { status: ['status'], cameras: ['cameras'], settings: ['settings'], capabilities: ['capabilities'], models: ['models'], people: ['people'], triggers: ['triggers'], invocations: ['invocations'], invocationLogs: ['invocation-logs'], events: ['events'] }
 export const clientSubscriptionKey = 'hsh-client-subscription'
 export const defaultClientSubscription = (): ClientSubscription => ({ mode: 'All', cameraIds: [], roiIds: [], faceRequired: false, plateRequired: false, includeFace: true, includePlate: true, includeUnknownFace: true, includeArtifacts: true, windowMs: 1500, cooldownSeconds: 0 })
 export function readClientSubscription(): ClientSubscription {
@@ -32,6 +32,9 @@ export function useCamera(id?: string) { return useQuery({ queryKey: ['camera', 
 export function useSettings() { return useQuery({ queryKey: keys.settings, queryFn: api.settings }) }
 export function useCapabilities() { return useQuery({ queryKey: keys.capabilities, queryFn: api.capabilities, staleTime: 60_000 }) }
 export function useModels() { return useQuery({ queryKey: keys.models, queryFn: api.models, staleTime: 60_000 }) }
+export function useInvocations() { return useQuery({ queryKey: keys.invocations, queryFn: api.invocations }) }
+export function useInvocationLogs(invocationId?: string) { return useQuery({ queryKey: [...keys.invocationLogs, invocationId], queryFn: () => api.invocationLogs(invocationId), refetchInterval: 5000 }) }
+export function useInvocationMutation() { const client = useQueryClient(); return useMutation({ mutationFn: (input: { value: InvocationDefinition; create: boolean }) => input.create ? api.createInvocation(input.value) : api.updateInvocation(input.value), onSuccess: () => { void client.invalidateQueries({ queryKey: keys.invocations }); void client.invalidateQueries({ queryKey: keys.invocationLogs }) } }) }
 export function usePeople() { return useQuery({ queryKey: keys.people, queryFn: api.people }) }
 export function usePersonSamples(id?: string) { return useQuery({ queryKey: ['samples', id], queryFn: () => api.samples(id!), enabled: Boolean(id) }) }
 export function useEvents(query = '', limit = 200) {

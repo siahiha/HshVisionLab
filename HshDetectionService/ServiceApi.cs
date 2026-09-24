@@ -128,6 +128,57 @@ public static class ServiceApi
             }
         });
 
+        // Generic outbound invocation management. The UI calls these endpoints
+        // instead of editing the whole service-settings document, which keeps
+        // concurrent camera/trigger edits isolated from integration edits.
+        app.MapGet("/api/v1/invocations", (ServiceSettingsStore store) => Results.Ok(new
+        {
+            revision = store.Service.Revision,
+            items = store.Service.Invocations
+        }));
+        app.MapPost("/api/v1/invocations", (InvocationDefinition definition, ServiceSettingsStore store) =>
+        {
+            definition.Id = string.IsNullOrWhiteSpace(definition.Id) ? Guid.NewGuid().ToString("N") : definition.Id;
+            ServiceSettingsDocument settings = store.Service;
+            if (settings.Invocations.Any(item => item.Id.Equals(definition.Id, StringComparison.OrdinalIgnoreCase))) return Results.Conflict(new { code = "duplicate_invocation_id" });
+            settings.Invocations.Add(definition);
+            store.SaveService(settings, store.Service.Revision);
+            return Results.Ok(definition);
+        });
+        app.MapPatch("/api/v1/invocations/{invocationId}", (string invocationId, InvocationDefinition update, ServiceSettingsStore store) =>
+        {
+            ServiceSettingsDocument settings = store.Service;
+            InvocationDefinition? current = settings.Invocations.FirstOrDefault(item => item.Id.Equals(invocationId, StringComparison.OrdinalIgnoreCase));
+            if (current is null) return Results.NotFound();
+            update.Id = invocationId;
+            settings.Invocations.Remove(current);
+            settings.Invocations.Add(update);
+            store.SaveService(settings, store.Service.Revision);
+            return Results.Ok(update);
+        });
+        app.MapDelete("/api/v1/invocations/{invocationId}", (string invocationId, ServiceSettingsStore store) =>
+        {
+            ServiceSettingsDocument settings = store.Service;
+            if (settings.Invocations.RemoveAll(item => item.Id.Equals(invocationId, StringComparison.OrdinalIgnoreCase)) == 0) return Results.NotFound();
+            store.SaveService(settings, store.Service.Revision);
+            return Results.NoContent();
+        });
+        app.MapGet("/api/v1/invocations/logs", (int? limit, string? invocationId, string? status, EventStore events) => Results.Ok(events.ReadInvocationLogs(limit ?? 200, invocationId, status)));
+        app.MapPost("/api/v1/invocations/{invocationId}/test", async (string invocationId, EventStore events, InvocationDeliveryService delivery, CancellationToken cancellationToken) =>
+        {
+            DetectionEventEnvelope? latest = events.ReadLatest();
+            if (latest is null) return Results.NotFound(new { code = "no_detection_events", message = "No detection event is available for testing." });
+            InvocationTestResult? result = await delivery.TestLatestAsync(invocationId, latest, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(new { latestEventId = latest.EventId, latestSequence = latest.Sequence, result });
+        });
+        app.MapPost("/api/v1/invocations/jobs/{jobId}/retry", (long jobId, EventStore events) =>
+        {
+            InvocationJobRecord? job = events.GetInvocationJob(jobId);
+            if (job is null) return Results.NotFound();
+            events.MarkInvocationJob(jobId, "Pending", job.AttemptCount, DateTime.UtcNow, null);
+            return Results.Ok(new { accepted = true });
+        });
+
         app.MapPost("/api/v1/settings/validate", (AppSettings settings, DetectionRuntimeHost host) =>
         {
             var errors = new List<string>();
