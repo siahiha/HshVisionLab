@@ -12,7 +12,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
     private readonly PlateProcessingOptions _options;
     private readonly int _maxFps;
     private readonly YoloDetector _plateDetector;
-    private readonly CrnnPlateRecognizer? _ocr;
+    private readonly IPlateTextRecognizer? _ocr;
     private readonly PlateTracker _tracker = new();
     private readonly Dictionary<int, CachedOcr> _ocrCache = [];
     private long _nextProcessTicks;
@@ -52,7 +52,9 @@ internal sealed class PlatePipeline : IProcessingPipeline
             ?? throw new FileNotFoundException($"Plate recognition model was not found: {options.CharacterModelFile}");
         if (ocrPath.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The selected plate recognition model must be an ONNX OCR model with a .labels.json sidecar.");
-        _ocr = new CrnnPlateRecognizer(ocrPath, threads);
+        _ocr = Path.GetFileNameWithoutExtension(ocrPath).Contains("cnn", StringComparison.OrdinalIgnoreCase)
+            ? new CnnPlateRecognizer(ocrPath, threads)
+            : new CrnnPlateRecognizer(ocrPath, threads);
     }
 
     public PipelineResult Process(ProcessingContext context)

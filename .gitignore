@@ -59,7 +59,9 @@ HshDetectionEngin.Tools/RawModels/
 
 # Runtime-ready plate detector and whole-plate OCR models.
 !HshDetectionEngin.Plate/Models/plate_yolo.onnx
+!HshDetectionEngin.Plate/Models/plate_yolo_fallback.onnx
 !HshDetectionEngin.Plate/Models/ocr_crnn.onnx
+!HshDetectionEngin.Plate/Models/ocr_cnn.onnx
 
 # Model packages over GitHub's regular 100 MB file limit.
 HshDetectionEngin.Plate/Models/best.hshmodel

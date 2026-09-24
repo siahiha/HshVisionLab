@@ -93,8 +93,10 @@ internal sealed class YoloDetector : IDisposable
 
         if (_session.ModelMetadata.CustomMetadataMap.TryGetValue("names", out var raw))
             _classNames = ParseClassNames(raw);
-        if (_opt.ForcedClassId is null && _classNames.Length == 1 &&
-            string.Equals(_classNames[0], "plate", StringComparison.OrdinalIgnoreCase))
+        // The Plate module owns this detector, so any single-class YOLO
+        // export in the plate catalog is a plate detector (some models use
+        // labels such as "licence" instead of "plate").
+        if (_opt.ForcedClassId is null && _classNames.Length == 1)
             _opt.ForcedClassId = PersianPlate.PlateClassId;
 
         int w = _opt.InputWidth;

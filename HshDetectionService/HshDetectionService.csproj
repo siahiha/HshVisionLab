@@ -36,12 +36,24 @@
           Link="Models\Plate\plate_yolo.onnx"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\HshDetectionEngin.Plate\Models\plate_yolo_fallback.onnx"
+          Link="Models\Plate\plate_yolo_fallback.onnx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\HshDetectionEngin.Plate\Models\ocr_crnn.onnx"
           Link="Models\Plate\ocr_crnn.onnx"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\HshDetectionEngin.Plate\Models\ocr_crnn.labels.json"
           Link="Models\Plate\ocr_crnn.labels.json"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\HshDetectionEngin.Plate\Models\ocr_cnn.onnx"
+          Link="Models\Plate\ocr_cnn.onnx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\HshDetectionEngin.Plate\Models\ocr_cnn.labels.json"
+          Link="Models\Plate\ocr_cnn.labels.json"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

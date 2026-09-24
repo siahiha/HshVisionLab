@@ -10,12 +10,18 @@ namespace HshDetectionEngin.Plate;
 
 internal sealed record PlateOcrResult(string Text, float Confidence);
 
+internal interface IPlateTextRecognizer : IDisposable
+{
+    double LastInferenceMs { get; }
+    PlateOcrResult Read(Mat crop);
+}
+
 /// <summary>
 /// Whole-plate CRNN recognizer. It deliberately accepts one plate crop at a
 /// time, keeping the detector and OCR stages independent and bounded in CPU
 /// cost. The model contract is 1x1x32x128 grayscale with CTC output.
 /// </summary>
-internal sealed class CrnnPlateRecognizer : IDisposable
+internal sealed class CrnnPlateRecognizer : IPlateTextRecognizer
 {
     private static readonly string[] FallbackLabels =
     [
