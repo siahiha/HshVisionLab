@@ -69,13 +69,18 @@ npx vite --host 0.0.0.0 --port 5173
 در بخش `Processing / ROI`، هر ROI می‌تواند آیتم‌های مستقل داشته باشد. ادیتور
 مطابق کد فعلی این بخش‌ها را جدا می‌کند:
 
-1. `تشخیص پلاک` (`Plate detection`): مدل، input size، preprocessing، confidence،
-   NMS، نرخ پردازش و tracking پلاک.
-2. `تشخیص چهره` (`Face detection`): مدل YuNet، input size، preprocessing،
+1. `تشخیص پلاک` (`Plate detection`): مدل، input size، confidence، NMS، نرخ
+   پردازش و tracking پلاک. مقدار `preprocessing` در تنظیمات، مسیر legacy
+   استخراج character را کنترل می‌کند؛ detector در runtime letterbox و
+   نرمال‌سازی ثابت خودش را اجرا می‌کند.
+2. `خواندن کاراکتر پلاک` (`Plate character recognition`): فعال‌سازی مستقل OCR،
+   مدل OCR، confidence و نرخ پردازش OCR برای crop هر پلاک. در حالت OCR مستقل،
+   crop خام پلاک به مدل داده می‌شود.
+3. `تشخیص چهره` (`Face detection`): مدل YuNet، input size، preprocessing،
    confidence و NMS/TopK تشخیص چهره.
-3. `شناسایی چهره` (`Face identification`): مدل SFace، threshold شناسایی،
+4. `شناسایی چهره` (`Face identification`): مدل SFace، threshold شناسایی،
    known/unknown matching و اتصال به Face Database.
-4. `ردیابی و ثبت سابقه` (`Tracking and recording`): IoU، حداکثر miss، نرخ
+5. `ردیابی و ثبت سابقه` (`Tracking and recording`): IoU، حداکثر miss، نرخ
    پردازش، record confidence و cooldown رخداد.
 
 مدل‌ها در UI به‌صورت input متنی وارد نمی‌شوند. هر فیلد مدل یک ComboBox است و

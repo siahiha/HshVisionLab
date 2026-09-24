@@ -167,7 +167,9 @@ detected-event-card
 
 crop از اولین artifactای انتخاب می‌شود که type آن شامل یکی از این عبارت‌ها
 باشد: `platecrop`، `detectioncrop`، `facealignedcrop`، `roiraw` یا
-`roiannotated`. در مسیر فعلی آرشیو، `RoiRaw` برای crop خام استفاده می‌شود.
+`roiannotated`. در مسیر فعلی آرشیو، `PlateCrop`، `DetectionCrop` و در صورت
+وجود `FaceAlignedCrop` تولید می‌شوند؛ `RoiRaw` و artifactهای annotated فعلاً
+تولید نمی‌شوند.
 اگر چنین artifactای نباشد، به‌جای تصویر آیکون Database نمایش داده می‌شود.
 کلیک روی کارت به `/events/<eventId>` می‌رود.
 
@@ -348,9 +350,17 @@ checkbox `ROI فعال` و task editor را نشان می‌دهد. در حال�
 3. `۳. شناسایی چهره` — `Face identification`؛
 4. `ردیابی و ثبت سابقه` — `Tracking and recording`.
 
-بخش Plate شامل ComboBox `Model`، `Input size`، `Preprocessing`، `Confidence`,
+بخش Plate detection شامل ComboBox `Model`، `Input size`، `Preprocessing`، `Confidence`,
 `NMS IoU`، `Max processing FPS`، `Threads`، `Buffer count`،
 `History event cooldown (sec)` و `Track max misses` است.
+
+بخش Plate character recognition جدا از detector است و Toggle
+`CharacterRecognitionEnabled`، ComboBox `Recognition model`،
+`Recognition confidence` و `Recognition max FPS` را دارد. `Preprocessing` این
+بخش برای detector به‌کار نمی‌رود؛ detector preprocessing ثابت خودش را دارد و
+در حالت OCR مستقل، crop خام پلاک به مدل OCR داده می‌شود. وقتی Toggle خاموش
+باشد، در صورت وجود character classهای خروجی detector از مسیر legacy استفاده
+می‌شود.
 
 بخش Face detection شامل ComboBox `Detection model`، `Input size`,
 `Preprocessing`، `Detection confidence`، `NMS IoU` و `Max candidate faces` است.
@@ -452,7 +462,7 @@ confidence، Face identity، scope دوربین‌ها و کانال اعلان 
 
 ## ۱۱. تنظیمات سرویس `/settings`
 
-در tab `Runtime و retention` فیلدهای association نیز وجود دارند: `Max association window (ms)` برای پنجرهٔ زمانی اتصال پلاک/چهره و `Association فقط داخل همان ROI` برای الزام تطابق ROI.
+در tab `Runtime و retention` فیلدهای association نیز وجود دارند: `Max association window (ms)` برای پنجرهٔ زمانی اتصال پلاک/چهره و `Association فقط داخل همان ROI` برای الزام تطابق ROI. این گزینه به‌صورت پیش‌فرض فعال است؛ در صورت خاموش‌کردن آن، Plate و Face از دو ROI متفاوت همان دوربین نیز می‌توانند در همان فریم/پنجرهٔ زمانی pair شوند. این association بررسی فاصله، هم‌پوشانی یا تعلق قطعی چهره به خودرو نیست.
 
 PageHead عنوان `تنظیمات سرویس` و دو اکشن `Reload runtime` و
 `ذخیره همهٔ تنظیمات` دارد. tabهای دقیق:

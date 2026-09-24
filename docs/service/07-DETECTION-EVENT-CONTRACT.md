@@ -31,7 +31,7 @@
 | --- | --- |
 | `PlateOnly` | تشخیص پلاک بدون وابستگی به چهره |
 | `FaceRecognition` | تشخیص چهره و در صورت امکان شناسایی از Face Database |
-| `PlateFaceAssociation` | تشخیص هم‌زمان پلاک و چهره و مقایسهٔ ارتباط آن‌ها با رکورد قبلی |
+| `PlateFaceAssociation` | اتصال componentهای پلاک و چهره در همان فریم یا پنجرهٔ زمانی؛ در نسخهٔ فعلی مقایسه با رکورد تاریخی انجام نمی‌شود |
 
 سناریو فقط نوع رخداد را مشخص می‌کند. هر سناریو می‌تواند چند component تشخیص داشته باشد.
 
@@ -124,42 +124,39 @@
     "componentId": "plate-component",
     "kind": "Plate",
     "status": "Accepted",
-    "plateText": "12الف34567",
-    "rawText": "12الف34567",
-    "normalizedText": "12الف34567",
-    "isValidIranianPlate": true,
+    "label": "12ا34567",
+    "confidence": 0.92,
+    "threshold": 0.35,
+    "trackId": 44,
+    "bounds": { },
+    "plateText": "12ا34567",
     "plateConfidence": 0.92,
     "plateThreshold": 0.35,
-    "bounds": { },
-    "trackId": 44,
-    "model": { },
+    "isValidIranianPlate": true,
+    "recognitionConfidence": 0.88,
+    "recognitionModel": "ocr_crnn.onnx",
+    "hasCharacterDetails": true,
     "characters": [
       {
         "index": 0,
         "symbol": "1",
-        "classId": 1,
+        "classId": null,
         "confidence": 0.91,
         "bounds": { }
       },
       {
         "index": 1,
         "symbol": "2",
-        "classId": 2,
+        "classId": null,
         "confidence": 0.89,
         "bounds": { }
       }
-    ],
-    "ocr": {
-      "ordering": "right-to-left",
-      "characterCount": 8,
-      "hasMissingCharacter": false,
-      "validationMessage": null
-    }
+    ]
   }
 }
 ```
 
-برای هر character، `symbol`، `classId`، confidence و bounds باید قابل دسترسی باشد. اگر موتور در یک مرحله characterها را تولید نکند، `characters` خالی و `hasCharacterDetails=false` اعلام شود؛ دادهٔ جعلی تولید نشود.
+این نمونه شکل واقعی component ساخته‌شده در `DetectionRuntimeHost` است. در OCR مستقل، `classId` و گاهی `bounds` می‌توانند `null` باشند؛ در مسیر legacy character detector، `classId` ممکن است مقدار عددی داشته باشد. اگر OCR مستقل خاموش باشد، `recognitionConfidence=0` و `recognitionModel=null` است و جزئیات character فقط در صورت تولید توسط detector پر می‌شود. فیلدهای `rawText`، `normalizedText`، `ocr` و شیء `model` در payload فعلی وجود ندارند. متن فقط وقتی پذیرفته می‌شود که الگوی کد، یعنی دو رقم، یک حرف فارسی و پنج رقم، را داشته باشد.
 
 ## 6. سناریوی `FaceRecognition`
 
@@ -247,7 +244,7 @@ RecognitionStatus:
       "status": "MatchedPreviousRecord",
       "plateComponentId": "plate-component",
       "faceComponentId": "face-component",
-      "plateText": "12الف34567",
+      "plateText": "12ا34567",
       "personId": "person-guid",
       "personName": "Ali Ahmadi",
       "isUnknownPerson": false,
@@ -309,26 +306,29 @@ VehiclePersonAssociation
 
 | Artifact | محتوا |
 | --- | --- |
-| `FullFrameRaw` | فریم اصلی بدون Drawing، در صورت فعال بودن policy |
-| `FullFrameAnnotated` | فریم کامل همراه ROIها و کادرهای detection |
-| `RoiRaw` | crop خام ROI مربوط به task |
-| `RoiAnnotated` | crop ROI همراه Drawing محلی و جزئیات detection |
-| `DetectionCrop` | crop دقیق پلاک یا چهره |
-| `FaceAlignedCrop` | crop aligned استفاده‌شده برای recognition |
-| `PlateCrop` | crop نهایی پلاک |
-| `CharacterCrop` | crop یا image sheet جزئیات characterها، در صورت نیاز |
+| `FullFrameRaw` | فریم اصلی بدون Drawing؛ در مسیر فعلی برای اولین source frame ذخیره می‌شود |
+| `AssociatedFrameRaw` | فریم خام source دیگری که برای association زمانی همان event ذخیره می‌شود |
+| `FullFrameAnnotated` | فریم کامل همراه ROIها و کادرهای detection؛ در مسیر فعلی تولید نمی‌شود |
+| `RoiRaw` | crop خام ROI؛ در مسیر فعلی تولید نمی‌شود |
+| `RoiAnnotated` | crop ROI همراه Drawing محلی؛ در مسیر فعلی تولید نمی‌شود |
+| `DetectionCrop` | crop دقیق component چهره |
+| `FaceAlignedCrop` | crop aligned چهره، فقط اگر metadata مربوطه تولید شده باشد |
+| `PlateCrop` | crop نهایی component پلاک |
+| `CharacterCrop` | crop یا image sheet characterها؛ در مسیر فعلی تولید نمی‌شود |
 
-در پیاده‌سازی فعلی آرشیو تشخیص، `FullFrameRaw` و `RoiRaw` از snapshot خام قبل
-از اجرای pipeline و قبل از هرگونه رسم ROI یا detection ساخته می‌شوند. تصویر
-رندرشدهٔ preview و overlay زنده مسیر جداگانه‌ای دارند و نباید به‌عنوان artifact
-آرشیو استفاده شوند.
+در پیاده‌سازی فعلی آرشیو تشخیص، برای هر event یک `FullFrameRaw` از اولین source
+frame یکتا ذخیره می‌شود؛ اگر association زمانی frame دیگری داشته باشد، آن frame
+با نوع `AssociatedFrameRaw` ذخیره می‌شود. برای componentها، `PlateCrop` برای
+پلاک و `DetectionCrop` برای چهره ساخته می‌شود و `FaceAlignedCrop` فقط در صورت
+وجود metadata مربوطه اضافه می‌گردد. `RoiRaw` و artifactهای annotated در مسیر
+فعلی آرشیو ساخته نمی‌شوند.
 
 هر artifact:
 
 ```json
 {
   "artifactId": "artifact-guid",
-  "type": "RoiRaw",
+  "type": "PlateCrop",
   "contentType": "image/jpeg",
   "width": 640,
   "height": 360,
@@ -342,10 +342,10 @@ VehiclePersonAssociation
 
 تصاویر باید قبل از broadcast پایدار شوند یا حداقل در یک outbox قابل‌بازیابی قرار گیرند. در غیر این صورت replay metadata انجام می‌شود ولی تصویر event قطع‌شده ممکن است وجود نداشته باشد.
 
-`FullFrameAnnotated` و `RoiAnnotated` بخشی از قرارداد قابل پشتیبانی هستند، اما
-در مسیر فعلی `DetectionRuntimeHost` برای آرشیو اصلی تولید نمی‌شوند؛ این مسیر
-از `FullFrameRaw`، crop تشخیص (`PlateCrop` یا `DetectionCrop`) و `RoiRaw`
-استفاده می‌کند.
+`FullFrameAnnotated`، `RoiRaw`، `RoiAnnotated` و `CharacterCrop` در قرارداد
+آینده قابل تعریف‌اند، اما در مسیر فعلی `DetectionRuntimeHost` تولید نمی‌شوند؛
+مسیر فعلی از `FullFrameRaw`، در صورت نیاز `AssociatedFrameRaw`، و cropهای
+`PlateCrop` یا `DetectionCrop` استفاده می‌کند.
 
 ## 10. Payload live، replay و Webhook
 

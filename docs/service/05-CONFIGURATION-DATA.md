@@ -48,7 +48,7 @@
 
 ### `service-settings.json`
 
-در implementation فعلی علاوه بر موارد بالا، بخش `association` شامل `maxWindowMs` و `requireSameRoi` است. این دو مقدار policy مشترک ارتباط پلاک/چهره را تعیین می‌کنند؛ فیلترهای client در `ClientSubscription` نگه‌داری می‌شوند و داخل تنظیمات دوربین ذخیره نمی‌شوند.
+در implementation فعلی علاوه بر موارد بالا، بخش `association` شامل `maxWindowMs` و `requireSameRoi` است. مقدار پیش‌فرض `maxWindowMs=1500` میلی‌ثانیه و `requireSameRoi=true` است. وقتی `requireSameRoi` روشن باشد، Plate و Face باید در یک ROI باشند؛ وقتی خاموش باشد، pair شدن بین ROIهای متفاوت همان دوربین در پنجرهٔ زمانی مجاز است. این policy فقط association زمانی/محدوده‌ای را کنترل می‌کند و جایگزین بررسی مکانی خودرو یا رابطهٔ مالکیتی نیست؛ فیلترهای client در `ClientSubscription` نگه‌داری می‌شوند و داخل تنظیمات دوربین ذخیره نمی‌شوند.
 
 تنظیمات خاص سرویس را نگه می‌دارد:
 

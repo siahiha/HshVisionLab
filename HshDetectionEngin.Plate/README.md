@@ -67,12 +67,12 @@ Models\\Plate\\chars_best_v26_int8.onnx # INT8، حجم و مصرف حافظه �
 
 ورودی ماژول، تصویر ROI اصلی است و مختصات `AnalysisDetection.Bounds` باید نسبت به همان ROI باقی بماند. Engine هنگام نمایش، offset مربوط به ROI را اضافه می‌کند. اگر یک pipeline تصویر مقیاس‌خورده تولید می‌کند، خود آن pipeline باید مختصات را به فضای ROI اصلی بازگرداند.
 
-پارامترهای مهم مدل در `CameraSettings` عبارت‌اند از `ModelFile`، `InputSize`، `Confidence`، `NmsIoU`، `MaxFps` و `Threads`.
+پارامترهای مهم detector در `CameraSettings` عبارت‌اند از `ModelFile`، `InputSize`، `Confidence`، `NmsIoU`، `MaxFps` و `Threads`. تنظیمات OCR مستقل شامل `CharacterRecognitionEnabled`، `CharacterModelFile`، `CharacterConfidence` و `CharacterMaxFps` است؛ مقدار پیش‌فرض `CharacterRecognitionEnabled=false` است. `Preprocessing` ورودی detector را تغییر نمی‌دهد: detector letterbox و نرمال‌سازی ثابت خودش را اجرا می‌کند و این فیلد فقط برای مسیر legacy استخراج character کاربرد دارد.
 
 ## اتصال به برنامه
 
 `PlatePipeline` API عمومی برای مصرف‌کننده‌های بیرونی نیست؛ `PlateModule.CreateRegistration` factory آن را در `ProcessingRegistry` ثبت می‌کند و `CameraPipelineCoordinator` برای هر ROI فعال که `Plate` در `NamedRoi.Processing` آن فعال باشد، نمونهٔ مستقل می‌سازد. فعال یا غیرفعال بودن پلاک از تنظیم ROI و قابلیت `Plate` در لایسنس کنترل می‌شود.
 
-OCR فقط پلاک ایرانی با الگوی `NNLNNNNN` را accepted می‌کند: دو رقم، یک حرف فارسی و پنج رقم. نتیجهٔ نامعتبر با `Accepted=false` برای overlay قرمز قابل مشاهده است، اما `DetectionRuntimeHost` آن را به history، trigger یا client ارسال نمی‌کند.
+پس از تولید متن، `PlatePipeline` فقط پلاک ایرانی با الگوی `NNLNNNNN` را accepted می‌کند: دو رقم، یک حرف فارسی و پنج رقم. در حالت OCR مستقل، crop خام پلاک مستقیماً به مدل OCR داده می‌شود؛ در حالت خاموش بودن OCR، اگر detector character class تولید کند از مسیر legacy استفاده می‌شود. نتیجهٔ نامعتبر با `Accepted=false` برای overlay قرمز قابل مشاهده است، اما `DetectionRuntimeHost` آن را به history، trigger یا client ارسال نمی‌کند.
 
 برای ساخت یا تغییر ماژول، قراردادهای [Abstractions](../HshDetectionEngin.Abstractions) را نشکنید و پیش از انتشار با مدل بسته‌بندی‌شده و یک جریان دوربین واقعی تست کنید.

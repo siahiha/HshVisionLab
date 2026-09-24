@@ -264,7 +264,9 @@ offer/answer اختصاصی و `WebRtcGateway` برای clientهای legacy که
 
 ## 11. ارتباط پلاک و چهره و subscription کلاینت
 
-ارتباط پلاک و چهره در همان event canonical انجام می‌شود و در نسخهٔ فعلی endpoint جداگانهٔ association وجود ندارد. پنجرهٔ اتصال از `service.Association.MaxWindowMs` (پیش‌فرض 1500ms) و `RequireSameRoi` کنترل می‌شود.
+ارتباط پلاک و چهره در همان event canonical انجام می‌شود و در نسخهٔ فعلی endpoint جداگانهٔ association وجود ندارد. پنجرهٔ اتصال از `service.Association.MaxWindowMs` (پیش‌فرض 1500ms) و `RequireSameRoi` کنترل می‌شود. `RequireSameRoi` به‌صورت پیش‌فرض `true` است؛ در این حالت Plate و Face باید از یک `RoiId` باشند. اگر `RequireSameRoi=false` شود، componentهای یک دوربین می‌توانند از دو ROI متفاوت نیز در همان فریم یا پنجرهٔ زمانی pair شوند.
+
+این pair شدن به معنی رابطهٔ قطعی چهره با خودرو نیست: runtime فاصله، هم‌پوشانی bounding box یا مالکیت خودرو را بررسی نمی‌کند. در همان فریم، اگر برای یک Plate بیش از یک Face مخالف وجود داشته باشد، association مبهم تلقی شده و pair ساخته نمی‌شود؛ در association زمانی نیز باید دقیقاً یک component مخالف در پنجرهٔ زمانی وجود داشته باشد.
 
 
 در نسخهٔ فعلی، policy هر اتصال با متد SignalR به نام `Subscribe(lastSequence, subscription)` تعیین می‌شود و تنظیمات inference دوربین را تغییر نمی‌دهد. فیلدهای اصلی subscription عبارت‌اند از `mode` (`All`، `Plate`، `KnownFace`)، `cameraIds`، `roiIds`، `faceRequired`، `plateRequired`، `includeFace`، `includePlate`، `includeUnknownFace`، `includeArtifacts`، `windowMs` و `cooldownSeconds`. `cooldownSeconds` فقط برای همان اتصال اعمال می‌شود و replay، live و query تاریخچهٔ UI را با کلید plate/face مستقل فیلتر می‌کند؛ برای REST history نام query آن `clientCooldownSeconds` است. اگر `faceRequired` یا `plateRequired` برابر false باشد، component اختیاری است و در صورت شناسایی به همان client ارسال می‌شود.
