@@ -32,6 +32,7 @@ export interface NamedRoi {
   id: Id;
   name: string;
   enabled: boolean;
+  processingMode: "Sequential" | "Parallel";
   points: RoiPoint[];
   processing: ProcessingTask[];
 }

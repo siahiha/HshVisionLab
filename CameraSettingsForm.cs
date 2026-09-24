@@ -15,6 +15,9 @@ public sealed class CameraSettingsForm : Form
     private readonly ComboBox _cmbModel = new();
     private readonly ComboBox _cmbInputSize = new();
     private readonly ComboBox _cmbPreprocessing = new();
+    private readonly ComboBox _cmbCharacterModel = new();
+    private readonly NumericUpDown _numCharacterConfidence = new();
+    private readonly NumericUpDown _numCharacterMaxFps = new();
     private readonly ComboBox _cmbFaceModel = new();
     private readonly ComboBox _cmbFacePreprocessing = new();
     private readonly ComboBox _cmbFaceRecognitionModel = new();
@@ -32,6 +35,7 @@ public sealed class CameraSettingsForm : Form
     private readonly NumericUpDown _numFaceEventCooldown = new();
     private readonly NumericUpDown _numPlateEventCooldown = new();
     private readonly CheckBox _chkPlateEnabled = new();
+    private readonly CheckBox _chkCharacterRecognition = new();
     private readonly CheckBox _chkFaceEnabled = new();
     private readonly CheckBox _chkFaceRecognition = new();
     private readonly TreeView _trvProcessing = new();
@@ -48,6 +52,7 @@ public sealed class CameraSettingsForm : Form
     private readonly List<Control> _genericSectionLabels = [];
     private readonly List<Control> _roiSectionLabels = [];
     private readonly TextBox _txtSelectedRoiName = new();
+    private readonly ComboBox _cmbSelectedRoiProcessingMode = new();
     private readonly CheckBox _chkSelectedRoiEnabled = new();
     private string _currentSection = string.Empty;
     private TargetNode? _selectedTarget;
@@ -215,7 +220,7 @@ public sealed class CameraSettingsForm : Form
         {
             Dock = DockStyle.Fill,
             AutoSize = false,
-            Text = "ROI processing targets  •  execution order is the tree order",
+            Text = "ROI processing targets  •  ROIs run in parallel; choose task mode per ROI",
             TextAlign = ContentAlignment.MiddleLeft,
             Font = new Font("Segoe UI", 10F, FontStyle.Bold),
             ForeColor = Color.FromArgb(95, 175, 255)
@@ -237,6 +242,7 @@ public sealed class CameraSettingsForm : Form
         _txtSelectedRoiName.Width = 220;
         _chkSelectedRoiEnabled.Text = "Enabled";
         AddRow(properties, "ROI name", _txtSelectedRoiName);
+        AddRow(properties, "Task execution mode", ConfigureCombo(_cmbSelectedRoiProcessingMode, RoiProcessingModes.Sequential, RoiProcessingModes.Parallel));
         AddRow(properties, "Status", ConfigureCheckBox(_chkSelectedRoiEnabled));
         AddSection(properties, "Detection properties");
         AddRow(properties, "Enabled", ConfigureCheckBox(_chkPlateEnabled));
@@ -252,6 +258,11 @@ public sealed class CameraSettingsForm : Form
         AddRow(properties, "Buffer count (0 = newest only)", ConfigureNumber(_numPlateBuffer, 0, 10, 1, 0));
         AddRow(properties, "Track max misses", ConfigureNumber(_numTrackMisses, 1, 30, 1, 0));
         AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numPlateEventCooldown, 0, 3600, 1, 0));
+        AddSection(properties, "PLATE RECOGNITION  •  OCR processes each plate crop");
+        AddRow(properties, "Enable plate character recognition", ConfigureCheckBox(_chkCharacterRecognition));
+        AddRow(properties, "Recognition model", ConfigureCombo(_cmbCharacterModel));
+        AddRow(properties, "Recognition confidence", ConfigureNumber(_numCharacterConfidence, 0.05m, 0.99m, 0.01m, 2));
+        AddRow(properties, "Recognition FPS per tracked plate", ConfigureNumber(_numCharacterMaxFps, 0, 30, 1, 0));
         AddSection(properties, "FACE DETECTION  •  YuNet finds face boxes");
         AddRow(properties, "Enabled", ConfigureCheckBox(_chkFaceEnabled));
         AddRow(properties, "Detection model", ConfigureCombo(_cmbFaceModel));
@@ -521,7 +532,7 @@ public sealed class CameraSettingsForm : Form
             foreach (NamedRoi roi in _settings.Rois)
             {
                 AddTargetNode(new TargetNode { Roi = roi },
-                    $"{(roi.Enabled ? "✓" : "×")}  {roi.Name}", previousTag);
+                    $"{(roi.Enabled ? "✓" : "×")}  {roi.Name} [{RoiProcessingModes.Normalize(roi.ProcessingMode)}]", previousTag);
             }
 
             if (_trvProcessing.Nodes.Count == 0)
@@ -607,6 +618,7 @@ public sealed class CameraSettingsForm : Form
         else if (_selectedTarget?.Roi is not null)
         {
             _txtSelectedRoiName.Text = _selectedTarget.Roi.Name;
+            _cmbSelectedRoiProcessingMode.SelectedItem = RoiProcessingModes.Normalize(_selectedTarget.Roi.ProcessingMode);
             _chkSelectedRoiEnabled.Checked = _selectedTarget.Roi.Enabled;
         }
 
@@ -704,6 +716,13 @@ public sealed class CameraSettingsForm : Form
         _numFaceTrackMisses.Value = Math.Clamp(face.TrackMaxMisses, 1, 60);
         _chkFaceRecognition.Checked = face.RecognitionEnabled;
 
+        _chkCharacterRecognition.Checked = plate.CharacterRecognitionEnabled;
+        _cmbCharacterModel.SelectedItem = _cmbCharacterModel.Items.Contains(plate.CharacterModelFile)
+            ? plate.CharacterModelFile
+            : _cmbCharacterModel.Items.Cast<string>().FirstOrDefault();
+        _numCharacterConfidence.Value = (decimal)Math.Clamp(plate.CharacterConfidence, 0.05f, 0.99f);
+        _numCharacterMaxFps.Value = Math.Clamp(plate.CharacterMaxFps, 0, 30);
+
         _chkGenericEnabled.Checked = item.Enabled;
         _numGenericMaxFps.Value = Math.Clamp(item.MaxFps, 1, 30);
         _numGenericThreads.Value = Math.Clamp(item.Threads, 1, (int)_numGenericThreads.Maximum);
@@ -761,6 +780,10 @@ public sealed class CameraSettingsForm : Form
                 plateOptions.Preprocessing = _cmbPreprocessing.SelectedItem?.ToString() ?? plateOptions.Preprocessing;
                 plateOptions.Confidence = (float)_numConfidence.Value;
                 plateOptions.NmsIoU = (float)_numIou.Value;
+                plateOptions.CharacterRecognitionEnabled = _chkCharacterRecognition.Checked;
+                plateOptions.CharacterModelFile = _cmbCharacterModel.SelectedItem?.ToString() ?? plateOptions.CharacterModelFile;
+                plateOptions.CharacterConfidence = (float)_numCharacterConfidence.Value;
+                plateOptions.CharacterMaxFps = (int)_numCharacterMaxFps.Value;
                 plateOptions.TrackMaxMisses = (int)_numTrackMisses.Value;
                 plateOptions.EventCooldownSeconds = (int)_numPlateEventCooldown.Value;
                 item.SetOptions(plateOptions);
@@ -788,6 +811,7 @@ public sealed class CameraSettingsForm : Form
             }
 
             roi.Name = name;
+            roi.ProcessingMode = RoiProcessingModes.Normalize(_cmbSelectedRoiProcessingMode.SelectedItem?.ToString());
             roi.Enabled = _chkSelectedRoiEnabled.Checked;
         }
 
@@ -823,6 +847,7 @@ public sealed class CameraSettingsForm : Form
                 ? "MediaMTX"
                 : "FFmpeg";
         LoadModels();
+        LoadCharacterModels();
         LoadFaceModels();
         LoadFaceRecognitionModels();
         _settings.EnsureProcessingDefaults();
@@ -1030,10 +1055,16 @@ public sealed class CameraSettingsForm : Form
         string[] modelDirectories = GetModelDirectories("Plate", "HshDetectionEngin.Plate");
         string[] modelNames = modelDirectories
             .Where(Directory.Exists)
-            .SelectMany(directory => Directory.EnumerateFiles(directory, "*.hshmodel"))
-                .Select(path => Path.ChangeExtension(Path.GetFileName(path), ".onnx"))
+            .SelectMany(directory => Directory.EnumerateFiles(directory)
+                .Where(path => path.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase) ||
+                               path.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase)))
+                .Select(path => path.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase)
+                    ? Path.ChangeExtension(Path.GetFileName(path), ".onnx")
+                    : Path.GetFileName(path))
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Where(name => !name!.StartsWith("face_", StringComparison.OrdinalIgnoreCase))
+                .Where(name => !name!.Contains("ocr", StringComparison.OrdinalIgnoreCase) &&
+                               !name!.Contains("char", StringComparison.OrdinalIgnoreCase))
                 .Where(name => !name!.EndsWith("_ort_optimized.onnx", StringComparison.OrdinalIgnoreCase))
                 .Where(name => !name!.Contains("_int8_dynamic", StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1055,6 +1086,23 @@ public sealed class CameraSettingsForm : Form
         {
             _cmbModel.EndUpdate();
         }
+    }
+
+    private void LoadCharacterModels()
+    {
+        string[] modelDirectories = GetModelDirectories("Plate", "HshDetectionEngin.Plate");
+        string[] modelNames = modelDirectories
+            .Where(Directory.Exists)
+            .SelectMany(directory => Directory.EnumerateFiles(directory, "*.onnx"))
+            .Select(path => Path.GetFileName(path) ?? string.Empty)
+            .Where(name => name.Contains("ocr", StringComparison.OrdinalIgnoreCase) ||
+                           name.Contains("char", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+        if (modelNames.Length == 0) modelNames = ["ocr_crnn.onnx"];
+        _cmbCharacterModel.Items.Clear();
+        _cmbCharacterModel.Items.AddRange(modelNames);
     }
 
     private void LoadFaceModels()

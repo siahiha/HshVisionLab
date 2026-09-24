@@ -56,14 +56,19 @@ public static class ServiceApi
                 {
                     string name = Path.ChangeExtension(Path.GetFileName(item.path), ".onnx");
                     string capability = item.module == "Plate"
-                        ? "Plate"
+                        ? (item.path.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase) &&
+                           (name.Contains("ocr", StringComparison.OrdinalIgnoreCase) ||
+                           name.Contains("char", StringComparison.OrdinalIgnoreCase)
+                           )
+                            ? "PlateRecognition"
+                            : "Plate")
                         : name.Contains("sface", StringComparison.OrdinalIgnoreCase)
                             ? "FaceRecognition"
                             : name.Contains("yunet", StringComparison.OrdinalIgnoreCase)
                                 ? "FaceDetection"
                                 : "Face";
                     int[] inputSizes;
-                    if (item.module == "Plate")
+                    if (item.module == "Plate" && capability == "Plate")
                     {
                         // Do not construct an ONNX InferenceSession inside an
                         // HTTP request. Model catalog metadata is requested by
@@ -541,7 +546,10 @@ public static class ServiceApi
         return directories
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(Directory.Exists)
-            .SelectMany(path => Directory.EnumerateFiles(path, "*.hshmodel", SearchOption.TopDirectoryOnly))
+            .SelectMany(path => Directory.EnumerateFiles(path, "*.*", SearchOption.TopDirectoryOnly)
+                .Where(file => file.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase) ||
+                               file.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase)))
+            .Where(file => !Path.GetFileName(file).EndsWith("_ort_optimized.onnx", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 

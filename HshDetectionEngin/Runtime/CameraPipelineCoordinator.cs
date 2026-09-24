@@ -25,12 +25,32 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         CameraProcessingSettings Settings,
         IReadOnlyDictionary<string, object?> DetectionMetadata);
 
+    private sealed record RoiPipelineGroup(
+        string ProcessingMode,
+        List<PipelineBinding> Pipelines);
+
+    private sealed record RoiRunPlan(
+        CameraRuntime.RuntimeRoi Roi,
+        RoiPipelineGroup Group);
+
+    private sealed record PipelineRunOutput(
+        IReadOnlyList<AnalysisDetection> Detections,
+        IReadOnlyList<ProcessingOverlay> Overlays,
+        bool OverlaysUpdated);
+
+    private sealed class RoiExecutionResult
+    {
+        public List<AnalysisDetection> Detections { get; } = [];
+        public List<ProcessingOverlay> Overlays { get; } = [];
+        public bool OverlaysUpdated { get; set; }
+    }
+
     private readonly CameraSettings _settings;
     private readonly ProcessingRegistry _registry;
     private readonly Action<string, bool> _reportStatus;
     private readonly Action<double> _setInferenceMs;
     private readonly object _gate = new();
-    private PipelineGraph _graph = new(new Dictionary<string, List<PipelineBinding>>(StringComparer.OrdinalIgnoreCase));
+    private PipelineGraph _graph = new(new Dictionary<string, RoiPipelineGroup>(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// An immutable pipeline graph which can be replaced atomically. Inference
@@ -47,16 +67,16 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         private bool _retired;
         private bool _disposed;
 
-        public PipelineGraph(Dictionary<string, List<PipelineBinding>> pipelines)
+        public PipelineGraph(Dictionary<string, RoiPipelineGroup> pipelines)
         {
             Pipelines = pipelines;
         }
 
-        public Dictionary<string, List<PipelineBinding>> Pipelines { get; }
+        public Dictionary<string, RoiPipelineGroup> Pipelines { get; }
 
-        public int ActivePipelineCount => Pipelines.Values.Sum(pipelines => pipelines.Count);
+        public int ActivePipelineCount => Pipelines.Values.Sum(group => group.Pipelines.Count);
 
-        public bool HasConfiguredPipelines => Pipelines.Values.Any(pipelines => pipelines.Count > 0);
+        public bool HasConfiguredPipelines => Pipelines.Values.Any(group => group.Pipelines.Count > 0);
 
         public bool TryAcquire()
         {
@@ -107,7 +127,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                 _disposed = true;
             }
 
-            DisposePipelines(Pipelines.Values);
+            DisposePipelines(Pipelines.Values.Select(group => group.Pipelines));
         }
     }
 
@@ -132,7 +152,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
 
     public void Rebuild()
     {
-        var rebuilt = new Dictionary<string, List<PipelineBinding>>(StringComparer.OrdinalIgnoreCase);
+        var rebuilt = new Dictionary<string, RoiPipelineGroup>(StringComparer.OrdinalIgnoreCase);
         foreach (NamedRoi configuredRoi in _settings.Rois.Where(roi => roi.Enabled))
         {
             string targetName = string.IsNullOrWhiteSpace(configuredRoi.Name) ? "ROI" : configuredRoi.Name;
@@ -173,7 +193,9 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                 }
             }
 
-            rebuilt[roiKey] = pipelines;
+            rebuilt[roiKey] = new RoiPipelineGroup(
+                RoiProcessingModes.Normalize(configuredRoi.ProcessingMode),
+                pipelines);
         }
 
         PipelineGraph replacement = new(rebuilt);
@@ -206,90 +228,45 @@ internal sealed class CameraPipelineCoordinator : IDisposable
 
         try
         {
-            double maxPipelineMs = 0;
             if (graph.Pipelines.Count == 0)
             {
                 _setInferenceMs(0);
                 return execution;
             }
 
-            foreach (CameraRuntime.RuntimeRoi roi in rois)
+            Stopwatch runTimer = Stopwatch.StartNew();
+            var plans = new List<RoiRunPlan>();
+            for (int index = 0; index < rois.Count; index++)
             {
+                CameraRuntime.RuntimeRoi roi = rois[index];
                 if (roi.Polygon.Length < 3 || roi.Bounds.Width < 32 || roi.Bounds.Height < 32) continue;
                 string roiKey = GetRoiKey(roi);
-                if (!graph.Pipelines.TryGetValue(roiKey, out List<PipelineBinding>? pipelines) &&
-                    !graph.Pipelines.TryGetValue(roi.Name, out pipelines)) continue;
-                if (pipelines.Count == 0) continue;
-
-                using var roiMat = new Mat(frame, roi.Bounds);
-                using var masked = MaskOutsidePolygon(roiMat, ToLocalPolygon(roi.Polygon, roi.Bounds));
-                Mat current = masked.Clone();
-                var previous = new List<AnalysisDetection>();
-                try
-                {
-                    foreach (PipelineBinding binding in pipelines.ToArray())
-                    {
-                        Stopwatch pipelineTimer = Stopwatch.StartNew();
-                        try
-                        {
-                            using var result = binding.Pipeline.Process(new ProcessingContext
-                            {
-                                Image = current,
-                                CameraId = _settings.Id,
-                                CameraName = _settings.Name,
-                                Timestamp = DateTime.UtcNow,
-                                SourceBounds = roi.Bounds,
-                                OriginalFrameSize = frame.Size,
-                                PreviousDetections = previous.ToArray()
-                            });
-
-                            previous = result.Detections
-                                .Select(detection => AttachProcessingSettings(detection, binding, roi.Id, roi.Name))
-                                .ToList();
-                            execution.Detections.AddRange(previous.Select(detection => detection with
-                            {
-                                Bounds = new Rectangle(
-                                    detection.Bounds.X + roi.Bounds.X,
-                                    detection.Bounds.Y + roi.Bounds.Y,
-                                    detection.Bounds.Width,
-                                    detection.Bounds.Height)
-                            }));
-
-                            foreach (ProcessingOverlay overlay in result.Overlays)
-                                execution.Overlays.Add(MapOverlayToFrame(overlay, roi.Bounds));
-                            execution.OverlaysUpdated |= result.OverlaysUpdated || result.Overlays.Count > 0;
-
-                            Mat? next = result.TakeNextImage();
-                            if (next is not null)
-                            {
-                                current.Dispose();
-                                current = next;
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _reportStatus(
-                                $"Pipeline '{binding.Pipeline.Name}' failed for ROI '{roi.Name}': {ex.Message}",
-                                true);
-                        }
-                        finally
-                        {
-                            pipelineTimer.Stop();
-                            maxPipelineMs = Math.Max(maxPipelineMs, pipelineTimer.Elapsed.TotalMilliseconds);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _reportStatus($"Pipeline execution failed: {ex.Message}", true);
-                }
-                finally
-                {
-                    current.Dispose();
-                }
+                if (!graph.Pipelines.TryGetValue(roiKey, out RoiPipelineGroup? group) &&
+                    !graph.Pipelines.TryGetValue(roi.Name, out group)) continue;
+                if (group.Pipelines.Count == 0) continue;
+                plans.Add(new RoiRunPlan(roi, group));
             }
 
-            _setInferenceMs(maxPipelineMs);
+            // ROI execution is independent, so each active ROI gets its own
+            // worker slot. The camera thread waits for all slots before it
+            // publishes one coherent frame result.
+            var results = new RoiExecutionResult?[plans.Count];
+            Parallel.For(0, plans.Count, index =>
+            {
+                RoiRunPlan plan = plans[index];
+                results[index] = RunRoi(frame, plan.Roi, plan.Group);
+            });
+
+            foreach (RoiExecutionResult? result in results)
+            {
+                if (result is null) continue;
+                execution.Detections.AddRange(result.Detections);
+                execution.Overlays.AddRange(result.Overlays);
+                execution.OverlaysUpdated |= result.OverlaysUpdated;
+            }
+
+            runTimer.Stop();
+            _setInferenceMs(runTimer.Elapsed.TotalMilliseconds);
             return execution;
         }
         finally
@@ -304,10 +281,153 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         lock (_gate)
         {
             previous = _graph;
-            _graph = new PipelineGraph(new Dictionary<string, List<PipelineBinding>>(StringComparer.OrdinalIgnoreCase));
+            _graph = new PipelineGraph(new Dictionary<string, RoiPipelineGroup>(StringComparer.OrdinalIgnoreCase));
         }
 
         previous.RetireAndDispose();
+    }
+
+    private RoiExecutionResult RunRoi(
+        Mat frame,
+        CameraRuntime.RuntimeRoi roi,
+        RoiPipelineGroup group)
+    {
+        using var roiMat = new Mat(frame, roi.Bounds);
+        using var masked = MaskOutsidePolygon(roiMat, ToLocalPolygon(roi.Polygon, roi.Bounds));
+        using Mat input = masked.Clone();
+
+        return string.Equals(
+            group.ProcessingMode,
+            RoiProcessingModes.Parallel,
+            StringComparison.OrdinalIgnoreCase)
+            ? RunRoiParallel(input, roi, group.Pipelines, frame.Size)
+            : RunRoiSequential(input, roi, group.Pipelines, frame.Size);
+    }
+
+    private RoiExecutionResult RunRoiSequential(
+        Mat input,
+        CameraRuntime.RuntimeRoi roi,
+        IReadOnlyList<PipelineBinding> pipelines,
+        Size originalFrameSize)
+    {
+        var execution = new RoiExecutionResult();
+        Mat current = input.Clone();
+        var previous = new List<AnalysisDetection>();
+        try
+        {
+            foreach (PipelineBinding binding in pipelines.ToArray())
+            {
+                try
+                {
+                    using var result = binding.Pipeline.Process(new ProcessingContext
+                    {
+                        Image = current,
+                        CameraId = _settings.Id,
+                        CameraName = _settings.Name,
+                        Timestamp = DateTime.UtcNow,
+                        SourceBounds = roi.Bounds,
+                        OriginalFrameSize = originalFrameSize,
+                        PreviousDetections = previous.ToArray()
+                    });
+
+                    previous = result.Detections
+                        .Select(detection => AttachProcessingSettings(detection, binding, roi.Id, roi.Name))
+                        .ToList();
+                    AddPipelineOutput(execution, previous, result.Overlays, result.OverlaysUpdated, roi);
+
+                    Mat? next = result.TakeNextImage();
+                    if (next is not null)
+                    {
+                        current.Dispose();
+                        current = next;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _reportStatus(
+                        $"Pipeline '{binding.Pipeline.Name}' failed for ROI '{roi.Name}': {ex.Message}",
+                        true);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _reportStatus($"Pipeline execution failed for ROI '{roi.Name}': {ex.Message}", true);
+        }
+        finally
+        {
+            current.Dispose();
+        }
+
+        return execution;
+    }
+
+    private RoiExecutionResult RunRoiParallel(
+        Mat input,
+        CameraRuntime.RuntimeRoi roi,
+        IReadOnlyList<PipelineBinding> pipelines,
+        Size originalFrameSize)
+    {
+        var outputs = new PipelineRunOutput?[pipelines.Count];
+        Parallel.For(0, pipelines.Count, index =>
+        {
+            PipelineBinding binding = pipelines[index];
+            try
+            {
+                using Mat pipelineInput = input.Clone();
+                using var result = binding.Pipeline.Process(new ProcessingContext
+                {
+                    Image = pipelineInput,
+                    CameraId = _settings.Id,
+                    CameraName = _settings.Name,
+                    Timestamp = DateTime.UtcNow,
+                    SourceBounds = roi.Bounds,
+                    OriginalFrameSize = originalFrameSize,
+                    PreviousDetections = []
+                });
+
+                outputs[index] = new PipelineRunOutput(
+                    result.Detections
+                        .Select(detection => AttachProcessingSettings(detection, binding, roi.Id, roi.Name))
+                        .ToArray(),
+                    result.Overlays.ToArray(),
+                    result.OverlaysUpdated);
+            }
+            catch (Exception ex)
+            {
+                _reportStatus(
+                    $"Pipeline '{binding.Pipeline.Name}' failed for ROI '{roi.Name}': {ex.Message}",
+                    true);
+            }
+        });
+
+        var execution = new RoiExecutionResult();
+        foreach (PipelineRunOutput? output in outputs)
+        {
+            if (output is null) continue;
+            AddPipelineOutput(execution, output.Detections, output.Overlays, output.OverlaysUpdated, roi);
+        }
+
+        return execution;
+    }
+
+    private static void AddPipelineOutput(
+        RoiExecutionResult target,
+        IReadOnlyList<AnalysisDetection> detections,
+        IReadOnlyList<ProcessingOverlay> overlays,
+        bool overlaysUpdated,
+        CameraRuntime.RuntimeRoi roi)
+    {
+        target.Detections.AddRange(detections.Select(detection => detection with
+        {
+            Bounds = new Rectangle(
+                detection.Bounds.X + roi.Bounds.X,
+                detection.Bounds.Y + roi.Bounds.Y,
+                detection.Bounds.Width,
+                detection.Bounds.Height)
+        }));
+        target.Overlays.AddRange(overlays.Select(overlay => MapOverlayToFrame(overlay, roi.Bounds)));
+        target.OverlaysUpdated |= overlaysUpdated || overlays.Count > 0;
     }
 
     private static AnalysisDetection AttachProcessingSettings(

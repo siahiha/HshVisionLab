@@ -11,6 +11,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { translateText, useLanguage } from "./i18n";
 import {
   Activity,
   AlertTriangle,
@@ -122,6 +123,8 @@ const processingType = (value: unknown) =>
     : s(value).toLocaleLowerCase() === "plate"
       ? "Plate"
       : s(value);
+const roiProcessingMode = (value: unknown): NamedRoi["processingMode"] =>
+  s(value).toLocaleLowerCase() === "parallel" ? "Parallel" : "Sequential";
 function normalizeCameraSettings(value: CameraSettings): CameraSettings {
   const raw = value as CameraSettings & { rois?: unknown[] };
   const rois = Array.isArray(raw.rois) ? raw.rois : [];
@@ -136,6 +139,7 @@ function normalizeCameraSettings(value: CameraSettings): CameraSettings {
         id: s(roi.id).trim() || newId(),
         name: s(roi.name).trim() || `ROI ${index + 1}`,
         enabled: roi.enabled !== false,
+        processingMode: roiProcessingMode(roi.processingMode),
         points: points
           .filter(
             (point) =>
@@ -239,7 +243,72 @@ function eventConfidence(event: DetectionEvent) {
 
 function App() {
   const [mobile, setMobile] = useState(false);
+  const { language, toggleLanguage } = useLanguage();
   const status = useServiceStatus();
+
+  useEffect(() => {
+    const root = document.getElementById("root");
+    if (!root) return;
+
+    let translating = false;
+    let scheduled = false;
+
+    const translateAttributes = (element: Element) => {
+      for (const name of ["title", "placeholder", "aria-label"]) {
+        const value = element.getAttribute(name);
+        if (!value) continue;
+        const next = translateText(value, language);
+        if (next !== value) element.setAttribute(name, next);
+      }
+    };
+
+    const translateDom = () => {
+      if (translating) return;
+      translating = true;
+      try {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const nodes: Text[] = [];
+        let current: Node | null;
+        while ((current = walker.nextNode())) nodes.push(current as Text);
+
+        for (const node of nodes) {
+          const parent = node.parentElement;
+          if (!parent || parent.closest("script,style,pre")) continue;
+          const value = node.nodeValue ?? "";
+          const next = translateText(value, language);
+          if (next !== value) node.nodeValue = next;
+        }
+
+        root
+          .querySelectorAll("[title],[placeholder],[aria-label]")
+          .forEach(translateAttributes);
+      } finally {
+        translating = false;
+      }
+    };
+
+    const scheduleTranslation = () => {
+      if (scheduled || translating) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        translateDom();
+      });
+    };
+
+    translateDom();
+    const observer = new MutationObserver(scheduleTranslation);
+    observer.observe(root, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["title", "placeholder", "aria-label"],
+    });
+
+    return () => observer.disconnect();
+  }, [language]);
+
   return (
     <BrowserRouter>
       <div className="app-shell">
@@ -311,6 +380,14 @@ function App() {
               <PageTitle />
             </div>
             <div className="topbar-actions">
+              <button
+                className="language-button"
+                onClick={toggleLanguage}
+                title={language === "fa" ? "English" : "فارسی"}
+                aria-label={language === "fa" ? "English" : "فارسی"}
+              >
+                {language === "fa" ? "EN" : "فا"}
+              </button>
               <span className="service-chip">
                 <i
                   className={`status-dot ${status.data?.ready ? "online" : "warning"}`}
@@ -903,6 +980,7 @@ function CameraFocusWorkspace({
       enabled: true,
       points: [],
       processing: [],
+      processingMode: "Sequential",
     };
     setRoiDraft(next);
     setSaveError("");
@@ -1061,6 +1139,7 @@ function CameraFullscreen({
         { x: 0.05, y: 0.95 },
       ],
       processing: [],
+      processingMode: "Sequential",
     };
     setDraft({ ...draft, rois: [...draft.rois, next] });
     setActiveRoi(next.id);
@@ -1445,6 +1524,7 @@ function CameraEditor({ id }: { id: string }) {
         { x: 0.05, y: 0.95 },
       ],
       processing: [],
+      processingMode: "Sequential",
     };
     setDraft({ ...draft, rois: [...draft.rois, next] });
     setActiveRoi(next.id);
@@ -2700,8 +2780,8 @@ function ProcessingSettings({
         <div>
           <h3>Processing tree</h3>
           <span>
-            ترتیب ROIها و taskها همان ترتیب اجرای runtime است؛ تنظیمات هر task
-            مستقل است.
+            ROIهای یک دوربین همزمان اجرا می‌شوند؛ برای taskهای هر ROI اجرای
+            سریالی یا همزمان را انتخاب کنید.
           </span>
         </div>
         <div className="head-actions">
@@ -2748,6 +2828,7 @@ function ProcessingSettings({
                 <b>{item.name}</b>
                 <span>
                   {item.processing.length} task ·{" "}
+                  {item.processingMode === "Parallel" ? "همزمان" : "سریالی"} ·{" "}
                   {item.enabled ? "فعال" : "غیرفعال"}
                 </span>
               </div>
@@ -2775,6 +2856,20 @@ function ProcessingSettings({
                       updateRoi({ ...roi, name: e.target.value })
                     }
                   />
+                </Field>
+                <Field label="اجرای پردازش‌های این ROI">
+                  <select
+                    value={roi.processingMode}
+                    onChange={(e) =>
+                      updateRoi({
+                        ...roi,
+                        processingMode: e.target.value as NamedRoi["processingMode"],
+                      })
+                    }
+                  >
+                    <option value="Sequential">سریالی (زنجیره‌ای)</option>
+                    <option value="Parallel">همزمان (موازی)</option>
+                  </select>
                 </Field>
                 <label className="check-field">
                   <input
@@ -2845,7 +2940,7 @@ function ModelSelect({
   value: string;
   onChange: (value: string) => void;
   models: ModelInfo[];
-  capability: "plate" | "faceDetection" | "faceRecognition";
+  capability: "plate" | "plateRecognition" | "faceDetection" | "faceRecognition";
   wide?: boolean;
 }) {
   const modelValue = (model: ModelInfo) => model.name || model.relativePath;
@@ -2855,6 +2950,7 @@ function ModelSelect({
     if (advertised) return advertised === capability.toLowerCase();
     const text = `${model.module} ${model.name} ${model.relativePath}`.toLowerCase();
     if (capability === "plate") return text.includes("plate");
+    if (capability === "plateRecognition") return text.includes("ocr") || text.includes("char");
     if (capability === "faceRecognition") return text.includes("face") && text.includes("sface");
     return text.includes("face") && text.includes("yunet");
   });
@@ -2900,13 +2996,14 @@ function ModelSelect({
 
 function modelFamilyModels(
   models: ModelInfo[],
-  capability: "plate" | "faceDetection" | "faceRecognition",
+  capability: "plate" | "plateRecognition" | "faceDetection" | "faceRecognition",
 ) {
   const familyModels = models.filter((model) => {
     const advertised = model.capability?.toLowerCase();
     if (advertised) return advertised === capability.toLowerCase();
     const text = `${model.module} ${model.name} ${model.relativePath}`.toLowerCase();
     if (capability === "plate") return text.includes("plate");
+    if (capability === "plateRecognition") return text.includes("ocr") || text.includes("char");
     if (capability === "faceRecognition") return text.includes("face") && text.includes("sface");
     return text.includes("face") && text.includes("yunet");
   });
@@ -2972,7 +3069,7 @@ function TaskEditor({
   const face = task.type.toLocaleLowerCase() === "face";
   const set = (key: string, value: unknown) =>
     onChange(setOption(task, key, value));
-  const setModel = (value: string, capability: "plate" | "faceDetection") => {
+  const setModel = (value: string, capability: "plate" | "plateRecognition" | "faceDetection") => {
     let next = setOption(task, "modelFile", value);
     const selected = modelFamilyModels(models, capability).find(
       (model) => model.name === value || model.relativePath === value,
@@ -3010,6 +3107,7 @@ function TaskEditor({
         </Field>
       </div>
       {!face && (
+        <>
         <div className="processing-option-section plate-section">
           <div className="processing-section-head">
             <div>
@@ -3118,6 +3216,48 @@ function TaskEditor({
             </Field>
           </div>
         </div>
+        <div className="processing-option-section plate-section">
+          <div className="processing-section-head">
+            <div>
+              <b>۲. خواندن کاراکترهای پلاک</b>
+              <span>Plate recognition · مدل OCR روی crop هر پلاک اجرا می‌شود</span>
+            </div>
+            <Toggle
+              checked={Boolean(option(task, "characterRecognitionEnabled", false))}
+              onChange={(value) => set("characterRecognitionEnabled", value)}
+            />
+          </div>
+          <div className="task-fields">
+            <ModelSelect
+              label="Recognition model"
+              value={s(option(task, "characterModelFile", "ocr_crnn.onnx"))}
+              onChange={(value) => setModel(value, "plateRecognition")}
+              models={models}
+              capability="plateRecognition"
+              wide
+            />
+            <Field label="Recognition confidence">
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step=".01"
+                value={n(option(task, "characterConfidence", 0.35))}
+                onChange={(e) => set("characterConfidence", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Recognition FPS per plate">
+              <input
+                type="number"
+                min="0"
+                max="30"
+                value={n(option(task, "characterMaxFps", 4))}
+                onChange={(e) => set("characterMaxFps", Number(e.target.value))}
+              />
+            </Field>
+          </div>
+        </div>
+        </>
       )}
       {face && (
         <>

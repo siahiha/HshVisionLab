@@ -101,7 +101,13 @@ public class CameraRuntime : IDisposable
     private bool IsOverlayActive(DateTime updatedUtc, DateTime now)
         => (now - updatedUtc).TotalMilliseconds <= DetectionOverlayHoldMs;
 
-    internal sealed record RuntimeRoi(string Id, string Name, PointF[] Polygon, Rectangle Bounds, bool Enabled);
+    internal sealed record RuntimeRoi(
+        string Id,
+        string Name,
+        PointF[] Polygon,
+        Rectangle Bounds,
+        bool Enabled,
+        string ProcessingMode);
     private sealed record PlateOverlayInfo(string Key, AnalysisDetection Detection, string Text, float Confidence, DateTime UpdatedUtc, Bitmap? Crop, bool Accepted);
     private sealed record AnalysisOverlayInfo(string Key, AnalysisDetection Detection, DateTime UpdatedUtc);
     public sealed record HistoryItem(Bitmap Crop, string Text, float Confidence, DateTime Timestamp, string OwnerKey);
@@ -1159,7 +1165,8 @@ public class CameraRuntime : IDisposable
                         string.IsNullOrWhiteSpace(roi.Name) ? "ROI" : roi.Name,
                         polygon,
                         GetPolygonBounds(polygon, size),
-                        true);
+                        true,
+                        RoiProcessingModes.Normalize(roi.ProcessingMode));
                 })
                 .Where(roi => roi.Bounds.Width >= 32 && roi.Bounds.Height >= 32));
         }

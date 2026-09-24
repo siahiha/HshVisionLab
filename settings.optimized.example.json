@@ -52,6 +52,7 @@
         {
           "Name": "Entrance ROI",
           "Enabled": true,
+          "ProcessingMode": "Sequential",
           "Points": [
             { "X": 0.05, "Y": 0.35 },
             { "X": 0.95, "Y": 0.35 },

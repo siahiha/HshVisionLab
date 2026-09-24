@@ -93,6 +93,9 @@ internal sealed class YoloDetector : IDisposable
 
         if (_session.ModelMetadata.CustomMetadataMap.TryGetValue("names", out var raw))
             _classNames = ParseClassNames(raw);
+        if (_opt.ForcedClassId is null && _classNames.Length == 1 &&
+            string.Equals(_classNames[0], "plate", StringComparison.OrdinalIgnoreCase))
+            _opt.ForcedClassId = PersianPlate.PlateClassId;
 
         int w = _opt.InputWidth;
         int h = _opt.InputHeight;
@@ -221,7 +224,7 @@ internal sealed class YoloDetector : IDisposable
                 W = output[i + 2 * stride],
                 H = output[i + 3 * stride],
                 Score = best,
-                Cls = bestCls
+                Cls = _opt.ForcedClassId ?? bestCls
             });
         }
 
@@ -277,7 +280,9 @@ internal sealed class YoloDetector : IDisposable
             x2 = Math.Clamp(x2, 1, srcW);
             y2 = Math.Clamp(y2, 1, srcH);
 
-            string label = a.Cls < _classNames.Length && !string.IsNullOrEmpty(_classNames[a.Cls])
+            string label = _opt.ForcedClassId is not null
+                ? PersianPlate.Name(a.Cls)
+                : a.Cls < _classNames.Length && !string.IsNullOrEmpty(_classNames[a.Cls])
                 ? _classNames[a.Cls]
                 : a.Cls.ToString();
 

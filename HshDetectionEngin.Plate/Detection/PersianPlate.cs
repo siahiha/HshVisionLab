@@ -59,6 +59,19 @@ internal static class PersianPlate
         [32] = "\u0632", // ز
     };
 
+    private static readonly Dictionary<string, string> LabelAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ا"] = "ا", ["الف"] = "ا", ["alef"] = "ا", ["aleph"] = "ا",
+        ["ب"] = "ب", ["be"] = "ب", ["ت"] = "ت", ["te"] = "ت", ["ث"] = "ث", ["se"] = "ث",
+        ["ج"] = "ج", ["jim"] = "ج", ["ح"] = "ح", ["د"] = "د", ["dal"] = "د", ["ز"] = "ز",
+        ["س"] = "س", ["sin"] = "س", ["ش"] = "ش", ["shin"] = "ش", ["ص"] = "ص", ["sad"] = "ص",
+        ["ط"] = "ط", ["ta"] = "ط", ["ظ"] = "ظ", ["za"] = "ظ", ["ع"] = "ع", ["ein"] = "ع",
+        ["ف"] = "ف", ["ق"] = "ق", ["ghaf"] = "ق", ["لام"] = "ل", ["ل"] = "ل", ["lam"] = "ل",
+        ["م"] = "م", ["mim"] = "م", ["ن"] = "ن", ["nun"] = "ن", ["ه"] = "ه", ["he"] = "ه",
+        ["و"] = "و", ["vav"] = "و", ["پ"] = "پ", ["pe"] = "پ", ["ژ"] = "ژ", ["zhe"] = "ژ",
+        ["ک"] = "ک", ["kaf"] = "ک", ["گ"] = "گ", ["gaf"] = "گ", ["ی"] = "ی", ["ye"] = "ی"
+    };
+
     // Iranian private plates are eight characters in the OCR output:
     // number-number-letter-number-number-number-number-number.
     private static readonly Regex IranianPlatePattern = new(
@@ -68,6 +81,24 @@ internal static class PersianPlate
     /// <summary>Persian glyph for a class id, or empty string.</summary>
     public static string CharOf(int classId) =>
         CharMap.TryGetValue(classId, out var ch) ? ch : "";
+
+    /// <summary>
+    /// Resolves a model-provided class label first and falls back to the legacy
+    /// class id mapping. This allows separate character models to use their own
+    /// class ordering without changing the existing combined-model contract.
+    /// </summary>
+    public static string CharOf(string? label, int fallbackClassId)
+    {
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            string value = label.Trim().Replace("‌", string.Empty, StringComparison.Ordinal);
+            if (value.Length == 1 && value[0] >= '0' && value[0] <= '9')
+                return ((char)('\u06F0' + (value[0] - '0'))).ToString();
+
+            if (LabelAliases.TryGetValue(value, out string? symbol)) return symbol;
+        }
+        return CharOf(fallbackClassId);
+    }
 
     /// <summary>Display name (English) for a class id.</summary>
     public static string Name(int classId) =>

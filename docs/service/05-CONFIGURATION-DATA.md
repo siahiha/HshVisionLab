@@ -41,6 +41,7 @@
 
 - دوربین‌ها
 - ROIها
+- حالت اجرای ROI (`Rois[].ProcessingMode`)
 - processing itemها
 - گزینه‌های Plate/Face
 - motion و capture

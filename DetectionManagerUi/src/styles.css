@@ -670,3 +670,42 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .roi-tree-actions { display: flex; gap: 6px; margin-bottom: 10px; }
 .roi-tree-actions .button { flex: 1; padding: 8px 6px; font-size: 10px; }
+
+.language-button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(18, 35, 49, .78);
+  color: var(--text);
+  min-width: 38px;
+  height: 30px;
+  padding: 0 9px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .3px;
+  cursor: pointer;
+  transition: border-color .16s ease, color .16s ease, background .16s ease;
+}
+.language-button:hover { border-color: var(--accent); color: var(--accent); background: rgba(25, 55, 73, .9); }
+
+html[data-language="en"] body { direction: ltr; }
+html[data-language="en"] .sidebar { border-left: 0; border-right: 1px solid var(--border); }
+html[data-language="en"] .sidebar-footer small,
+html[data-language="en"] .brand span,
+html[data-language="en"] .camera-list-item,
+html[data-language="en"] .event-mini,
+html[data-language="en"] .camera-tile,
+html[data-language="en"] .person-row,
+html[data-language="en"] .trigger-row,
+html[data-language="en"] .roi-tree button,
+html[data-language="en"] .profile-grid button,
+html[data-language="en"] .table-row,
+html[data-language="en"] .field,
+html[data-language="en"] .setting-line { text-align: left; }
+html[data-language="en"] .mobile-close { margin-left: auto; margin-right: 0; }
+html[data-language="en"] .nav-pulse { margin-left: auto; margin-right: 0; }
+html[data-language="en"] .nav-item.active { box-shadow: inset 2px 0 #4a9bff; }
+html[data-language="en"] .preview-toolbar span { margin-left: auto; margin-right: 0; }
+@media (max-width: 820px) {
+  html[data-language="en"] .sidebar { left: -280px; right: auto; }
+  html[data-language="en"] .sidebar.open { left: 0; right: auto; }
+}

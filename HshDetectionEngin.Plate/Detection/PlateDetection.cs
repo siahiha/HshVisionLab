@@ -18,4 +18,6 @@ internal sealed class YoloOptions
     public float NmsIoUThreshold { get; set; } = 0.45f;
     public int IntraOpThreads { get; set; } = 2;
     public bool AutoOptimizeModel { get; set; } = true;
+    /// <summary>Maps a single-class plate detector to the legacy plate class id.</summary>
+    public int? ForcedClassId { get; set; }
 }

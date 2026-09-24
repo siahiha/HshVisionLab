@@ -766,6 +766,8 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             component["plateConfidence"] = detection.Confidence;
             component["plateThreshold"] = GetMetadataFloat(detection, "Threshold");
             component["isValidIranianPlate"] = GetMetadataBool(detection, "Accepted");
+            component["recognitionConfidence"] = GetMetadataFloat(detection, "RecognitionConfidence");
+            component["recognitionModel"] = GetMetadataString(detection, "RecognitionModel");
             component["hasCharacterDetails"] = GetMetadataBool(detection, "HasCharacterDetails");
             component["characters"] = GetMetadataNode(detection, "Characters") ?? new JsonArray();
         }

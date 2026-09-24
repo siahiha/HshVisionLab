@@ -73,7 +73,7 @@ camera.Start();
 
 نقاط ROI نرمال‌شده‌اند (`0..1`). `Camera.Source`، `Camera.Motion`، `Camera.Roi` و `Camera.Configuration` viewهای عمومی روی همان `CameraSettings` هستند.
 
-Pipelineهای فعال هر ROI به ترتیب مستقل اجرا می‌شوند. `PreviousDetections` خروجی pipeline قبلی همان ROI است و `NextImage` ورودی pipeline بعدی می‌شود؛ این تصویر باید با `TakeNextImage()` منتقل شود تا دوباره توسط `PipelineResult.Dispose()` آزاد نشود. خطای یک pipeline به همان pipeline محدود می‌ماند و اجرای pipelineهای بعدی همان ROI و ROIهای دیگر را متوقف نمی‌کند. Runtime offset ROI را به `Bounds` detection و هندسهٔ `ProcessingOverlay` اضافه می‌کند؛ pipelineی که تصویر را resize یا crop می‌کند باید bounds و overlayهای خود را با ابعاد ROI اصلی هم‌مقیاس نگه دارد. `AnalysisDetection` برای نتایج معنایی است و overlayهایی مانند polyline، polygon، point، circle و rectangle باید از `PipelineResult.Overlays` برگردند تا وارد history تشخیص نشوند.
+ROIهای فعال یک دوربین به‌صورت موازی اجرا می‌شوند. در هر ROI، فیلد `ProcessingMode` دو حالت دارد: `Sequential` (پیش‌فرض و سازگار با تنظیمات قدیمی) taskها را به‌ترتیب فهرست اجرا می‌کند؛ در این حالت `PreviousDetections` خروجی pipeline قبلی همان ROI است و `NextImage` ورودی pipeline بعدی می‌شود و باید با `TakeNextImage()` منتقل شود تا دوباره توسط `PipelineResult.Dispose()` آزاد نشود. در حالت `Parallel`، هر task یک کپی مستقل از تصویر اصلی ROI می‌گیرد، `PreviousDetections` خالی است و `NextImage` بین taskها زنجیره نمی‌شود؛ نتیجهٔ taskها پس از پایان اجرا به‌ترتیب فهرست ترکیب می‌شود. خطای یک pipeline به همان pipeline محدود می‌ماند و اجرای pipelineهای دیگر را متوقف نمی‌کند. Runtime offset ROI را به `Bounds` detection و هندسهٔ `ProcessingOverlay` اضافه می‌کند؛ pipelineی که تصویر را resize یا crop می‌کند باید bounds و overlayهای خود را با ابعاد ROI اصلی هم‌مقیاس نگه دارد. `AnalysisDetection` برای نتایج معنایی است و overlayهایی مانند polyline، polygon، point، circle و rectangle باید از `PipelineResult.Overlays` برگردند تا وارد history تشخیص نشوند.
 
 `PlatePipeline` داخل ماژول Plate وجود دارد اما internal است و `PlateModule.CreateRegistration` registration آن را فراهم می‌کند. `FaceModule` نیز با وابستگی‌های لازم مانند database و license registration خود را فراهم می‌کند. Composition Root برنامه هر دو registration را در یک `ProcessingRegistry` مشترک ثبت می‌کند؛ `CameraPipelineCoordinator` برای هر ROI فعال از registry pipeline می‌سازد و اجرا می‌کند. `CameraRuntime` به concrete type یا factory مخصوص Face/Plate وابسته نیست. هر دو قابلیت از قرارداد مشترک `IProcessingPipeline` و چرخهٔ اجرای همان ROI استفاده می‌کنند؛ خود Engine به ماژول Face یا Plate وابستگی مستقیم ندارد.
 
@@ -85,7 +85,7 @@ FrameSource (به‌صورت پیش‌فرض فقط جدیدترین Mat؛ با 
   → CameraRuntime capture/Motion/ROI loop
   → CameraPipelineCoordinator برای ساخت graph و اجرای هر ROI
   → MotionDetector و mask کردن بخش خارج polygon ROI
-  → processing pipelines به‌ترتیب فهرست (Plate و Face، در صورت فعال و مجاز)
+  → اجرای موازی ROIها؛ taskهای هر ROI طبق `ProcessingMode` سریالی یا موازی
   → overlay، history و UI events
 ```
 

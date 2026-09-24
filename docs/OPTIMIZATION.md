@@ -20,6 +20,11 @@ YOLO با ONNX Runtime و CPU اجرا می‌شود. ورودی با letterbox 
 
 - برای کمترین latency، `BufferCount = 0` و newest-frame semantics را حفظ کنید؛ پردازش فریم‌های صف‌شده ممکن است باعث عقب‌افتادن تصویر زنده شود.
 - ROI دقیق و Motion Gate فعال، تعداد inferenceهای بی‌فایده را کم می‌کند.
+- ROIهای یک دوربین به‌صورت موازی اجرا می‌شوند؛ این latency کلی را کم می‌کند اما
+  مصرف CPU و حافظه را بالا می‌برد. در هر ROI، `ProcessingMode = Parallel` فقط
+  وقتی مناسب است که taskها به خروجی یکدیگر وابسته نباشند و CPU ظرفیت اجرای
+  همزمان آن‌ها را داشته باشد. برای زنجیره‌هایی که به `PreviousDetections` یا
+  `NextImage` نیاز دارند، `Sequential` را نگه دارید.
 - `ActiveDetectionFps` و `MaxFps` را متناسب با CPU تنظیم کنید.
 - `InputSize` بزرگ‌تر معمولاً دقت و هزینهٔ CPU را با هم افزایش می‌دهد.
 - `Threads` تعداد threadهای داخلی ONNX (`IntraOpNumThreads`) است، نه تعداد دوربین یا worker مستقل. افزایش آن برای هر ROI یک مصرف CPU سنگین ایجاد می‌کند؛ ابتدا با `1` baseline بگیرید و فقط اگر latency لازم است به `2` یا بیشتر بروید.

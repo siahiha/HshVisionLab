@@ -101,6 +101,8 @@ HshDetectionService
 
 `CameraPipelineCoordinator` graph فعال را بدون نگه‌داشتن قفل در طول inference snapshot می‌کند. بنابراین endpointهای وضعیت دوربین برای خواندن تعداد pipeline یا وضعیت runtime منتظر پایان ONNX نمی‌مانند. graph قبلی هنگام تغییر تنظیمات تا پایان leaseهای فعال زنده می‌ماند و سپس sessionهای آن آزاد می‌شوند.
 
+ROIهای فعال هر دوربین در coordinator به‌صورت موازی اجرا می‌شوند. `Rois[].ProcessingMode` اجرای taskهای داخل هر ROI را کنترل می‌کند: `Sequential` زنجیرهٔ `PreviousDetections`/`NextImage` را حفظ می‌کند و `Parallel` taskها را روی ورودی‌های مستقل همزمان اجرا می‌کند.
+
 ### `OverlayStateStore`
 
 نتیجهٔ آخرین inference کامل‌شده را به‌شکل immutable نگه می‌دارد. این store شامل ROIهای ثابت، detectionهای پویا، زمان انقضا، sequence فریم مبنا و version وضعیت است.

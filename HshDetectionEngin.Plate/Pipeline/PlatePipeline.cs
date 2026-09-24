@@ -4,32 +4,36 @@ using Emgu.CV;
 
 namespace HshDetectionEngin.Plate;
 
-/// <summary>Complete Iranian plate detection, OCR and tracking pipeline.</summary>
+/// <summary>Plate detection with an optional second-stage OCR recognizer.</summary>
 internal sealed class PlatePipeline : IProcessingPipeline
 {
+    private sealed record CachedOcr(PlateOcrResult Result, long Timestamp);
+
     private readonly PlateProcessingOptions _options;
     private readonly int _maxFps;
-    private readonly YoloDetector _detector;
+    private readonly YoloDetector _plateDetector;
+    private readonly CrnnPlateRecognizer? _ocr;
     private readonly PlateTracker _tracker = new();
+    private readonly Dictionary<int, CachedOcr> _ocrCache = [];
     private long _nextProcessTicks;
 
     public string Name => "Iranian Plate Detection";
-    public double LastInferenceMs => _detector.LastInferenceMs;
+    public double LastInferenceMs => _plateDetector.LastInferenceMs + (_ocr?.LastInferenceMs ?? 0);
 
     public PlatePipeline(PlateProcessingOptions options, int maxFps, int threads)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _maxFps = maxFps;
-        string modelPath = PlateModelPaths.Find(options.ModelFile)
+        string platePath = PlateModelPaths.Find(options.ModelFile)
             ?? throw new FileNotFoundException($"Plate model was not found: {options.ModelFile}");
         string? temporaryModel = null;
         try
         {
-            bool encrypted = modelPath.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase);
-            temporaryModel = encrypted ? SecureModelLoader.Materialize(modelPath) : null;
-            _detector = new YoloDetector(new YoloOptions
+            bool encrypted = platePath.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase);
+            temporaryModel = encrypted ? SecureModelLoader.Materialize(platePath) : null;
+            _plateDetector = new YoloDetector(new YoloOptions
             {
-                ModelPath = temporaryModel ?? modelPath,
+                ModelPath = temporaryModel ?? platePath,
                 InputWidth = options.InputSize,
                 InputHeight = options.InputSize,
                 ConfThreshold = options.Confidence,
@@ -42,6 +46,13 @@ internal sealed class PlatePipeline : IProcessingPipeline
         {
             if (temporaryModel is not null) TryDelete(temporaryModel);
         }
+
+        if (!options.CharacterRecognitionEnabled) return;
+        string ocrPath = PlateModelPaths.Find(options.CharacterModelFile)
+            ?? throw new FileNotFoundException($"Plate recognition model was not found: {options.CharacterModelFile}");
+        if (ocrPath.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The selected plate recognition model must be an ONNX OCR model with a .labels.json sidecar.");
+        _ocr = new CrnnPlateRecognizer(ocrPath, threads);
     }
 
     public PipelineResult Process(ProcessingContext context)
@@ -52,55 +63,97 @@ internal sealed class PlatePipeline : IProcessingPipeline
         if (now < _nextProcessTicks) return new PipelineResult();
         _nextProcessTicks = now + Math.Max(1, Stopwatch.Frequency / fps);
 
-        _detector.UpdateThresholds(_options.Confidence, _options.NmsIoU);
-        List<PlateDetection> detections = Deduplicate(_detector.Detect(context.Image));
+        _plateDetector.UpdateThresholds(_options.Confidence, _options.NmsIoU);
+        List<PlateDetection> detections = Deduplicate(_plateDetector.Detect(context.Image));
         _tracker.Update(detections, maxMisses: Math.Clamp(_options.TrackMaxMisses, 1, 60));
-
+        if (_ocrCache.Count > 0)
+        {
+            HashSet<int> activeTracks = _tracker.CurrentTracks.Select(track => track.Id).ToHashSet();
+            foreach (int staleId in _ocrCache.Keys.Where(id => !activeTracks.Contains(id)).ToArray())
+                _ocrCache.Remove(staleId);
+        }
         List<PlateDetection> plates = detections.Where(d => PersianPlate.IsPlate(d.ClassId)).ToList();
-        List<PlateDetection> characters = detections.Where(d => !PersianPlate.IsPlate(d.ClassId)).ToList();
-        var results = new List<AnalysisDetection>(plates.Count);
+        List<PlateDetection> detectedCharacters = detections.Where(d => !PersianPlate.IsPlate(d.ClassId)).ToList();
+
+        // A materialized crop list keeps stage two independent from frame
+        // traversal and guarantees one OCR call per plate crop.
+        var plateCrops = new List<(PlateDetection Detection, Rectangle Bounds, int? TrackId)>(plates.Count);
         foreach (PlateDetection plate in plates)
         {
-            Rectangle cropBounds = ExpandBounds(plate, context.Image.Size);
-            if (cropBounds.Width < 12 || cropBounds.Height < 6) continue;
-            List<PlateDetection> inside = ReadCharacters(context.Image, cropBounds, characters);
-            string text = BuildPlateText(inside);
-            bool accepted = plate.Score >= _options.Confidence && PersianPlate.IsValidIranianPlate(text);
-            int? trackId = FindTrackId(plate);
-            int characterOffsetX = context.SourceBounds.X;
-            int characterOffsetY = context.SourceBounds.Y;
+            Rectangle bounds = ExpandBounds(plate, context.Image.Size);
+            if (bounds.Width >= 12 && bounds.Height >= 6)
+                plateCrops.Add((plate, bounds, FindTrackId(plate)));
+        }
+
+        var results = new List<AnalysisDetection>(plateCrops.Count);
+        foreach (var item in plateCrops)
+        {
+            List<PlateDetection> inside = [];
+            string text;
+            float recognitionConfidence = 0;
+            if (_ocr is not null)
+            {
+                PlateOcrResult recognition = ReadOcr(context.Image, item.Bounds, item.TrackId, now);
+                text = recognition.Text;
+                recognitionConfidence = recognition.Confidence;
+            }
+            else
+            {
+                inside = ReadCharacters(context.Image, item.Bounds, detectedCharacters);
+                text = BuildPlateText(inside);
+            }
+
+            bool accepted = item.Detection.Score >= _options.Confidence &&
+                (_ocr is null || recognitionConfidence >= _options.CharacterConfidence) &&
+                PersianPlate.IsValidIranianPlate(text);
             var characterDetails = inside.Select((character, index) => new Dictionary<string, object?>
             {
                 ["index"] = index,
                 ["classId"] = character.ClassId,
-                ["symbol"] = PersianPlate.CharOf(character.ClassId),
+                ["symbol"] = PersianPlate.CharOf(character.Label, character.ClassId),
                 ["confidence"] = character.Score,
                 ["bounds"] = new Dictionary<string, object?>
                 {
-                    ["x"] = character.X + characterOffsetX,
-                    ["y"] = character.Y + characterOffsetY,
+                    ["x"] = character.X + context.SourceBounds.X,
+                    ["y"] = character.Y + context.SourceBounds.Y,
                     ["width"] = character.Width,
                     ["height"] = character.Height
                 }
             }).ToList();
+
             results.Add(new AnalysisDetection(
                 AnalysisKind.Plate,
                 string.IsNullOrWhiteSpace(text) ? "Plate" : text,
-                plate.Score,
-                cropBounds,
-                trackId,
+                item.Detection.Score,
+                item.Bounds,
+                item.TrackId,
                 new Dictionary<string, object?>
                 {
                     ["Accepted"] = accepted,
                     ["PlateText"] = text,
+                    ["RecognitionConfidence"] = recognitionConfidence,
+                    ["RecognitionModel"] = _ocr is null ? null : Path.GetFileName(_options.CharacterModelFile),
                     ["Threshold"] = _options.Confidence,
                     ["OverlayThreshold"] = _options.Confidence,
                     ["HasCharacterDetails"] = characterDetails.Count > 0,
                     ["Characters"] = characterDetails
                 }));
         }
-
         return new PipelineResult { Detections = results };
+    }
+
+    private PlateOcrResult ReadOcr(Mat image, Rectangle bounds, int? trackId, long now)
+    {
+        if (trackId is int id && _ocrCache.TryGetValue(id, out CachedOcr? cached))
+        {
+            int maxFps = Math.Max(0, _options.CharacterMaxFps);
+            long interval = maxFps == 0 ? 0 : Math.Max(1, Stopwatch.Frequency / maxFps);
+            if (maxFps > 0 && now - cached.Timestamp < interval) return cached.Result;
+        }
+        using var crop = new Mat(image, bounds);
+        PlateOcrResult result = _ocr!.Read(crop);
+        if (trackId is int track) _ocrCache[track] = new CachedOcr(result, now);
+        return result;
     }
 
     private List<PlateDetection> ReadCharacters(Mat image, Rectangle bounds, List<PlateDetection> characters)
@@ -108,10 +161,9 @@ internal sealed class PlatePipeline : IProcessingPipeline
         PlatePreprocessingMode preprocessing = PlatePreprocessor.Parse(_options.Preprocessing);
         if (preprocessing == PlatePreprocessingMode.None)
             return GetCharactersInside(characters, bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
-
         using var crop = new Mat(image, bounds);
         using var prepared = PlatePreprocessor.Apply(crop, preprocessing);
-        return _detector.Detect(prepared).Where(d => !PersianPlate.IsPlate(d.ClassId)).ToList();
+        return _plateDetector.Detect(prepared).Where(d => !PersianPlate.IsPlate(d.ClassId)).ToList();
     }
 
     private int? FindTrackId(PlateDetection detection)
@@ -151,7 +203,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
     {
         if (characters.Count == 0) return string.Empty;
         characters.Sort((a, b) => (b.X + b.Width / 2f).CompareTo(a.X + a.Width / 2f));
-        string raw = string.Concat(characters.Select(c => PersianPlate.CharOf(c.ClassId)));
+        string raw = string.Concat(characters.Select(c => PersianPlate.CharOf(c.Label, c.ClassId)));
         return string.IsNullOrWhiteSpace(raw) ? string.Empty : new string(raw.Reverse().ToArray());
     }
 
@@ -165,5 +217,11 @@ internal sealed class PlatePipeline : IProcessingPipeline
     }
 
     private static void TryDelete(string path) { try { File.Delete(path); } catch { } }
-    public void Dispose() => _detector.Dispose();
+
+    public void Dispose()
+    {
+        _ocr?.Dispose();
+        _plateDetector.Dispose();
+        _ocrCache.Clear();
+    }
 }

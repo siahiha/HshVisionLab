@@ -16,8 +16,21 @@ public sealed class NamedRoi
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "ROI 1";
     public bool Enabled { get; set; } = true;
+    /// <summary>Execution mode for processing items owned by this ROI.</summary>
+    public string ProcessingMode { get; set; } = RoiProcessingModes.Sequential;
     public List<RoiPoint> Points { get; set; } = [];
     public List<CameraProcessingSettings> Processing { get; set; } = [];
+}
+
+public static class RoiProcessingModes
+{
+    public const string Sequential = "Sequential";
+    public const string Parallel = "Parallel";
+
+    public static string Normalize(string? value) =>
+        string.Equals(value, Parallel, StringComparison.OrdinalIgnoreCase)
+            ? Parallel
+            : Sequential;
 }
 
 public sealed partial class CameraProcessingSettings
@@ -134,6 +147,7 @@ public class CameraSettings
             while (!usedRoiNames.Add(normalizedName))
                 normalizedName = $"{requestedName} ({suffix++})";
             roi.Name = normalizedName;
+            roi.ProcessingMode = RoiProcessingModes.Normalize(roi.ProcessingMode);
             roi.Processing ??= [];
             NormalizeProcessingItems(roi.Processing);
         }

@@ -11,6 +11,12 @@ public sealed class PlateProcessingOptions
     public string Preprocessing { get; set; } = "Standard";
     public float Confidence { get; set; } = 0.35f;
     public float NmsIoU { get; set; } = 0.45f;
+    /// <summary>Runs the selected OCR model once for every detected plate crop.</summary>
+    public bool CharacterRecognitionEnabled { get; set; } = false;
+    public string CharacterModelFile { get; set; } = "ocr_crnn.onnx";
+    public float CharacterConfidence { get; set; } = 0.35f;
+    /// <summary>Maximum OCR rate per tracked plate. Zero means every detection pass.</summary>
+    public int CharacterMaxFps { get; set; } = 4;
     public int TrackMaxMisses { get; set; } = 6;
     public int EventCooldownSeconds { get; set; } = 60;
 }
@@ -130,6 +136,10 @@ public sealed partial class CameraProcessingSettings
                 Preprocessing = Legacy("Preprocessing", "Standard"),
                 Confidence = Legacy("Confidence", 0.35f),
                 NmsIoU = Legacy("NmsIoU", 0.45f),
+                CharacterRecognitionEnabled = Legacy("CharacterRecognitionEnabled", false),
+                CharacterModelFile = Legacy("CharacterModelFile", "ocr_crnn.onnx"),
+                CharacterConfidence = Legacy("CharacterConfidence", 0.35f),
+                CharacterMaxFps = Legacy("CharacterMaxFps", 4),
                 TrackMaxMisses = Legacy("TrackMaxMisses", 6),
                 EventCooldownSeconds = Legacy("PlateEventCooldownSeconds", 60)
             };
