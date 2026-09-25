@@ -231,6 +231,28 @@ function fmtDate(value?: string) {
     timeStyle: "short",
   }).format(new Date(value));
 }
+function fmtUtcDate(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("fa-IR", {
+    dateStyle: "short",
+    timeStyle: "medium",
+    timeZone: "UTC",
+  }).format(date);
+}
+function fmtSendDuration(occurredAtUtc?: string, completedAtUtc?: string) {
+  if (!completedAtUtc) return "در انتظار ارسال";
+  const elapsedMs = new Date(completedAtUtc).getTime() - new Date(occurredAtUtc ?? "").getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return "—";
+  const totalSeconds = Math.floor(elapsedMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toLocaleString("fa-IR")} دقیقه و ${seconds.toLocaleString("fa-IR")} ثانیه`;
+}
+function effectiveInvocationCompletedAt(log: { status?: string; completedAtUtc?: string }) {
+  return log.status?.toLocaleLowerCase() === "skipped" ? undefined : log.completedAtUtc;
+}
 function fmt(v: unknown, digits = 1) {
   return typeof v === "number" ? v.toFixed(digits) : "—";
 }
@@ -5012,7 +5034,7 @@ function blankInvocation(): InvocationDefinition {
 function Invocations() {
   const invocations = useInvocations();
   const cameras = useCameras();
-  const logs = useInvocationLogs();
+  const logs = useInvocationLogs(undefined, 1000);
   const mutation = useInvocationMutation();
   const client = useQueryClient();
   const [selectedId, setSelectedId] = useState<string>();
@@ -5084,7 +5106,7 @@ function Invocations() {
           </>}
         </section>
       </div>
-      <section className="panel invocation-log-panel"><div className="panel-head compact"><div><h3>لاگ نتیجه فراخوانی‌ها</h3><span>درخواست، پاسخ، خطا و تعداد تلاش‌ها در SQLite ذخیره می‌شود.</span></div><Button variant="ghost" icon={RefreshCw} onClick={() => void logs.refetch()}>به‌روزرسانی</Button></div><div className="invocation-log-list">{(logs.data ?? []).slice(0, 30).map((log) => <div className="invocation-log-row" key={log.logId}><Badge tone={log.status === "Succeeded" ? "green" : log.status === "Failed" ? "red" : "amber"}>{log.status}</Badge><b>{log.invocationName}</b><span>{log.method}</span><small>{fmtDate(log.startedAtUtc)}</small><small>تلاش {log.attempt}</small><code title={log.error || log.responseBody || ""}>{log.error || log.responseBody || "بدون پاسخ متنی"}</code>{log.status === "Failed" && <Button variant="ghost" onClick={() => void api.retryInvocationJob(log.jobId).then(() => logs.refetch())}>تلاش مجدد</Button>}</div>)}{!logs.data?.length && <Empty icon={Database} title="لاگی وجود ندارد" text="بعد از ثبت اولین تشخیص، نتیجه اینجا نمایش داده می‌شود." />}</div></section>
+      <section className="panel invocation-log-panel"><div className="panel-head compact"><div><h3>لاگ نتیجه فراخوانی‌ها</h3><span>درخواست، پاسخ، خطا و تعداد تلاش‌ها در SQLite ذخیره می‌شود.</span></div><Button variant="ghost" icon={RefreshCw} onClick={() => void logs.refetch()}>به‌روزرسانی</Button></div><div className="invocation-log-list"><div className="invocation-log-row invocation-log-head"><span>وضعیت</span><span>فراخوانی</span><span>روش</span><span>زمان وقوع رخداد</span><span>زمان پایان ارسال</span><span>مدت ارسال</span><span>تلاش</span><span>پاسخ</span><span /></div>{(logs.data ?? []).slice(0, 30).map((log) => { const completedAtUtc = effectiveInvocationCompletedAt(log); return <div className="invocation-log-row" key={log.logId}><Badge tone={log.status === "Succeeded" ? "green" : log.status === "Failed" ? "red" : "amber"}>{log.status}</Badge><b>{log.invocationName}</b><span>{log.method}</span><small title={log.occurredAtUtc}>{fmtUtcDate(log.occurredAtUtc)}</small><small title={completedAtUtc}>{fmtUtcDate(completedAtUtc)}</small><small>{fmtSendDuration(log.occurredAtUtc, completedAtUtc)}</small><small>تلاش {log.attempt}</small><code title={log.error || log.responseBody || ""}>{log.error || log.responseBody || "بدون پاسخ متنی"}</code>{log.status === "Failed" && <Button variant="ghost" onClick={() => void api.retryInvocationJob(log.jobId).then(() => logs.refetch())}>تلاش مجدد</Button>}</div> })}{!logs.data?.length && <Empty icon={Database} title="لاگی وجود ندارد" text="بعد از ثبت اولین تشخیص، نتیجه اینجا نمایش داده می‌شود." />}</div></section>
     </>
   );
 }

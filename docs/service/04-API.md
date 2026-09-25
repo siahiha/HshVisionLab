@@ -173,7 +173,7 @@ GET    /api/v1/invocations
 POST   /api/v1/invocations
 PATCH  /api/v1/invocations/{invocationId}
 DELETE /api/v1/invocations/{invocationId}
-GET    /api/v1/invocations/logs
+GET    /api/v1/invocations/logs?limit=200&invocationId=...&status=...
 POST   /api/v1/invocations/{invocationId}/test
 POST   /api/v1/invocations/jobs/{jobId}/retry
 ```

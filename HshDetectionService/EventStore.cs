@@ -182,11 +182,11 @@ public sealed class EventStore : IDisposable
             ThrowIfDisposed();
             limit = Math.Clamp(limit, 1, 1000);
             var predicates = new List<string>();
-            if (!string.IsNullOrWhiteSpace(invocationId)) predicates.Add("InvocationId = $invocationId");
-            if (!string.IsNullOrWhiteSpace(status)) predicates.Add("Status = $status");
+            if (!string.IsNullOrWhiteSpace(invocationId)) predicates.Add("l.InvocationId = $invocationId");
+            if (!string.IsNullOrWhiteSpace(status)) predicates.Add("l.Status = $status");
             string where = predicates.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", predicates);
             using SqliteCommand command = _connection.CreateCommand();
-            command.CommandText = $"SELECT LogId, JobId, EventSequence, EventId, InvocationId, InvocationName, StepOrder, Status, Attempt, StartedAtUtc, CompletedAtUtc, Method, Target, RequestPayload, ResponseStatusCode, ResponseBody, Error FROM InvocationLogs{where} ORDER BY LogId DESC LIMIT $limit;";
+            command.CommandText = $"SELECT l.LogId, l.JobId, l.EventSequence, l.EventId, l.InvocationId, l.InvocationName, l.StepOrder, l.Status, l.Attempt, l.StartedAtUtc, l.CompletedAtUtc, l.Method, l.Target, l.RequestPayload, l.ResponseStatusCode, l.ResponseBody, l.Error, e.OccurredAtUtc FROM InvocationLogs l LEFT JOIN DetectionEvents e ON e.Sequence = l.EventSequence{where} ORDER BY l.LogId DESC LIMIT $limit;";
             if (!string.IsNullOrWhiteSpace(invocationId)) Add(command, "$invocationId", invocationId!);
             if (!string.IsNullOrWhiteSpace(status)) Add(command, "$status", status!);
             Add(command, "$limit", limit);
@@ -219,7 +219,8 @@ public sealed class EventStore : IDisposable
         reader.GetInt32(6), reader.GetString(7), reader.GetInt32(8), ParseDate(reader.GetString(9)) ?? DateTime.UtcNow,
         ParseDate(reader.IsDBNull(10) ? null : reader.GetString(10)), reader.GetString(11), reader.GetString(12),
         reader.IsDBNull(13) ? null : reader.GetString(13), reader.IsDBNull(14) ? null : reader.GetInt32(14),
-        reader.IsDBNull(15) ? null : reader.GetString(15), reader.IsDBNull(16) ? null : reader.GetString(16));
+        reader.IsDBNull(15) ? null : reader.GetString(15), reader.IsDBNull(16) ? null : reader.GetString(16),
+        ParseDate(reader.IsDBNull(17) ? null : reader.GetString(17)));
 
     private static DateTime? ParseDate(string? value) => DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime parsed) ? parsed : null;
 

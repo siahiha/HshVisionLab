@@ -33,7 +33,7 @@ export function useSettings() { return useQuery({ queryKey: keys.settings, query
 export function useCapabilities() { return useQuery({ queryKey: keys.capabilities, queryFn: api.capabilities, staleTime: 60_000 }) }
 export function useModels() { return useQuery({ queryKey: keys.models, queryFn: api.models, staleTime: 60_000 }) }
 export function useInvocations() { return useQuery({ queryKey: keys.invocations, queryFn: api.invocations }) }
-export function useInvocationLogs(invocationId?: string) { return useQuery({ queryKey: [...keys.invocationLogs, invocationId], queryFn: () => api.invocationLogs(invocationId), refetchInterval: 5000 }) }
+export function useInvocationLogs(invocationId?: string, limit = 200) { return useQuery({ queryKey: [...keys.invocationLogs, invocationId, limit], queryFn: () => api.invocationLogs(invocationId, limit), refetchInterval: 5000 }) }
 export function useInvocationMutation() { const client = useQueryClient(); return useMutation({ mutationFn: (input: { value: InvocationDefinition; create: boolean }) => input.create ? api.createInvocation(input.value) : api.updateInvocation(input.value), onSuccess: () => { void client.invalidateQueries({ queryKey: keys.invocations }); void client.invalidateQueries({ queryKey: keys.invocationLogs }) } }) }
 export function usePeople() { return useQuery({ queryKey: keys.people, queryFn: api.people }) }
 export function usePersonSamples(id?: string) { return useQuery({ queryKey: ['samples', id], queryFn: () => api.samples(id!), enabled: Boolean(id) }) }

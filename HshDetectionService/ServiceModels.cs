@@ -131,7 +131,8 @@ public sealed record InvocationLogRecord(
     string? RequestPayload,
     int? ResponseStatusCode,
     string? ResponseBody,
-    string? Error);
+    string? Error,
+    DateTime? OccurredAtUtc = null);
 
 public sealed record InvocationTestResult(
     bool Success,

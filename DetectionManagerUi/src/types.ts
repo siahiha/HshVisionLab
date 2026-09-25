@@ -201,6 +201,7 @@ export interface InvocationLog {
   responseStatusCode?: number;
   responseBody?: string;
   error?: string;
+  occurredAtUtc?: string;
 }
 export interface ClientSubscription {
   mode: "All" | "Plate" | "KnownFace";
