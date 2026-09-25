@@ -355,13 +355,26 @@ public static class ServiceApi
                 };
             }
 
+            bool subscriptionHasFilter = subscription is not null &&
+                (!subscription.Mode.Equals("All", StringComparison.OrdinalIgnoreCase) ||
+                 subscription.FaceRequired ||
+                 subscription.PlateRequired ||
+                 !subscription.IncludeFace ||
+                 !subscription.IncludePlate ||
+                 !subscription.IncludeUnknownFace ||
+                 subscription.WindowMs != 1500 ||
+                 subscription.CooldownSeconds != 0 ||
+                 subscription.CameraIds.Count > 0 ||
+                 subscription.RoiIds.Count > 0);
             bool hasFilter = !string.IsNullOrWhiteSpace(cameraId) ||
                 !string.IsNullOrWhiteSpace(scenario) ||
                 fromUtc is not null ||
                 toUtc is not null ||
-                subscription is not null;
+                subscriptionHasFilter;
             if (!hasFilter)
-                return Results.Ok(host.Events.ReadAfter(afterSequence ?? 0, requestedLimit).ToArray());
+                return Results.Ok((afterSequence is null
+                    ? host.Events.ReadLatest(requestedLimit)
+                    : host.Events.ReadAfter(afterSequence.Value, requestedLimit)).ToArray());
 
             DateTime from = fromUtc?.ToUniversalTime() ?? DateTime.MinValue;
             DateTime to = toUtc?.ToUniversalTime() ?? DateTime.MaxValue;

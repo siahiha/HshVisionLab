@@ -40,7 +40,18 @@ export function usePersonSamples(id?: string) { return useQuery({ queryKey: ['sa
 export function useEvents(query = '', limit = 200) {
   const subscription = useClientSubscription()
   const subscriptionKey = JSON.stringify(subscription)
-  return useQuery({ queryKey: [...keys.events, query, limit, subscriptionKey], queryFn: () => api.events(query, subscription, limit), refetchInterval: 5000 })
+  const client = useQueryClient()
+  const queryKey = [...keys.events, query, limit, subscriptionKey]
+  return useQuery({ queryKey, queryFn: async () => {
+    const batch = await api.events(query, subscription, limit)
+    // REST polling may return an older page while SignalR has already added
+    // a newer event to the same cache. Merge both sets so a live card is not
+    // removed by the next five-second polling refresh.
+    const merged = new Map<string, DetectionEvent>()
+    for (const item of client.getQueryData<DetectionEvent[]>(queryKey) ?? []) merged.set(item.eventId, item)
+    for (const item of batch) merged.set(item.eventId, item)
+    return [...merged.values()].sort((a, b) => b.sequence - a.sequence).slice(0, limit)
+  }, refetchInterval: 5000 })
 }
 export function useEvent(id?: string) { return useQuery({ queryKey: ['event', id], queryFn: () => api.event(id!), enabled: Boolean(id) }) }
 export function useDeleteEvents() { const client = useQueryClient(); return useMutation({ mutationFn: (range: EventDeletionRange) => api.deleteEvents(range), onSuccess: () => { void client.invalidateQueries({ queryKey: keys.events }); void client.removeQueries({ queryKey: ['event'] }) } }) }
