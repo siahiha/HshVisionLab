@@ -14,13 +14,13 @@ npm run dev
 برای دسترسی از سایر دستگاه‌های شبکهٔ محلی، Vite را روی همهٔ interfaceها bind کنید:
 
 ```powershell
-npx vite --host 0.0.0.0 --port 5173
+npx vite --host 0.0.0.0 --port 5081
 ```
 
 آدرس فعلی UI در این محیط:
 
 ```text
-http://192.168.10.172:5173/
+http://192.168.10.172:5081/
 ```
 
 اگر آدرس شبکهٔ سیستم تغییر کرد، مقدار `192.168.10.172` را با IPv4 جدید سیستم جایگزین کنید. سرویس تشخیص همچنان باید روی پورت `5080` فعال باشد و برای پخش WebRTC/MediaMTX از دستگاه دیگر، پورت UDP مربوط به WebRTC نیز باید در Firewall باز باشد.
@@ -31,12 +31,15 @@ http://192.168.10.172:5173/
 $env:VITE_HSH_API_BASE_URL = 'http://127.0.0.1:5080'
 $env:VITE_HSH_API_KEY = 'service-api-key'
 npm run build
-npm run preview -- --host 0.0.0.0 --port 5173
+npm run preview -- --host 0.0.0.0 --port 5081
 ```
 
-اگر UI و سرویس روی یک ماشین نیستند، origin UI را در `service-settings.json` داخل
-`http.corsOrigins` اضافه کنید. مسیرهای API، snapshot، WHEP و SignalR همگی از همین
-`VITE_HSH_API_BASE_URL` استفاده می‌کنند.
+اگر UI و سرویس روی یک ماشین نیستند، origin دقیق UI را در `service-settings.json` داخل
+`http.corsOrigins` اضافه کنید؛ برای اجرای محلی معمولاً
+`http://127.0.0.1:5081` و `http://localhost:5081` لازم هستند. این تنظیم برای API و
+SignalR (`/hubs/detections`) مشترک است و بعد از تغییر، سرویس باید restart شود تا
+policy جدید در middleware اعمال شود. مسیرهای API، snapshot، WHEP و SignalR همگی از
+همین `VITE_HSH_API_BASE_URL` استفاده می‌کنند.
 
 برای سرویس remote می‌توان کلید API را تنظیم کرد:
 
@@ -69,6 +72,8 @@ npm run dev
 - snapshot برای backendهای غیر MediaMTX و endpoint WebRTC کامپوزیت‌شده برای مصرف‌کننده‌های legacy باقی می‌مانند؛ مسیر اصلی MediaMTX از encode مجدد ویدئو استفاده نمی‌کند
 - Face Database کامل: افراد نام‌دار/Unknown، rename، حذف sample/person، enrollment چندتصویری، انتقال sample و Similarity/Merge
 - مشاهدهٔ eventهای پایدار، فریم کامل، ROI/Plate/Face crop، metadata جزئی و payload کامل trigger
+- صفحهٔ تاریخچهٔ رخدادها آخرین ۵۰۰ رکورد را بارگذاری می‌کند و گرید آن با اندازهٔ ۵۰ (پیش‌فرض)، ۱۰۰ یا ۲۰۰ رکورد در صفحه، داخل خود گرید صفحه‌بندی می‌شود
+- preview رخداد انتخاب‌شده در بالای صفحه sticky است؛ فقط گرید اسکرول عمودی دارد و header آن ثابت می‌ماند، و ارتفاع ردیف‌ها برای نمایش رکوردهای بیشتر فشرده شده است
 - اتصال SignalR با نگهداری sequence و replay پس از reconnect؛ polling فقط fallback است
 - تنظیم `History event cooldown (sec)` مستقل برای هر آیتم Plate/Face زیر ROI؛ در نبود trigger، ثبت تکراری canonical history برای همان دوربین/ROI/component را محدود می‌کند
 - فیلد `History event cooldown (sec)` در «آزمایش subscription کلاینت»؛ فقط history و replay/live همان اتصال وب را فیلتر می‌کند و database مشترک یا triggerها را تغییر نمی‌دهد

@@ -246,6 +246,11 @@ const english: Record<string, string> = {
   "اعمال برای اتصال جاری": "Apply to current connection",
   "رخداد پایه": "Base event",
   "همهٔ رخدادها": "All events",
+  "تشخیص پلاک": "Plate detection",
+  "شناسایی چهره": "Face recognition",
+  "چهره ناشناس": "Unknown face",
+  "تطبیق پلاک و چهره": "Plate + face match",
+  "چند نوع رخداد انتخاب شده": "Multiple event types selected",
   "پلاک‌محور": "Plate-based",
   "چهرهٔ شناخته‌شده": "Known face",
   "پنجرهٔ association (ms)": "Association window (ms)",
@@ -398,12 +403,266 @@ const persian: Record<string, string> = {
   "People / Samples": "افراد / نمونه‌ها",
   "Dropped frames": "فریم‌های حذف‌شده",
   "NotConfigured": "پیکربندی نشده",
+
+  // Invocation editor and invocation-log labels.
+  "Invocations": "فراخوانی‌ها",
+  "Web API": "وب‌سرویس API",
+  "WEB": "وب",
+  "SQL": "SQL",
+  "Request": "درخواست",
+  "Payload": "بار داده",
+  "Response": "پاسخ",
+  "Succeeded": "موفق",
+  "Failed": "ناموفق",
+  "Skipped": "ردشده",
+  "HTTP": "HTTP",
+  "Provider": "ارائه‌دهنده",
+  "Connection String": "رشته اتصال",
+  "Content-Type": "نوع محتوا",
+  "Token / Value": "توکن / مقدار",
+  "Mapping": "نگاشت",
+  "Input mapping": "نگاشت ورودی",
+  "Timeout (seconds)": "مهلت (ثانیه)",
+  "Retry count": "تعداد تلاش مجدد",
+  "Retry delay (seconds)": "فاصله تلاش مجدد (ثانیه)",
+
+  // English-only labels that are also used outside the invocation page.
+  "Detected events · All cameras": "رخدادهای تشخیص · همه دوربین‌ها",
+  "Inference": "استنتاج",
+  "Trigger": "تریگر",
+  "matched": "منطبق",
+  "stored": "ذخیره‌شده",
+  "Sequence": "شماره ترتیبی",
+  "Runtime & retention": "زمان اجرا و نگهداری",
+  "HTTP & security": "HTTP و امنیت",
+  "Preview & drawing": "پیش‌نمایش و ترسیم",
+  "Capabilities & models": "قابلیت‌ها و مدل‌ها",
+  "Current revision": "نسخه فعلی",
+  "API managed": "مدیریت‌شده با API",
+  "Similar face samples": "نمونه‌های چهره مشابه",
+  "Only different people": "فقط افراد متفاوت",
+  "Plate recognition": "شناسایی پلاک",
+  "Face recognition": "شناسایی چهره",
+  "Tracking and recording": "ردیابی و ثبت رخداد",
+  "Plate detection": "تشخیص پلاک",
+  "Check similarity": "بررسی شباهت",
+  "Max association window (ms)": "حداکثر پنجره ارتباط (میلی‌ثانیه)",
+  "Max event queue": "حداکثر صف رخداد",
+  "Minimum similarity": "حداقل شباهت",
+  "Points": "نقاط",
+  "Polygon": "چندضلعی",
+  "Preview FPS": "نرخ فریم پیش‌نمایش",
+  "Recognition confidence": "اطمینان شناسایی",
+  "Recognition FPS per plate": "نرخ فریم شناسایی برای هر پلاک",
+  "Unknown auto-enrollment": "ثبت خودکار افراد ناشناس",
+  "مقصد Web API": "مقصد وب‌سرویس API",
+  "Mapping ورودی": "نگاشت ورودی",
+  "حداقل Confidence": "حداقل اطمینان",
+  "Timeout (ثانیه)": "مهلت (ثانیه)",
+  "تعداد Retry": "تعداد تلاش مجدد",
+  "فاصله Retry (ثانیه)": "فاصله تلاش مجدد (ثانیه)",
+  "Revision فعلی": "نسخه فعلی",
+  "Select an event": "یک رخداد را انتخاب کنید",
+  "The full frame, ROI/Plate/Face crops, and partial payload are shown here.": "فریم کامل، کراپ‌های ROI/Plate/Face و payload جزئی در اینجا نمایش داده می‌شود.",
+  "یک Event را انتخاب کنید": "یک رخداد را انتخاب کنید",
+  "فریم کامل، cropهای ROI/Plate/Face و payload جزئی آن Showing داده می‌شود.": "فریم کامل، کراپ‌های ROI/Plate/Face و payload جزئی در اینجا نمایش داده می‌شود.",
 };
+
+// The invocation screen contains a few mixed-language phrases. Keeping these
+// as complete entries avoids leaving one English word inside a Persian label
+// (or one Persian word inside an English label) after a language switch.
+Object.assign(english, {
+  "فراخوانی‌ها": "Invocations",
+  "اتصال رویدادهای تشخیص به Web API یا دستور SQL، با زنجیره، فیلتر و لاگ پایدار": "Connect detection events to a Web API or SQL command with workflows, filters, and persistent logs",
+  "تعریف‌ها": "Definitions",
+  "فراخوانی": "invocation",
+  "فراخوانی جدید": "New invocation",
+  "روند": "workflow",
+  "مرحله": "step",
+  "بدون مقصد": "No destination",
+  "خاموش": "Disabled",
+  "فراخوانی تعریف نشده": "No invocation defined",
+  "برای شروع یک Web یا SQL بسازید.": "Create a Web or SQL invocation to begin.",
+  "یک مورد را انتخاب کنید": "Select an item",
+  "تنظیمات فراخوانی و Mapping اینجا نمایش داده می‌شود.": "Invocation settings and mapping are shown here.",
+  "تعریف فراخوانی": "Invocation definition",
+  "فیلتر، مقصد، Mapping و روند اجرا": "Filter, destination, mapping and workflow",
+  "در حال تست...": "Testing...",
+  "تست آخرین رکورد": "Test latest record",
+  "موفق": "Succeeded",
+  "ناموفق": "Failed",
+  "آخرین رکورد": "Latest record",
+  "بدون پاسخ متنی": "No text response",
+  "بدون Payload": "No payload",
+  "مقصد Web API": "Web API destination",
+  "احراز هویت": "Authentication",
+  "Token / مقدار": "Token / value",
+  "مقصد SQL": "SQL destination",
+  "نوع دستور": "Command type",
+  "دستور / نام Procedure": "Command / procedure name",
+  "فیلتر اجرا": "Execution filter",
+  "دوربین‌ها:": "Cameras:",
+  "دوربینی پیدا نشد": "No camera found",
+  "فقط تریگر؟": "Triggered only?",
+  "همه رکوردها": "All records",
+  "فقط همراه تریگر": "Triggered records only",
+  "فقط معمولی": "Non-triggered only",
+  "حداقل Confidence": "Minimum confidence",
+  "نوع رخدادها": "Event types",
+  "شناسه تریگرها": "Trigger IDs",
+  "با کاما جدا کنید": "Separate with commas",
+  "Mapping ورودی": "Input mapping",
+  "منبع داده را از فهرست انتخاب کنید؛ برای DTO دارای byte[]، Content-Type را روی JSON بگذارید تا تصویر به Base64 استاندارد تبدیل شود.": "Select the data source from the list. For a DTO with byte[], set Content-Type to JSON so the image is converted to standard Base64.",
+  "فیلد مقصد": "Target field",
+  "مقدار پیش‌فرض": "Default value",
+  "انتخاب منبع داده...": "Select a data source...",
+  "مسیر سفارشی...": "Custom path...",
+  "Timeout (ثانیه)": "Timeout (seconds)",
+  "تعداد Retry": "Retry count",
+  "فاصله Retry (ثانیه)": "Retry delay (seconds)",
+  "لاگ نتیجه فراخوانی‌ها": "Invocation result log",
+  "درخواست، پاسخ، خطا و تعداد تلاش‌ها در SQLite ذخیره می‌شود.": "Requests, responses, errors and attempt counts are stored in SQLite.",
+  "زمان وقوع رخداد": "Event occurrence time",
+  "زمان پایان ارسال": "Send completion time",
+  "مدت ارسال": "Send duration",
+  "تلاش": "Attempt",
+  "تلاش مجدد": "Retry",
+  "لاگی وجود ندارد": "No log exists",
+  "بعد از ثبت اولین تشخیص، نتیجه اینجا نمایش داده می‌شود.": "The result appears here after the first detection is recorded.",
+  "خطا در اجرای تست": "Test execution failed",
+  "Revision فعلی": "Current revision",
+  "Registry مرکزی موتور تشخیص": "Central detection engine registry",
+  "فقط packageهای قابل استفادهٔ runtime": "Only runtime-usable packages",
+  "یک رخداد را انتخاب کنید": "Select an event",
+  "یک Event را انتخاب کنید": "Select an event",
+  "فریم کامل، cropهای ROI/Plate/Face و payload جزئی آن نمایش داده می‌شود.": "The full frame, ROI/Plate/Face crops, and partial payload are shown here.",
+  "فریم کامل، cropهای ROI/Plate/Face و payload جزئی آن Showing داده می‌شود.": "The full frame, ROI/Plate/Face crops, and partial payload are shown here.",
+  "Runtime": "Runtime",
+  "General": "General",
+  "Capture": "Capture",
+  "Drawing": "Drawing",
+  "Transport": "Transport",
+  "Processing": "Processing",
+  "Preview": "Preview",
+  "Reload runtime": "Reload runtime",
+  "آستانه را انتخاب و Check را اجرا کنید.": "Choose a threshold and run Check.",
+  "زمان ثبت (UTC)": "Recorded time (UTC)",
+  "زمان وقوع (UTC)": "Occurrence time (UTC)",
+  "میانگین inference": "Average inference",
+});
+
+// Complete translations for descriptive UI copy. These entries intentionally
+// translate the whole sentence so the word-level fallback cannot leave a
+// Persian or English fragment in the middle of a description.
+Object.assign(english, {
+  "معادل وب برنامه HshVisionLab برای کنترل دوربین‌ها، ROI، پردازش و کلاینت‌ها": "Web application equivalent to HshVisionLab for controlling cameras, ROIs, processing, and clients",
+  "منبع، فریم، inference و فریم‌های حذف‌شده": "Source, frames, inference, and dropped frames",
+  "پس از دریافت اولین رخداد، crop و مشخصات متنی تشخیص اینجا نمایش داده می‌شود.": "Detection crops and text details appear here after the first event is received.",
+  "مانند فرم CameraSettingsForm، تنظیمات General و Processing در اینجا قابل ویرایش است.": "Like CameraSettingsForm, General and Processing settings can be edited here.",
+  "؛ ROI و task ذخیره می‌شوند اما تا رفع این وضعیت inference اجرا نمی‌شود.": "; ROIs and tasks are saved, but inference will not run until this issue is resolved.",
+  "WebRTC · استریم پردازش‌شده با ROI، کادرها و نتایج تشخیص": "WebRTC · processed stream with ROIs, boxes, and detection results",
+  "ROI و Drawing روی آخرین تصویر سرویس رسم می‌شوند.": "ROIs and drawing are rendered on the latest service image.",
+  "دادهٔ runtime همان دوربین": "Runtime data for this camera",
+  "فریم preview از سرویس می‌آید و UI هرگز مستقیماً به دوربین یا دیتابیس دسترسی ندارد.": "Preview frames come from the service, and the UI never accesses the camera or database directly.",
+  "WHEP خام MediaMTX + Overlay سبک سمت کلاینت": "Raw MediaMTX WHEP + lightweight client-side overlay",
+  "کلیک روی تصویر: افزودن نقطه · آخرین نقطه را با Undo حذف کنید": "Click the image to add a point · use Undo to remove the last point",
+  "معادل تب General فرم تنظیمات دوربین": "Equivalent to the General tab of the camera settings form",
+  "اختیاری؛ برای Mapping از source.cameraCode استفاده کنید": "Optional; use source.cameraCode for mapping",
+  "نمایش Drawing، ROI و کادر تشخیص": "Show drawing, ROIs, and detection boxes",
+  "برای Face و Plate مستقل نگه‌داری می‌شود": "Stored independently for Face and Plate",
+  "برای حفظ latency، inference در حالت idle کنترل می‌شود.": "Inference is controlled while idle to preserve latency.",
+  "thresholdها را تغییر نمی‌دهد؛ فقط سرعت و مصرف را تنظیم می‌کند.": "Thresholds are unchanged; only speed and resource usage are adjusted.",
+  "INT8 · ۵ FPS · یک thread": "INT8 · 5 FPS · one thread",
+  "پیشنهادی · ۸ FPS · دو thread": "Recommended · 8 FPS · two threads",
+  "۱۵ FPS · چهار thread": "15 FPS · four threads",
+  "فهرست مدل در حال حاضر خالی است یا endpoint در دسترس نیست.": "The model list is currently empty or the endpoint is unavailable.",
+  "Plate detection · تنظیمات مدل، دقت و tracking": "Plate detection · model, accuracy, and tracking settings",
+  "Plate recognition · مدل OCR روی crop هر پلاک اجرا می‌شود": "Plate recognition · OCR runs on each plate crop",
+  "Face detection · YuNet چهره‌ها را پیدا می‌کند": "Face detection · YuNet finds faces",
+  "Face identification · مقایسه با Face DB توسط SFace": "Face identification · SFace comparison with the Face database",
+  "Tracking and recording · کنترل نرخ و ثبت رویداد": "Tracking and recording · rate control and event recording",
+  "در این بخش تمام نمونه‌ها، وضعیت Image missing و عملیات انتقال در دسترس است.": "All samples, Image missing status, and transfer operations are available here.",
+  "threshold پیش‌فرض 0.40 مطابق recognition SFace": "Default threshold 0.40, matching SFace recognition",
+  "این تنظیم فقط eventهای همین اتصال UI را فیلتر می‌کند و تنظیمات دوربین را تغییر نمی‌دهد.": "This setting filters only events for this UI connection and does not change camera settings.",
+  "LiveEvent، Webhook و کلاینت‌های مجاز از اینجا تنظیم می‌شوند.": "Configure LiveEvent, Webhook, and authorized clients here.",
+  "خالی‌بودن یعنی همهٔ دوربین‌ها. تغییرات بعد از اعمال، روی SignalR همین صفحه فعال می‌شود.": "Empty means all cameras. After applying, changes become active on SignalR for this page.",
+  "همهٔ فیلترها در": "All filters are applied in",
+  "runtime سرویس اعمال می‌شوند.": "the service runtime.",
+  "کلاینت‌ها با SignalR replay می‌شوند؛ Webhook برای سیستم‌های بیرونی": "Clients replay through SignalR; Webhook is for external systems",
+  "پاک‌سازی دوره‌ای metadata و evidence": "Periodic metadata and evidence cleanup",
+  "هر origin UI جداگانه در یک خط؛ برای SignalR هم استفاده می‌شود. تغییر پس از restart سرویس اعمال می‌شود.": "Enter each UI origin on a separate line; it is also used for SignalR. Changes apply after the service restarts.",
+  "کلید برای کلاینت‌های remote": "Key for remote clients",
+  "برای توسعه روی 127.0.0.1": "For development on 127.0.0.1",
+});
+
+Object.assign(persian, {
+  "Web application equivalent to HshVisionLab for controlling cameras, ROIs, processing, and clients": "معادل وب‌برنامه HshVisionLab برای کنترل دوربین‌ها، نواحی ROI، پردازش و کلاینت‌ها",
+  "Source, frames, inference, and dropped frames": "منبع، فریم‌ها، استنتاج و فریم‌های حذف‌شده",
+  "Detection crops and text details appear here after the first event is received.": "پس از دریافت اولین رخداد، کراپ‌ها و مشخصات متنی تشخیص اینجا نمایش داده می‌شود.",
+  "Like CameraSettingsForm, General and Processing settings can be edited here.": "مانند فرم تنظیمات دوربین، تنظیمات عمومی و پردازش در اینجا قابل ویرایش است.",
+  "; ROIs and tasks are saved, but inference will not run until this issue is resolved.": "; نواحی ROI و پردازش‌ها ذخیره می‌شوند، اما تا رفع این وضعیت استنتاج اجرا نمی‌شود.",
+  "WebRTC · processed stream with ROIs, boxes, and detection results": "WebRTC · استریم پردازش‌شده با نواحی ROI، کادرها و نتایج تشخیص",
+  "ROIs and drawing are rendered on the latest service image.": "نواحی ROI و ترسیم روی آخرین تصویر سرویس نمایش داده می‌شوند.",
+  "Runtime data for this camera": "داده‌های زمان اجرای همین دوربین",
+  "Preview frames come from the service, and the UI never accesses the camera or database directly.": "فریم‌های پیش‌نمایش از سرویس می‌آیند و UI هرگز مستقیماً به دوربین یا پایگاه داده دسترسی ندارد.",
+  "Raw MediaMTX WHEP + lightweight client-side overlay": "WHEP خام MediaMTX به‌همراه پوشش سبک سمت کلاینت",
+  "Click the image to add a point · use Undo to remove the last point": "برای افزودن نقطه روی تصویر کلیک کنید · برای حذف آخرین نقطه از برگشت استفاده کنید",
+  "Equivalent to the General tab of the camera settings form": "معادل تب عمومی فرم تنظیمات دوربین",
+  "Optional; use source.cameraCode for mapping": "اختیاری؛ برای نگاشت از source.cameraCode استفاده کنید",
+  "Show drawing, ROIs, and detection boxes": "نمایش ترسیم، نواحی ROI و کادرهای تشخیص",
+  "Inference is controlled while idle to preserve latency.": "برای حفظ تأخیر، استنتاج در حالت بی‌کار کنترل می‌شود.",
+  "Thresholds are unchanged; only speed and resource usage are adjusted.": "آستانه‌ها تغییر نمی‌کنند؛ فقط سرعت و مصرف منابع تنظیم می‌شود.",
+  "The model list is currently empty or the endpoint is unavailable.": "فهرست مدل در حال حاضر خالی است یا نقطه پایانی در دسترس نیست.",
+  "All samples, Image missing status, and transfer operations are available here.": "تمام نمونه‌ها، وضعیت نبود تصویر و عملیات انتقال در اینجا در دسترس است.",
+  "This setting filters only events for this UI connection and does not change camera settings.": "این تنظیم فقط رخدادهای همین اتصال UI را فیلتر می‌کند و تنظیمات دوربین را تغییر نمی‌دهد.",
+  "Configure LiveEvent, Webhook, and authorized clients here.": "LiveEvent، Webhook و کلاینت‌های مجاز از اینجا تنظیم می‌شوند.",
+  "Empty means all cameras. After applying, changes become active on SignalR for this page.": "خالی‌بودن یعنی همه دوربین‌ها. پس از اعمال، تغییرات روی SignalR همین صفحه فعال می‌شود.",
+  "All filters are applied in": "همه فیلترها در",
+  "the service runtime.": "زمان اجرای سرویس اعمال می‌شوند.",
+  "Clients replay through SignalR; Webhook is for external systems": "کلاینت‌ها با SignalR بازپخش می‌شوند؛ Webhook برای سامانه‌های بیرونی است",
+  "Periodic metadata and evidence cleanup": "پاک‌سازی دوره‌ای فراداده و شواهد",
+  "Enter each UI origin on a separate line; it is also used for SignalR. Changes apply after the service restarts.": "هر مبدأ UI را در یک خط وارد کنید؛ برای SignalR نیز استفاده می‌شود. تغییرات پس از راه‌اندازی مجدد سرویس اعمال می‌شوند.",
+  "Key for remote clients": "کلید کلاینت‌های راه دور",
+  "For development on 127.0.0.1": "برای توسعه روی 127.0.0.1",
+});
 
 const normalized = (value: string) => value.replace(/\s+/g, " ").trim();
 const englishBySource = new Map(Object.entries(english).map(([key, value]) => [normalized(key), value]));
 const sourceByEnglish = new Map(Object.entries(english).map(([key, value]) => [normalized(value), key]));
 const persianBySource = new Map(Object.entries(persian).map(([key, value]) => [normalized(key), value]));
+
+// Some labels were originally authored in English and some in Persian. Build
+// both directions from both tables so switching language never depends on
+// which language was rendered immediately before the switch.
+const faToEn = new Map(englishBySource);
+for (const [englishKey, persianValue] of Object.entries(persian)) {
+  const key = normalized(persianValue);
+  if (!faToEn.has(key)) faToEn.set(key, englishKey);
+}
+
+const enToFa = new Map<string, string>();
+for (const [persianKey, englishValue] of Object.entries(english)) {
+  enToFa.set(normalized(englishValue), persianKey);
+}
+for (const [englishKey, persianValue] of Object.entries(persian)) {
+  enToFa.set(normalized(englishKey), persianValue);
+}
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const phraseReplacements = (language: Language) => {
+  const entries = language === "en" ? faToEn : enToFa;
+  return [...entries.entries()]
+    .filter(([from, to]) => from && to && from !== to)
+    .sort(([left], [right]) => right.length - left.length);
+};
+
+const replacePhrases = (value: string, language: Language) => {
+  let result = value;
+  for (const [from, to] of phraseReplacements(language)) {
+    result = result.replace(new RegExp(escapeRegExp(from), "g"), to);
+  }
+  return result;
+};
 
 function translateDynamic(key: string, language: Language): string | undefined {
   if (language === "en") {
@@ -432,9 +691,14 @@ export function translateText(value: string, language: Language): string {
   const trailing = value.match(/\s*$/)?.[0] ?? "";
   const key = normalized(value);
   const translated = language === "en"
-    ? englishBySource.get(key) ?? translateDynamic(key, language)
-    : persianBySource.get(key) ?? sourceByEnglish.get(key) ?? translateDynamic(key, language);
-  return translated ? `${leading}${translated}${trailing}` : value;
+    ? englishBySource.get(key) ?? faToEn.get(key) ?? translateDynamic(key, language)
+    : persianBySource.get(key) ?? enToFa.get(key) ?? sourceByEnglish.get(key) ?? translateDynamic(key, language);
+  if (translated) return `${leading}${translated}${trailing}`;
+
+  // Handle mixed labels such as "Revision فعلی: 3" and dynamic workflow
+  // labels without translating identifiers or user-entered values wholesale.
+  const replaced = replacePhrases(key, language);
+  return replaced !== key ? `${leading}${replaced}${trailing}` : value;
 }
 
 type LanguageContextValue = {

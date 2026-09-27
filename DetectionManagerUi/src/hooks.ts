@@ -53,7 +53,14 @@ export function useEvents(query = '', limit = 200) {
     return [...merged.values()].sort((a, b) => b.sequence - a.sequence).slice(0, limit)
   }, refetchInterval: 5000 })
 }
-export function useEvent(id?: string) { return useQuery({ queryKey: ['event', id], queryFn: () => api.event(id!), enabled: Boolean(id) }) }
+export function useEvent(id?: string) {
+  return useQuery({
+    queryKey: ['event', id],
+    queryFn: () => api.event(id!),
+    enabled: Boolean(id),
+    staleTime: 30_000,
+  })
+}
 export function useDeleteEvents() { const client = useQueryClient(); return useMutation({ mutationFn: (range: EventDeletionRange) => api.deleteEvents(range), onSuccess: () => { void client.invalidateQueries({ queryKey: keys.events }); void client.removeQueries({ queryKey: ['event'] }) } }) }
 export function useTriggers() { return useQuery({ queryKey: keys.triggers, queryFn: api.triggers }) }
 export function useCameraMutation() { const client = useQueryClient(); return useMutation({ mutationFn: (camera: CameraSettings) => api.saveCamera(camera), onSuccess: (_, camera) => { void client.invalidateQueries({ queryKey: keys.cameras }); void client.invalidateQueries({ queryKey: ['camera', camera.id] }); void client.invalidateQueries({ queryKey: keys.settings }) } }) }

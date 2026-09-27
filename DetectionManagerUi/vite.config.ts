@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       host: true,
-      port: 5173,
+      port: 5081,
       proxy: {
         '/api': service,
         '/health': service,

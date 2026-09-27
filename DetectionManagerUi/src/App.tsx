@@ -523,8 +523,6 @@ function PageTitle() {
   );
 }
 function PageHead({
-  title,
-  description,
   action,
   className,
 }: {
@@ -533,12 +531,9 @@ function PageHead({
   action?: React.ReactNode;
   className?: string;
 }) {
+  if (!action) return null;
   return (
     <div className={`page-head ${className ?? ""}`}>
-      <div>
-        <h1>{title}</h1>
-        {description && <p>{description}</p>}
-      </div>
       {action}
     </div>
   );
@@ -728,10 +723,6 @@ function Dashboard() {
             {status.data?.ready ? "سرویس آنلاین" : "در انتظار سرویس"}
           </Badge>
           <h2>مرکز مدیریت تشخیص</h2>
-          <p>
-            معادل وب برنامه HshVisionLab برای کنترل دوربین‌ها، ROI، پردازش و
-            کلاینت‌ها
-          </p>
           <div className="hero-meta">
             <span>
               <Camera size={14} />
@@ -4233,10 +4224,12 @@ function Events() {
   const [deleteTo, setDeleteTo] = useState("");
   const [deleteNotice, setDeleteNotice] = useState("");
   const [deleteError, setDeleteError] = useState("");
+  const [pageSize, setPageSize] = useState(50);
+  const [page, setPage] = useState(0);
   const deleteEvents = useDeleteEvents();
   const events = useEvents(
     scenario ? `&scenario=${encodeURIComponent(scenario)}` : "",
-    2000,
+    500,
   );
   const getDeleteSelection = (): DeleteSelection | null => {
     const now = new Date();
@@ -4259,16 +4252,37 @@ function Events() {
   };
 
   const [selected, setSelected] = useState<string>();
-  const list = (events.data ?? [])
-    .filter(
-      (event) =>
-        !filter ||
-        JSON.stringify(event)
-          .toLocaleLowerCase()
-          .includes(filter.toLocaleLowerCase()),
-    )
-    .slice()
-    .sort((a, b) => b.sequence - a.sequence);
+  const client = useQueryClient();
+  const normalizedFilter = filter.trim().toLocaleLowerCase();
+  const list = useMemo(() => {
+    const source = events.data ?? [];
+    if (!normalizedFilter) return source.slice().sort((a, b) => b.sequence - a.sequence);
+    return source
+      .filter((event) => {
+        const face = objectValue(event.components.face);
+        const recognition = objectValue(face.recognition);
+        const searchText = [
+          eventTitle(event),
+          event.eventType,
+          event.scenario,
+          s(event.source.cameraName),
+          s(event.source.cameraId),
+          s(event.source.roiName),
+          s(event.components.plate?.plateText),
+          s(event.components.face?.label),
+          s(recognition.name),
+        ].join(" ").toLocaleLowerCase();
+        return searchText.includes(normalizedFilter);
+      })
+      .sort((a, b) => b.sequence - a.sequence);
+  }, [events.data, normalizedFilter]);
+  const selectEvent = (event: DetectionEvent) => {
+    // The list already contains the complete event envelope. Hydrate the
+    // detail query so the preview renders immediately; useEvent may refresh
+    // it in the background when the cached value becomes stale.
+    client.setQueryData(["event", event.eventId], event);
+    setSelected(event.eventId);
+  };
   const deletePreview = getDeleteSelection();
   const previewList = deleteMode === "all"
     ? list
@@ -4276,8 +4290,17 @@ function Events() {
       ? list.filter((event) => {
           const occurred = new Date(event.occurredAtUtc).getTime();
           return occurred >= new Date(deletePreview.range.fromUtc!).getTime() && occurred <= new Date(deletePreview.range.toUtc!).getTime();
-        })
+      })
       : [];
+  const pageCount = Math.max(1, Math.ceil(previewList.length / pageSize));
+  const activePage = Math.min(page, pageCount - 1);
+  const pageStart = activePage * pageSize;
+  const pageEnd = Math.min(pageStart + pageSize, previewList.length);
+  const pagedPreviewList = previewList.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    if (page !== activePage) setPage(activePage);
+  }, [activePage, page]);
 
   const runDelete = () => {
     setDeleteError("");
@@ -4310,14 +4333,20 @@ function Events() {
         <Search size={17} />
         <input
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          onChange={(e) => {
+            setFilter(e.target.value);
+            setPage(0);
+          }}
           placeholder="پلاک، نام، دوربین..."
         />
       </div>
       <select
         className="toolbar-select"
         value={scenario}
-        onChange={(e) => setScenario(e.target.value)}
+        onChange={(e) => {
+          setScenario(e.target.value);
+          setPage(0);
+        }}
       >
         <option value="">همهٔ سناریوها</option>
         <option value="PlateOnly">پلاک</option>
@@ -4332,6 +4361,7 @@ function Events() {
             setDeleteMode(e.target.value as DeleteMode);
             setDeleteError("");
             setDeleteNotice("");
+            setPage(0);
           }}
           aria-label="بازه حذف تاریخچه"
         >
@@ -4401,11 +4431,11 @@ function Events() {
               <span>زمان</span>
               <span />
             </div>
-            {previewList.map((event) => (
+            {pagedPreviewList.map((event) => (
               <button
                 className={`table-row ${selected === event.eventId ? "selected" : ""}`}
                 key={event.eventId}
-                onClick={() => setSelected(event.eventId)}
+                onClick={() => selectEvent(event)}
               >
                 <span className="event-cell">
                   <i
@@ -4443,6 +4473,45 @@ function Events() {
               />
             )}
           </div>
+          {previewList.length > 0 && (
+            <div className="event-pagination" aria-label="صفحه‌بندی رخدادها">
+              <Button
+                variant="ghost"
+                icon={ChevronRight}
+                disabled={activePage === 0}
+                onClick={() => setPage((current) => Math.max(0, current - 1))}
+              >
+                قبلی
+              </Button>
+              <span>
+                صفحهٔ {activePage + 1} از {pageCount} · نمایش {pageStart + 1} تا {pageEnd} از {previewList.length}
+              </span>
+              <label className="event-page-size">
+                <span>تعداد</span>
+                <select
+                  className="toolbar-select"
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(0);
+                  }}
+                  aria-label="تعداد رخداد در صفحه"
+                >
+                  <option value={50}>۵۰</option>
+                  <option value={100}>۱۰۰</option>
+                  <option value={200}>۲۰۰</option>
+                </select>
+              </label>
+              <Button
+                variant="ghost"
+                icon={ChevronLeft}
+                disabled={activePage >= pageCount - 1}
+                onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+              >
+                بعدی
+              </Button>
+            </div>
+          )}
         </section>
       </div>
     </>
@@ -4912,6 +4981,58 @@ function TriggerEditor({
 
 type InvocationSourceOption = readonly [value: string, label: string];
 
+const invocationEventTypeOptions: InvocationSourceOption[] = [
+  ["PlateDetected", "تشخیص پلاک"],
+  ["FaceRecognized", "شناسایی چهره"],
+  ["FaceUnknown", "چهره ناشناس"],
+  ["PlateFaceMatched", "تطبیق پلاک و چهره"],
+];
+
+function InvocationEventTypeSelect({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const selectedLabels = invocationEventTypeOptions
+    .filter(([eventType]) => value.includes(eventType))
+    .map(([, label]) => label);
+  const summary = value.length === 0
+    ? "همهٔ رخدادها"
+    : value.length === 1
+      ? selectedLabels[0] ?? value[0]
+      : "چند نوع رخداد انتخاب شده";
+  const toggle = (eventType: string) => {
+    onChange(value.includes(eventType)
+      ? value.filter((item) => item !== eventType)
+      : [...value, eventType]);
+  };
+  return (
+    <details className="invocation-event-type-picker">
+      <summary>{summary}</summary>
+      <div className="invocation-event-type-options">
+        <label className="invocation-event-type-option">
+          <input type="checkbox" checked={value.length === 0} onChange={() => onChange([])} />
+          <span>همهٔ رخدادها</span>
+        </label>
+        {invocationEventTypeOptions.map(([eventType, label]) => (
+          <label className="invocation-event-type-option" key={eventType}>
+            <input type="checkbox" checked={value.includes(eventType)} onChange={() => toggle(eventType)} />
+            <span>{label}</span>
+          </label>
+        ))}
+        {value.filter((eventType) => !invocationEventTypeOptions.some(([knownType]) => knownType === eventType)).map((eventType) => (
+          <label className="invocation-event-type-option" key={eventType}>
+            <input type="checkbox" checked onChange={() => toggle(eventType)} />
+            <span>{eventType}</span>
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 const invocationSourceGroups: { label: string; options: InvocationSourceOption[] }[] = [
   {
     label: "اطلاعات رکورد",
@@ -5088,7 +5209,7 @@ function Invocations() {
             <div className="invocation-form">
               {testResult && <div className={`invocation-test-result ${testResult.success ? "success" : "failure"}`}><Badge tone={testResult.success ? "green" : "red"}>{testResult.success ? "موفق" : "ناموفق"}</Badge><span>آخرین رکورد #{testResult.latestSequence}</span>{testResult.responseStatusCode !== undefined && <span>HTTP {testResult.responseStatusCode}</span>}<code>{testResult.error || testResult.responseBody || "بدون پاسخ متنی"}</code></div>}
               {testResult && !testResult.success && <div className="invocation-test-debug"><div><b>Request</b><code dir="ltr">{testResult.method} {testResult.target}</code></div><div><b>Payload</b><pre dir="ltr">{testResult.requestPayload || "بدون Payload"}</pre></div>{testResult.responseBody && <div><b>Response</b><pre dir="ltr">{testResult.responseBody}</pre></div>}</div>}
-              <div className="form-grid">
+              <div className="form-grid invocation-meta-grid">
                 <Field label="نام"><input value={draft.name} onChange={(e) => update({ name: e.target.value })} /></Field>
                 <Field label="نوع"><select value={draft.type} onChange={(e) => update({ type: e.target.value })}><option value="Web">Web API</option><option value="Sql">SQL</option></select></Field>
                 <Field label="وضعیت"><Toggle checked={draft.enabled} onChange={(enabled) => update({ enabled })} /></Field>
@@ -5097,11 +5218,11 @@ function Invocations() {
                 <Field label="وابسته به مرحله قبل"><Toggle checked={draft.dependsOnPrevious} onChange={(dependsOnPrevious) => update({ dependsOnPrevious })} /></Field>
               </div>
               {draft.type === "Web" ? <div className="invocation-destination">
-                <h4>مقصد Web API</h4><div className="form-grid"><Field label="URL" wide><input dir="ltr" value={draft.web.url} onChange={(e) => updateWeb({ url: e.target.value })} placeholder="https://server/api/detections" /></Field><Field label="متد"><select value={draft.web.method} onChange={(e) => updateWeb({ method: e.target.value })}><option>POST</option><option>GET</option></select></Field><Field label="Content-Type"><select value={draft.web.contentType} onChange={(e) => updateWeb({ contentType: e.target.value })}><option>application/json</option><option>application/x-www-form-urlencoded</option></select></Field><Field label="احراز هویت"><select value={draft.web.authenticationType} onChange={(e) => updateWeb({ authenticationType: e.target.value })}><option>None</option><option>Bearer</option><option>ApiKey</option><option>Basic</option></select></Field><Field label="Token / مقدار"><input dir="ltr" type="password" value={draft.web.authenticationValue} onChange={(e) => updateWeb({ authenticationValue: e.target.value })} /></Field></div>
-              </div> : <div className="invocation-destination"><h4>مقصد SQL</h4><div className="form-grid"><Field label="Provider"><select value={draft.sql.provider} onChange={(e) => updateSql({ provider: e.target.value })}><option>Sqlite</option><option>SqlServer</option></select></Field><Field label="نوع دستور"><select value={draft.sql.commandType} onChange={(e) => updateSql({ commandType: e.target.value })}><option>Text</option><option>StoredProcedure</option></select></Field><Field label="Connection String" wide><input dir="ltr" value={draft.sql.connectionString} onChange={(e) => updateSql({ connectionString: e.target.value })} /></Field><Field label="دستور / نام Procedure" wide><textarea dir="ltr" rows={3} value={draft.sql.commandText} onChange={(e) => updateSql({ commandText: e.target.value })} placeholder="EXEC dbo.SaveDetection @plateNumber, @frameBase64" /></Field></div></div>}
-              <div className="invocation-destination"><h4>فیلتر اجرا</h4><div className="camera-filter"><span>دوربین‌ها:</span>{(cameras.data ?? []).map((camera) => <label key={camera.id} className="scope-chip"><input type="checkbox" checked={draft.cameraIds.includes(camera.id)} onChange={() => toggleCamera(camera.id)} />{camera.name}</label>)}{!(cameras.data ?? []).length && <small>دوربینی پیدا نشد</small>}</div><div className="form-grid"><Field label="فقط تریگر؟"><select value={draft.triggered === null || draft.triggered === undefined ? "all" : draft.triggered ? "yes" : "no"} onChange={(e) => update({ triggered: e.target.value === "all" ? null : e.target.value === "yes" })}><option value="all">همه رکوردها</option><option value="yes">فقط همراه تریگر</option><option value="no">فقط معمولی</option></select></Field><Field label="حداقل Confidence"><input type="number" min="0" max="100" value={draft.minimumConfidence ?? ""} onChange={(e) => update({ minimumConfidence: e.target.value === "" ? null : Number(e.target.value) })} /></Field><Field label="پلاک مشخص"><input dir="ltr" value={draft.plateTextEquals ?? ""} onChange={(e) => update({ plateTextEquals: e.target.value || null })} /></Field><Field label="نوع رخدادها" hint="با کاما جدا کنید"><input dir="ltr" value={draft.eventTypes.join(", ")} onChange={(e) => update({ eventTypes: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} placeholder="PlateDetected, FaceRecognized" /></Field><Field label="شناسه تریگرها" hint="با کاما جدا کنید"><input dir="ltr" value={draft.triggerIds.join(", ")} onChange={(e) => update({ triggerIds: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></Field></div></div>
+                <h4>مقصد Web API</h4><div className="form-grid invocation-web-grid"><Field label="URL" wide><input dir="ltr" value={draft.web.url} onChange={(e) => updateWeb({ url: e.target.value })} placeholder="https://server/api/detections" /></Field><Field label="متد"><select value={draft.web.method} onChange={(e) => updateWeb({ method: e.target.value })}><option>POST</option><option>GET</option></select></Field><Field label="Content-Type"><select value={draft.web.contentType} onChange={(e) => updateWeb({ contentType: e.target.value })}><option>application/json</option><option>application/x-www-form-urlencoded</option></select></Field><Field label="احراز هویت"><select value={draft.web.authenticationType} onChange={(e) => updateWeb({ authenticationType: e.target.value })}><option>None</option><option>Bearer</option><option>ApiKey</option><option>Basic</option></select></Field><Field label="Token / مقدار"><input dir="ltr" type="password" value={draft.web.authenticationValue} onChange={(e) => updateWeb({ authenticationValue: e.target.value })} /></Field></div>
+              </div> : <div className="invocation-destination"><h4>مقصد SQL</h4><div className="form-grid invocation-sql-grid"><Field label="Provider"><select value={draft.sql.provider} onChange={(e) => updateSql({ provider: e.target.value })}><option>Sqlite</option><option>SqlServer</option></select></Field><Field label="نوع دستور"><select value={draft.sql.commandType} onChange={(e) => updateSql({ commandType: e.target.value })}><option>Text</option><option>StoredProcedure</option></select></Field><Field label="Connection String" wide><input dir="ltr" value={draft.sql.connectionString} onChange={(e) => updateSql({ connectionString: e.target.value })} /></Field><Field label="دستور / نام Procedure" wide><textarea dir="ltr" rows={3} value={draft.sql.commandText} onChange={(e) => updateSql({ commandText: e.target.value })} placeholder="EXEC dbo.SaveDetection @plateNumber, @frameBase64" /></Field></div></div>}
+              <div className="invocation-destination"><h4>فیلتر اجرا</h4><div className="camera-filter"><span>دوربین‌ها:</span>{(cameras.data ?? []).map((camera) => <label key={camera.id} className="scope-chip"><input type="checkbox" checked={draft.cameraIds.includes(camera.id)} onChange={() => toggleCamera(camera.id)} />{camera.name}</label>)}{!(cameras.data ?? []).length && <small>دوربینی پیدا نشد</small>}</div><div className="form-grid invocation-filter-grid"><Field label="فقط تریگر؟"><select value={draft.triggered === null || draft.triggered === undefined ? "all" : draft.triggered ? "yes" : "no"} onChange={(e) => update({ triggered: e.target.value === "all" ? null : e.target.value === "yes" })}><option value="all">همه رکوردها</option><option value="yes">فقط همراه تریگر</option><option value="no">فقط معمولی</option></select></Field><Field label="حداقل Confidence"><input type="number" min="0" max="100" value={draft.minimumConfidence ?? ""} onChange={(e) => update({ minimumConfidence: e.target.value === "" ? null : Number(e.target.value) })} /></Field><Field label="پلاک مشخص"><input dir="ltr" value={draft.plateTextEquals ?? ""} onChange={(e) => update({ plateTextEquals: e.target.value || null })} /></Field><Field label="نوع رخدادها"><InvocationEventTypeSelect value={draft.eventTypes} onChange={(eventTypes) => update({ eventTypes })} /></Field><Field label="شناسه تریگرها" hint="با کاما جدا کنید"><input dir="ltr" value={draft.triggerIds.join(", ")} onChange={(e) => update({ triggerIds: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></Field></div></div>
               <div className="invocation-destination"><div className="section-title-row"><div><h4>Mapping ورودی</h4><small>منبع داده را از فهرست انتخاب کنید؛ برای DTO دارای byte[]، Content-Type را روی JSON بگذارید تا تصویر به Base64 استاندارد تبدیل شود.</small></div><Button variant="soft" icon={Plus} onClick={addMapping}>فیلد</Button></div><div className="mapping-list">{draft.mappings.map((mapping, index) => <div className="mapping-row" key={`${index}-${mapping.target}`}><input dir="ltr" placeholder="فیلد مقصد" value={mapping.target} onChange={(e) => patchMapping(index, { target: e.target.value })} /><span>←</span><InvocationSourceSelect value={mapping.source} onChange={(source) => patchMapping(index, { source })} /><input placeholder="مقدار پیش‌فرض" value={mapping.defaultValue ?? ""} onChange={(e) => patchMapping(index, { defaultValue: e.target.value })} /><button className="icon-button" onClick={() => removeMapping(index)}><Trash2 size={15} /></button></div>)}</div></div>
-              <div className="form-grid"><Field label="Timeout (ثانیه)"><input type="number" min="1" value={draft.timeoutSeconds} onChange={(e) => update({ timeoutSeconds: Number(e.target.value) || 15 })} /></Field><Field label="تعداد Retry"><input type="number" min="0" value={draft.maxRetries} onChange={(e) => update({ maxRetries: Number(e.target.value) || 0 })} /></Field><Field label="فاصله Retry (ثانیه)"><input type="number" min="1" value={draft.retryDelaySeconds} onChange={(e) => update({ retryDelaySeconds: Number(e.target.value) || 30 })} /></Field></div>
+              <div className="form-grid invocation-retry-grid"><Field label="Timeout (ثانیه)"><input type="number" min="1" value={draft.timeoutSeconds} onChange={(e) => update({ timeoutSeconds: Number(e.target.value) || 15 })} /></Field><Field label="تعداد Retry"><input type="number" min="0" value={draft.maxRetries} onChange={(e) => update({ maxRetries: Number(e.target.value) || 0 })} /></Field><Field label="فاصله Retry (ثانیه)"><input type="number" min="1" value={draft.retryDelaySeconds} onChange={(e) => update({ retryDelaySeconds: Number(e.target.value) || 30 })} /></Field></div>
             </div>
           </>}
         </section>

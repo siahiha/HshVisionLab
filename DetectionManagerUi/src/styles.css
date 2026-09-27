@@ -586,9 +586,21 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 /* Events page: preview first, full-width history below it. */
-.events-layout { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.events-layout { grid-template-columns: minmax(0, 1fr); gap: 6px; align-items: start; }
 .event-preview-top, .events-panel { min-width: 0; width: 100%; }
-.events-panel .event-table { overflow-x: auto; }
+.event-preview-top { position: sticky; top: 8px; z-index: 5; align-self: start; }
+.events-panel .event-table { max-height: clamp(260px, calc(100vh - 360px), 700px); overflow-x: auto; overflow-y: auto; }
+.events-panel .table-head { position: sticky; top: 0; z-index: 2; }
+.events-panel .table-row:not(.table-head) { min-height: 40px; padding-block: 7px; gap: 8px; }
+.events-panel .event-cell { gap: 6px; }
+.events-panel .event-cell > div { gap: 2px; }
+.events-panel .event-cell b { font-size: 10px; }
+.events-panel .event-cell small { font-size: 8px; }
+.events-panel .block-muted { margin-top: 1px; }
+.event-pagination { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 8px 12px 12px; color: #899eaf; font-size: 9px; }
+.event-pagination > span { min-width: 250px; text-align: center; }
+.event-page-size { display: inline-flex; align-items: center; gap: 5px; color: #899eaf; white-space: nowrap; }
+.event-page-size .toolbar-select { min-width: 66px; padding: 6px 8px; }
 .events-panel .table-row { grid-template-columns: minmax(260px, 1.6fr) minmax(200px, 1.2fr) minmax(120px, .7fr) minmax(160px, .9fr) 22px; }
 .events-panel > .panel-head.compact { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; padding-bottom: 0; }
 .events-panel > .panel-head.compact > div:first-child { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; }
@@ -611,6 +623,11 @@ button { -webkit-tap-highlight-color: transparent; }
 .event-preview .artifact img { height: 105px; }
 .event-preview .json-block { margin: 0 12px 12px; }
 @media (max-width: 820px) {
+  .event-preview-top { top: 4px; }
+  .events-panel .event-table { max-height: calc(100vh - 300px); }
+  .event-pagination { gap: 5px; }
+  .event-pagination > span { min-width: 0; }
+  .event-pagination > .button { padding-inline: 2px; }
   .events-panel .table-row { grid-template-columns: minmax(220px, 1.4fr) minmax(170px, 1fr) 110px 145px 20px; }
   .events-panel-head-actions { flex: 1 1 auto; justify-content: flex-start; padding-bottom: 2px; }
   .events-panel-head-actions .page-actions { justify-content: flex-start; }
@@ -790,11 +807,27 @@ html[data-language="en"] .preview-toolbar span { margin-left: auto; margin-right
 .invocation-editor .head-actions { gap: 4px; }
 .invocation-editor .head-actions .button, .invocation-editor .section-title-row .button { min-height: 27px; padding: 5px 9px; font-size: 10px; }
 .invocation-editor .invocation-form { padding: 8px 12px 10px; gap: 8px; }
-.invocation-editor .form-grid { gap: 7px 9px; padding: 7px 0; }
+.invocation-editor .form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px 9px; padding: 7px 0; }
+.invocation-editor .invocation-meta-grid { grid-template-columns: minmax(0, 1fr) 120px max-content; align-items: end; }
+.invocation-editor .invocation-meta-grid > .field:nth-child(2) { max-width: 120px; }
+.invocation-editor .invocation-meta-grid > .field:nth-child(3), .invocation-editor .invocation-meta-grid > .field:nth-child(6) { width: max-content; min-width: 92px; }
+.invocation-editor .invocation-web-grid, .invocation-editor .invocation-sql-grid, .invocation-editor .invocation-filter-grid, .invocation-editor .invocation-retry-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.invocation-editor .invocation-web-grid > .field select, .invocation-editor .invocation-sql-grid > .field select { max-width: 190px; }
+.invocation-editor .invocation-filter-grid > .field:nth-child(2) { max-width: 150px; }
+.invocation-editor .invocation-retry-grid > .field { max-width: 180px; }
 .invocation-editor .field { gap: 3px; }
 .invocation-editor .field > span { font-size: 9px; }
 .invocation-editor .field input, .invocation-editor .field select, .invocation-editor .field textarea { min-height: 29px; padding: 6px 8px; border-radius: 3px; font-size: 10px; }
 .invocation-editor .field textarea { resize: vertical; }
+.invocation-event-type-picker { position: relative; min-width: 0; }
+.invocation-event-type-picker summary { min-height: 29px; padding: 6px 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 3px; color: #f0f0f1; background: #17181a; cursor: pointer; font-size: 10px; list-style: none; text-overflow: ellipsis; white-space: nowrap; }
+.invocation-event-type-picker summary::-webkit-details-marker { display: none; }
+.invocation-event-type-picker summary::after { content: "▾"; float: left; color: #8298ad; }
+.invocation-event-type-picker[open] { z-index: 20; }
+.invocation-event-type-options { position: absolute; top: calc(100% + 4px); right: 0; left: 0; z-index: 21; display: grid; gap: 2px; min-width: 180px; padding: 6px; border: 1px solid rgba(255,255,255,.16); border-radius: 4px; background: #17181a; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+.invocation-event-type-option { display: flex; align-items: center; gap: 7px; padding: 6px 7px; border-radius: 3px; color: #c7d4df; cursor: pointer; font-size: 9px; }
+.invocation-event-type-option:hover { background: rgba(0,120,212,.18); }
+.invocation-event-type-option input { min-height: auto !important; width: auto !important; padding: 0 !important; accent-color: #1499dc; }
 .invocation-editor .invocation-test-result { gap: 7px; padding: 7px 9px; border-radius: 5px; font-size: 9px; }
 .invocation-editor .invocation-test-debug { gap: 6px; padding: 8px 9px; }
 .invocation-editor .invocation-test-debug > div { gap: 3px; }
@@ -813,4 +846,6 @@ html[data-language="en"] .preview-toolbar span { margin-left: auto; margin-right
 .invocation-log-panel { margin-top: 0; }
 @media (max-width: 900px) {
   .invocations-layout { grid-template-columns: 1fr; margin-top: 0; }
+  .invocation-editor .form-grid, .invocation-editor .invocation-meta-grid, .invocation-editor .invocation-web-grid, .invocation-editor .invocation-sql-grid, .invocation-editor .invocation-filter-grid, .invocation-editor .invocation-retry-grid { grid-template-columns: 1fr; }
+  .invocation-editor .invocation-meta-grid > .field:nth-child(2), .invocation-editor .invocation-filter-grid > .field:nth-child(2), .invocation-editor .invocation-retry-grid > .field { max-width: none; }
 }

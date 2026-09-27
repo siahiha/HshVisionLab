@@ -77,7 +77,7 @@ DELETE /api/v1/invocations/{invocationId}
 | --- | --- |
 | `enabled` | فعال یا غیرفعال بودن تعریف |
 | `cameraIds` | محدودکردن به شناسهٔ داخلی دوربین؛ خالی یعنی همهٔ دوربین‌ها |
-| `eventTypes` | محدودکردن به نوع رخداد، مانند `PlateDetected` یا `FaceRecognized` |
+| `eventTypes` | محدودکردن به نوع رخداد، مانند `PlateDetected` یا `FaceRecognized`؛ در UI از combo نوع رخداد انتخاب می‌شود و حالت پیش‌فرض همهٔ رخدادهاست |
 | `triggered` | `true` فقط eventهای همراه trigger، `false` فقط eventهای معمولی، `null` هر دو |
 | `triggerIds` | حداقل یکی از triggerهای منطبق باید در این فهرست باشد |
 | `minimumConfidence` | بیشترین confidence componentهای event باید حداقل این مقدار باشد |

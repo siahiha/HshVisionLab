@@ -71,6 +71,10 @@ GET /api/v1/streams/{cameraId}/snapshot
 هر event قبل از ارسال live در `events.db` ذخیره می‌شود و شامل `EventId`، `Sequence`، source، trigger state، componentهای `plate`/`face` و artifact descriptorهاست. artifactهای تصویری به‌جای Base64 با URL سرویس ارائه می‌شوند. برای face، person id/number/name، unknown state، similarity، matched sample id و aligned crop ذخیره می‌شود. برای plate، متن، validation، threshold و characterهای OCR با bounds و confidence ارائه می‌شود.
 
 کلاینت SignalR به `/hubs/detections` وصل می‌شود و متد `Subscribe(lastSequence)` را صدا می‌زند. اگر cursor در retention موجود نباشد، پیام `cursorExpired` دریافت می‌کند و باید resync کامل انجام دهد.
+برای اتصال مرورگر، origin دقیق UI باید در `http.corsOrigins` تنظیمات HTTP سرویس
+وجود داشته باشد؛ originهای محلی UI فعلی `http://127.0.0.1:5081` و
+`http://localhost:5081` هستند. این CORS policy برای REST و SignalR مشترک است و
+پس از تغییر تنظیمات باید سرویس restart شود.
 
 ## WebRTC
 

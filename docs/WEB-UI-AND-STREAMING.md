@@ -1,16 +1,21 @@
 # رابط وب و مسیرهای دریافت/نمایش تصویر
 
-در توسعه، UI مستقل `DetectionManagerUi` با Vite روی پورت `5173` اجرا می‌شود. برای
+در توسعه، UI مستقل `DetectionManagerUi` با Vite روی پورت `5081` اجرا می‌شود. برای
 دسترسی از شبکهٔ محلی باید Vite روی همهٔ interfaceها bind شود:
 
 ```powershell
 cd DetectionManagerUi
-npx vite --host 0.0.0.0 --port 5173
+npx vite --host 0.0.0.0 --port 5081
 ```
 
-آدرس LAN فعلی این محیط `http://192.168.10.172:5173/` است؛ این IP ممکن است با
+آدرس LAN فعلی این محیط `http://192.168.10.172:5081/` است؛ این IP ممکن است با
 تغییر شبکه عوض شود. سرویس تشخیص باید جداگانه روی `http://127.0.0.1:5080` فعال
 باشد و برای پخش WebRTC از دستگاه دیگر، پورت UDP WebRTC در Firewall مجاز باشد.
+
+برای اجرای سریع محلی می‌توان از `npm run dev` استفاده کرد؛ مقدار پورت در
+`vite.config.ts` روی `5081` تنظیم شده است. اگر origin رابط وب با originهای مجاز
+سرویس یکی نباشد، همان origin را در `http.corsOrigins` قرار دهید و سرویس را restart
+کنید؛ این policy برای REST و SignalR با endpoint `/hubs/detections` مشترک است.
 
 برای مشخصات بازسازی route، component، اندازه‌ها و breakpointها، ابتدا
 [مشخصات مرجع بازسازی UI وب](WEB-UI-RECONSTRUCTION-SPEC.md) را بخوانید. این سند
