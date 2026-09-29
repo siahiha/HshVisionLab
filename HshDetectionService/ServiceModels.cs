@@ -168,11 +168,7 @@ public sealed class TriggerActionDefinition
     public bool Enabled { get; set; } = true;
 }
 
-/// <summary>
-/// Per-connection event policy. It never changes camera inference settings;
-/// it only controls which canonical events a client receives.
-/// </summary>
-public sealed class ClientSubscription
+public class ClientSubscriptionFilter
 {
     /// <summary>All, Plate, or KnownFace.</summary>
     public string Mode { get; set; } = "All";
@@ -187,18 +183,52 @@ public sealed class ClientSubscription
     public int WindowMs { get; set; } = 1500;
     public int CooldownSeconds { get; set; }
 
-    public ClientSubscription Normalize()
+    public void NormalizeFields()
     {
+        Mode ??= "All";
         Mode = Mode.Trim();
         if (!Mode.Equals("All", StringComparison.OrdinalIgnoreCase) &&
             !Mode.Equals("Plate", StringComparison.OrdinalIgnoreCase) &&
             !Mode.Equals("KnownFace", StringComparison.OrdinalIgnoreCase))
             Mode = "All";
-
         CameraIds ??= [];
         RoiIds ??= [];
         WindowMs = Math.Clamp(WindowMs, 0, 10_000);
         CooldownSeconds = Math.Clamp(CooldownSeconds, 0, 3600);
+    }
+}
+
+/// <summary>
+/// Per-connection event policy. It never changes camera inference settings;
+/// it only controls which canonical events a client receives.
+/// </summary>
+public sealed class ClientSubscription : ClientSubscriptionFilter
+{
+    /// <summary>
+    /// Optional per-camera policies. When present, an event is delivered when
+    /// it matches at least one profile. The legacy fields above remain for
+    /// backwards compatibility with older clients.
+    /// </summary>
+    public List<ClientSubscriptionProfile> Profiles { get; set; } = [];
+
+    public ClientSubscription Normalize()
+    {
+        NormalizeFields();
+        Profiles ??= [];
+        foreach (ClientSubscriptionProfile profile in Profiles) profile.Normalize();
+        return this;
+    }
+}
+
+public sealed class ClientSubscriptionProfile : ClientSubscriptionFilter
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "Subscription";
+    public ClientSubscriptionProfile Normalize()
+    {
+        Id = string.IsNullOrWhiteSpace(Id) ? Guid.NewGuid().ToString("N") : Id.Trim();
+        Name = string.IsNullOrWhiteSpace(Name) ? "Subscription" : Name.Trim();
+        NormalizeFields();
         return this;
     }
 }

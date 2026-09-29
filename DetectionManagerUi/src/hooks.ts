@@ -3,14 +3,22 @@ import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr'
 import { useEffect, useState } from 'react'
 import { api, serviceUrl } from './api'
 import type { EventDeletionRange } from './api'
-import type { CameraSettings, ClientSubscription, DetectionEvent, InvocationDefinition, TriggerDefinition } from './types'
+import type { CameraSettings, ClientSubscription, ClientSubscriptionProfile, DetectionEvent, InvocationDefinition, TriggerDefinition } from './types'
 export const keys = { status: ['status'], cameras: ['cameras'], settings: ['settings'], capabilities: ['capabilities'], models: ['models'], people: ['people'], triggers: ['triggers'], invocations: ['invocations'], invocationLogs: ['invocation-logs'], events: ['events'] }
 export const clientSubscriptionKey = 'hsh-client-subscription'
-export const defaultClientSubscription = (): ClientSubscription => ({ mode: 'All', cameraIds: [], roiIds: [], faceRequired: false, plateRequired: false, includeFace: true, includePlate: true, includeUnknownFace: true, includeArtifacts: true, windowMs: 1500, cooldownSeconds: 0 })
+export const defaultClientSubscriptionProfile = (): ClientSubscriptionProfile => ({ id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID().replaceAll('-', '') : `${Date.now()}${Math.random()}`, name: 'پروفایل جدید', mode: 'All', cameraIds: [], roiIds: [], faceRequired: false, plateRequired: false, includeFace: true, includePlate: true, includeUnknownFace: true, includeArtifacts: true, windowMs: 1500, cooldownSeconds: 0 })
+export const defaultClientSubscription = (): ClientSubscription => ({ profiles: [] })
 export function readClientSubscription(): ClientSubscription {
   try {
     const value = JSON.parse(sessionStorage.getItem(clientSubscriptionKey) ?? 'null') as Partial<ClientSubscription> | null
-    return { ...defaultClientSubscription(), ...(value ?? {}) }
+    if (Array.isArray(value?.profiles)) return { profiles: value.profiles as ClientSubscriptionProfile[] }
+    // Migrate the previous single-profile shape stored by older UI builds.
+    const legacyValue = value as unknown as Partial<ClientSubscriptionProfile> | null
+    if (legacyValue && typeof legacyValue.mode === 'string') {
+      const legacy = legacyValue as ClientSubscriptionProfile
+      return { profiles: [{ ...defaultClientSubscriptionProfile(), ...legacy, id: legacy.id ?? 'legacy', name: legacy.name ?? 'پروفایل فعلی' }] }
+    }
+    return defaultClientSubscription()
   } catch { return defaultClientSubscription() }
 }
 export function saveClientSubscription(value: ClientSubscription) {

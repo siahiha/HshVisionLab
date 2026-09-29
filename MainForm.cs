@@ -256,6 +256,7 @@ public sealed partial class MainForm : Form
 
         foreach (CameraRuntime candidate in candidates)
         {
+            if (!candidate.Settings.Enabled) continue;
             candidate.Settings.EnsureProcessingDefaults();
             CameraProcessingSettings? item = candidate.Settings.Rois
                 .SelectMany(roi => roi.Processing)

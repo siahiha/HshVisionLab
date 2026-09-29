@@ -74,6 +74,7 @@ import {
   useSettings,
   useTriggerMutation,
   useTriggers,
+  defaultClientSubscriptionProfile,
   readClientSubscription,
   saveClientSubscription,
 } from "./hooks";
@@ -82,6 +83,7 @@ import type {
   CameraSettings,
   CameraStatus,
   ClientSubscription,
+  ClientSubscriptionProfile,
   DetectionEvent,
   FaceIdentity,
   FaceSample,
@@ -137,6 +139,7 @@ function normalizeCameraSettings(value: CameraSettings): CameraSettings {
   const rois = Array.isArray(raw.rois) ? raw.rois : [];
   return {
     ...raw,
+    enabled: raw.enabled !== false,
     cameraCode: s(raw.cameraCode).trim(),
     processingSchemaVersion: 3,
     rois: rois.map((item, index) => {
@@ -683,7 +686,7 @@ function Dashboard() {
   const [focusedCameraId, setFocusedCameraId] = useState<string>();
   const [cameraPage, setCameraPage] = useState(0);
   const [commandBusy, setCommandBusy] = useState(false);
-  const list = cameras.data ?? [];
+  const list = (cameras.data ?? []).filter((camera) => camera.enabled !== false);
   const cameraPageSize = 6;
   const cameraPageCount = Math.max(1, Math.ceil(list.length / cameraPageSize));
   const activeCameraPage = Math.min(cameraPage, cameraPageCount - 1);
@@ -988,7 +991,7 @@ function CameraTile({
   onFullscreen: () => void;
 }) {
   const action = useCameraAction();
-  const running = camera.running;
+  const running = camera.enabled !== false && camera.running;
   return (
     <article className={`camera-tile ${running ? "camera-running" : "camera-stopped"}`}>
       <button className="camera-tile-open" onClick={onOpen} aria-label={`باز کردن ${camera.name}`}>
@@ -1303,7 +1306,8 @@ function CameraFullscreen({
               cameraId={cameraId}
               roi={roi}
               className="fullscreen-roi"
-              live={Boolean(status?.running)}
+              live={Boolean(status?.running && draft.enabled !== false)}
+              enabled={draft.enabled !== false}
               streamBackend={draft.captureBackend}
               onChange={(points) => roi && updateRoi({ ...roi, points })}
             />
@@ -1491,13 +1495,15 @@ function Cameras() {
                 <div>
                   <b>{camera.name}</b>
                   <span>
-                    {camera.running
+                    {camera.enabled === false
+                      ? "غیرفعال"
+                      : camera.running
                       ? `${fmt(camera.fps)} FPS · ${fmt(camera.inferenceMs)} ms`
                       : "متوقف"}
                   </span>
                 </div>
                 <span
-                  className={`status-dot ${camera.running ? "online" : "muted"}`}
+                  className={`status-dot ${camera.enabled === false ? "muted" : camera.running ? "online" : "muted"}`}
                 />
               </button>
             ))}
@@ -1589,6 +1595,17 @@ function CameraEditor({ id }: { id: string }) {
   const serviceStatus = useServiceStatus();
   const mutation = useCameraMutation();
   const action = useCameraAction();
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  const deleteMutation = useMutation({
+    mutationFn: () => api.deleteCamera(id),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.cameras });
+      void client.invalidateQueries({ queryKey: keys.settings });
+      void client.removeQueries({ queryKey: ["camera", id] });
+      navigate("/cameras");
+    },
+  });
   const models = useModels();
   const [draft, setDraft] = useState<CameraSettings>();
   const [tab, setTab] = useState<"preview" | "general" | "processing">(
@@ -1751,15 +1768,15 @@ function CameraEditor({ id }: { id: string }) {
           <div>
             <div className="title-row">
               <h2>{draft.name}</h2>
-              <Badge tone={status?.running ? "green" : "neutral"}>
-                {status?.running ? "در حال کار" : "متوقف"}
+              <Badge tone={status?.enabled === false ? "amber" : status?.running ? "green" : "neutral"}>
+                {status?.enabled === false ? "غیرفعال" : status?.running ? "در حال کار" : "متوقف"}
               </Badge>
             </div>
             <span>{draft.sourceUrl || "منبع تنظیم نشده"}</span>
           </div>
         </div>
         <div className="title-actions">
-          {status?.running ? (
+          {status?.enabled === false ? null : status?.running ? (
             <Button
               variant="soft"
               icon={Pause}
@@ -1778,6 +1795,16 @@ function CameraEditor({ id }: { id: string }) {
           )}
           <Button icon={Save} disabled={mutation.isPending} onClick={save}>
             {mutation.isPending ? "در حال ذخیره..." : "ذخیره تغییرات"}
+          </Button>
+          <Button
+            variant="danger"
+            icon={Trash2}
+            disabled={deleteMutation.isPending}
+            onClick={() => {
+              if (window.confirm(`دوربین «${draft.name}» حذف شود؟`)) deleteMutation.mutate();
+            }}
+          >
+            حذف دوربین
           </Button>
         </div>
       </section>
@@ -1853,7 +1880,8 @@ function CameraEditor({ id }: { id: string }) {
             <RoiCanvas
               cameraId={id}
               roi={roi}
-              live={draft.captureBackend === "MediaMTX"}
+              live={draft.captureBackend === "MediaMTX" && draft.enabled !== false}
+              enabled={draft.enabled !== false}
               onChange={(next) => roi && updateRoi({ ...roi, points: next })}
             />
             <div className="preview-toolbar">
@@ -2530,6 +2558,7 @@ function RoiCanvas({
   roi,
   className,
   live = false,
+  enabled = true,
   streamBackend,
   editable = true,
   onChange,
@@ -2538,6 +2567,7 @@ function RoiCanvas({
   roi?: NamedRoi;
   className?: string;
   live?: boolean;
+  enabled?: boolean;
   streamBackend?: string;
   editable?: boolean;
   onChange: (points: { x: number; y: number }[]) => void;
@@ -2552,11 +2582,15 @@ function RoiCanvas({
   );
   useEffect(() => {
     if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
+    if (!enabled) {
+      setImageSource("");
+      return () => undefined;
+    }
     setImageSource(api.snapshotUrl(cameraId));
     return () => {
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
     };
-  }, [cameraId, stamp]);
+  }, [cameraId, stamp, enabled]);
   const scheduleRefresh = () => {
     if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
     refreshTimer.current = window.setTimeout(() => setStamp(Date.now()), 250);
@@ -2583,7 +2617,9 @@ function RoiCanvas({
           className="roi-image-stage"
           style={{ aspectRatio: `${imageSize.width} / ${imageSize.height}` }}
         >
-          {live ? streamBackend?.toLocaleLowerCase() === "mediamtx" ? (
+          {!enabled ? (
+            <div className="video-empty"><Pause size={22} /><span>دوربین غیرفعال است</span></div>
+          ) : live ? streamBackend?.toLocaleLowerCase() === "mediamtx" ? (
             <RawMediaMtxStream
               cameraId={cameraId}
               enabled
@@ -2694,6 +2730,14 @@ function GeneralSettings({
           </div>
         </div>
         <div className="form-grid">
+          <label className="check-field">
+            <input
+              type="checkbox"
+              checked={draft.enabled !== false}
+              onChange={(e) => update("enabled", e.target.checked)}
+            />
+            <span>دوربین فعال باشد (دوربین غیرفعال هیچ stream یا پردازشی ندارد)</span>
+          </label>
           <Field label="نام دوربین">
             <input
               value={draft.name}
@@ -3623,6 +3667,7 @@ function LivePreview({ camera }: { camera?: CameraStatus }) {
   const session = useRef<string>();
   const pc = useRef<RTCPeerConnection>();
   const [stamp, setStamp] = useState(Date.now());
+  const activeCamera = camera?.enabled === false ? undefined : camera;
   useEffect(
     () => () => {
       pc.current?.close();
@@ -3631,7 +3676,7 @@ function LivePreview({ camera }: { camera?: CameraStatus }) {
     [],
   );
   const start = async () => {
-    if (!camera?.id || !videoRef.current) return;
+    if (!activeCamera?.id || !videoRef.current) return;
     setError("");
     try {
       const connection = new RTCPeerConnection();
@@ -3643,7 +3688,7 @@ function LivePreview({ camera }: { camera?: CameraStatus }) {
       };
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
-      const answer = await api.webRtcOffer(camera.id, {
+      const answer = await api.webRtcOffer(activeCamera.id, {
         type: "offer",
         sdp: offer.sdp ?? "",
       });
@@ -3684,9 +3729,9 @@ function LivePreview({ camera }: { camera?: CameraStatus }) {
       <div className="video-frame">
         {mode === "webrtc" ? (
           <video ref={videoRef} autoPlay muted playsInline />
-        ) : camera?.id ? (
+        ) : activeCamera?.id ? (
           <img
-            src={api.snapshotUrl(camera.id) + `&t=${stamp}`}
+            src={api.snapshotUrl(activeCamera.id) + `&t=${stamp}`}
             alt="camera snapshot"
           />
         ) : (
@@ -3695,7 +3740,7 @@ function LivePreview({ camera }: { camera?: CameraStatus }) {
             <span>دوربینی انتخاب نشده</span>
           </div>
         )}
-        {!camera?.running && (
+        {!activeCamera?.running && (
           <div className="video-overlay">
             <Pause size={17} /> دوربین متوقف است
           </div>
@@ -4629,7 +4674,7 @@ function Triggers() {
           </Button>
         }
       />
-      <ClientSubscriptionTester cameras={cameras.data ?? []} />
+      <ClientSubscriptionTester cameras={(cameras.data ?? []).filter((camera) => camera.enabled !== false)} />
       <div className="triggers-layout">
         <section className="panel trigger-list">
           <div className="panel-head compact">
@@ -4704,15 +4749,35 @@ function Triggers() {
 
 function ClientSubscriptionTester({ cameras }: { cameras: CameraStatus[] }) {
   const [draft, setDraft] = useState<ClientSubscription>(() => readClientSubscription());
-  const update = <K extends keyof ClientSubscription>(key: K, value: ClientSubscription[K]) =>
-    setDraft((current) => ({ ...current, [key]: value }));
-  const toggleCamera = (id: string) =>
-    update(
-      "cameraIds",
-      draft.cameraIds.includes(id)
-        ? draft.cameraIds.filter((item) => item !== id)
-        : [...draft.cameraIds, id],
-    );
+  const [activeProfileId, setActiveProfileId] = useState<string>();
+  const cameraTitle = (profile: ClientSubscriptionProfile) => {
+    const names = profile.cameraIds
+      .map((id) => cameras.find((camera) => camera.id === id)?.name ?? id)
+      .filter(Boolean);
+    return names.length ? names.join("، ") : "همهٔ دوربین‌ها";
+  };
+  useEffect(() => {
+    if (!draft.profiles.some((profile) => profile.id === activeProfileId)) {
+      setActiveProfileId(draft.profiles[0]?.id);
+    }
+  }, [draft.profiles, activeProfileId]);
+  const updateProfile = (id: string, patch: Partial<ClientSubscriptionProfile>) =>
+    setDraft((current) => ({
+      profiles: current.profiles.map((profile) => profile.id === id ? { ...profile, ...patch } : profile),
+    }));
+  const addProfile = () => {
+    const profile = defaultClientSubscriptionProfile();
+    profile.name = `پروفایل ${draft.profiles.length + 1}`;
+    setDraft((current) => ({ profiles: [...current.profiles, profile] }));
+  };
+  const removeProfile = (id: string) =>
+    setDraft((current) => ({ profiles: current.profiles.filter((profile) => profile.id !== id) }));
+  const toggleCamera = (profile: ClientSubscriptionProfile, cameraId: string) =>
+    updateProfile(profile.id, {
+      cameraIds: profile.cameraIds.includes(cameraId)
+        ? profile.cameraIds.filter((item) => item !== cameraId)
+        : [...profile.cameraIds, cameraId],
+    });
   const apply = () => saveClientSubscription(draft);
   return (
     <section className="panel client-subscription-panel">
@@ -4720,55 +4785,72 @@ function ClientSubscriptionTester({ cameras }: { cameras: CameraStatus[] }) {
         <div>
           <h3>آزمایش subscription کلاینت</h3>
           <span>
-            این تنظیم فقط eventهای همین اتصال UI را فیلتر می‌کند و تنظیمات دوربین را تغییر نمی‌دهد.
+            چند پروفایل مستقل تعریف کنید؛ رخداد در صورت انطباق با حداقل یکی از آن‌ها نمایش داده می‌شود. این تنظیم فقط eventهای همین اتصال UI را فیلتر می‌کند.
           </span>
         </div>
-        <Button icon={Radio} onClick={apply}>اعمال برای اتصال جاری</Button>
+        <div className="title-actions">
+          <Button variant="soft" icon={Plus} onClick={addProfile}>پروفایل جدید</Button>
+          <Button icon={Radio} onClick={apply}>اعمال برای اتصال جاری</Button>
+        </div>
       </div>
-      <div className="form-grid">
-        <Field label="رخداد پایه">
-          <select value={draft.mode} onChange={(e) => update("mode", e.target.value as ClientSubscription["mode"])}>
-            <option value="All">همهٔ رخدادها</option>
-            <option value="Plate">پلاک‌محور</option>
-            <option value="KnownFace">چهرهٔ شناخته‌شده</option>
-          </select>
-        </Field>
-        <Field label="پنجرهٔ association (ms)">
-          <input type="number" min="0" max="10000" step="100" value={draft.windowMs} onChange={(e) => update("windowMs", Number(e.target.value))} />
-        </Field>
-        <Field
-          label="History event cooldown (sec)"
-          hint="فقط برای history همین اتصال UI؛ روی دیتابیس مرکزی و تریگرها اثر ندارد"
-        >
-          <input
-            type="number"
-            min="0"
-            max="3600"
-            value={draft.cooldownSeconds}
-            onChange={(e) => update("cooldownSeconds", Number(e.target.value))}
-          />
-        </Field>
-        <Field label="چهره الزامی باشد">
-          <Toggle checked={draft.faceRequired} onChange={(value) => update("faceRequired", value)} />
-        </Field>
-        <Field label="پلاک الزامی باشد">
-          <Toggle checked={draft.plateRequired} onChange={(value) => update("plateRequired", value)} />
-        </Field>
-        <Field label="چهرهٔ ناشناس هم ارسال شود">
-          <Toggle checked={draft.includeUnknownFace} onChange={(value) => update("includeUnknownFace", value)} />
-        </Field>
-      </div>
-      <div className="trigger-scope">
-        <b>محدودکردن subscription به دوربین‌ها</b>
-        <div>
-          {cameras.map((camera) => (
-            <label key={camera.id} className="scope-chip">
-              <input type="checkbox" checked={draft.cameraIds.includes(camera.id)} onChange={() => toggleCamera(camera.id)} />
-              <span>{camera.name}</span>
-            </label>
+      {draft.profiles.length > 0 && (
+        <div className="subscription-tabs" role="tablist" aria-label="پروفایل‌های subscription">
+          {draft.profiles.map((profile) => (
+            <button
+              className={`subscription-tab ${profile.id === (activeProfileId ?? draft.profiles[0]?.id) ? "active" : ""}`}
+              key={profile.id}
+              role="tab"
+              aria-selected={profile.id === (activeProfileId ?? draft.profiles[0]?.id)}
+              onClick={() => setActiveProfileId(profile.id)}
+            >
+              <b>{cameraTitle(profile)}</b>
+              <small>{profile.name}</small>
+            </button>
           ))}
         </div>
-        <small>خالی‌بودن یعنی همهٔ دوربین‌ها. تغییرات بعد از اعمال، روی SignalR همین صفحه فعال می‌شود.</small>
+      )}
+      <div className="subscription-profiles">
+        {draft.profiles.filter((profile) => profile.id === (activeProfileId ?? draft.profiles[0]?.id)).map((profile) => (
+          <div className="subscription-profile" key={profile.id}>
+            <div className="subscription-profile-head">
+              <Field label="نام پروفایل">
+                <input value={profile.name} onChange={(e) => updateProfile(profile.id, { name: e.target.value })} />
+              </Field>
+              <button className="icon-button danger-icon" title="حذف پروفایل" onClick={() => removeProfile(profile.id)}><Trash2 size={15} /></button>
+            </div>
+            <div className="form-grid">
+              <Field label="رخداد پایه">
+                <select value={profile.mode} onChange={(e) => updateProfile(profile.id, { mode: e.target.value as ClientSubscriptionProfile["mode"] })}>
+                  <option value="All">همهٔ رخدادها</option>
+                  <option value="Plate">پلاک‌محور</option>
+                  <option value="KnownFace">چهرهٔ شناخته‌شده</option>
+                </select>
+              </Field>
+              <Field label="پنجرهٔ association (ms)">
+                <input type="number" min="0" max="10000" step="100" value={profile.windowMs} onChange={(e) => updateProfile(profile.id, { windowMs: Number(e.target.value) })} />
+              </Field>
+              <Field label="History event cooldown (sec)" hint="فقط برای همین پروفایل و اتصال UI">
+                <input type="number" min="0" max="3600" value={profile.cooldownSeconds} onChange={(e) => updateProfile(profile.id, { cooldownSeconds: Number(e.target.value) })} />
+              </Field>
+              <Field label="چهره الزامی باشد"><Toggle checked={profile.faceRequired} onChange={(value) => updateProfile(profile.id, { faceRequired: value })} /></Field>
+              <Field label="پلاک الزامی باشد"><Toggle checked={profile.plateRequired} onChange={(value) => updateProfile(profile.id, { plateRequired: value })} /></Field>
+              <Field label="چهرهٔ ناشناس هم ارسال شود"><Toggle checked={profile.includeUnknownFace} onChange={(value) => updateProfile(profile.id, { includeUnknownFace: value })} /></Field>
+            </div>
+            <div className="trigger-scope">
+              <b>دوربین‌های این پروفایل</b>
+              <div>
+                {cameras.map((camera) => (
+                  <label key={camera.id} className="scope-chip">
+                    <input type="checkbox" checked={profile.cameraIds.includes(camera.id)} onChange={() => toggleCamera(profile, camera.id)} />
+                    <span>{camera.name}</span>
+                  </label>
+                ))}
+              </div>
+              <small>خالی‌بودن یعنی همهٔ دوربین‌ها.</small>
+            </div>
+          </div>
+        ))}
+        {!draft.profiles.length && <Empty icon={Radio} title="پروفایلی تعریف نشده" text="برای هر سناریو یک پروفایل جدید بسازید." />}
       </div>
     </section>
   );

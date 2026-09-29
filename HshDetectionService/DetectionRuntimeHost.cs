@@ -148,23 +148,39 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     {
         lock (_gate)
         {
-            return _cameras.Values.Select(camera => new CameraStatusDto(
-                camera.Settings.Id,
-                camera.Settings.Name,
-                camera.IsRunning,
-                camera.ProcessingFps,
-                camera.LastInferenceMs,
-                camera.DroppedFrames,
-                camera.LastFrameSize.Width,
-                camera.LastFrameSize.Height,
-                camera.IsRunning ? "Running" : "Stopped",
-                camera.ConfiguredRoiCount,
-                camera.ConfiguredTaskCount,
-                camera.ActivePipelineCount,
-                camera.ActivePipelineCount > 0
-                    ? "Ready"
-                    : camera.ConfiguredTaskCount > 0 ? "Unavailable" : "NotConfigured",
-                camera.Settings.CaptureBackend)).ToArray();
+            return _settings.Cameras.Select(settings =>
+            {
+                if (!_cameras.TryGetValue(settings.Id, out Camera? camera))
+                {
+                    int roiCount = settings.Rois.Count(roi => roi.Enabled);
+                    int taskCount = settings.Rois
+                        .Where(roi => roi.Enabled)
+                        .SelectMany(roi => roi.Processing ?? [])
+                        .Count(item => item.Enabled);
+                    return new CameraStatusDto(settings.Id, settings.Name, settings.Enabled, false, 0, 0, 0, 0, 0,
+                        settings.Enabled ? "Stopped" : "Disabled", roiCount, taskCount, 0,
+                        settings.Enabled ? "NotConfigured" : "Disabled", settings.CaptureBackend);
+                }
+
+                return new CameraStatusDto(
+                    camera.Settings.Id,
+                    camera.Settings.Name,
+                    camera.Settings.Enabled,
+                    camera.IsRunning,
+                    camera.ProcessingFps,
+                    camera.LastInferenceMs,
+                    camera.DroppedFrames,
+                    camera.LastFrameSize.Width,
+                    camera.LastFrameSize.Height,
+                    camera.IsRunning ? "Running" : "Stopped",
+                    camera.ConfiguredRoiCount,
+                    camera.ConfiguredTaskCount,
+                    camera.ActivePipelineCount,
+                    camera.ActivePipelineCount > 0
+                        ? "Ready"
+                        : camera.ConfiguredTaskCount > 0 ? "Unavailable" : "NotConfigured",
+                    camera.Settings.CaptureBackend);
+            }).ToArray();
         }
     }
 
@@ -176,6 +192,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     public bool StartCamera(string cameraId)
     {
         if (!TryGetCamera(cameraId, out Camera? camera) || camera is null) return false;
+        if (!camera.Settings.Enabled) return false;
         camera.Start();
         return true;
     }
@@ -216,9 +233,12 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             if (_cameras.Remove(settings.Id, out previous)) { }
             _settings.Cameras.RemoveAll(item => item.Id.Equals(settings.Id, StringComparison.OrdinalIgnoreCase));
             _settings.Cameras.Add(settings);
-            Camera camera = CreateCamera(settings);
-            _cameras[settings.Id] = camera;
-            if (start) camera.Start();
+            if (settings.Enabled)
+            {
+                Camera camera = CreateCamera(settings);
+                _cameras[settings.Id] = camera;
+                if (start) camera.Start();
+            }
         }
 
         if (previous is not null)
@@ -250,18 +270,30 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             _cameras.Clear();
             _settings = settings;
         }
+        foreach (string cameraId in _latestFrames.Keys.ToArray())
+        {
+            if (settings.Cameras.Any(camera => camera.Enabled && camera.Id.Equals(cameraId, StringComparison.OrdinalIgnoreCase))) continue;
+            if (_latestFrames.TryRemove(cameraId, out LatestFrameSlot? removed)) removed.Dispose();
+        }
         foreach (CameraSettings cameraSettings in settings.Cameras.ToArray())
             AddOrReplaceCamera(cameraSettings, startCameras);
     }
 
     public Bitmap? GetLatestFrame(string cameraId)
     {
+        if (!TryGetCamera(cameraId, out Camera? camera) || camera is null || !camera.Settings.Enabled) return null;
         if (!_latestFrames.TryGetValue(cameraId, out LatestFrameSlot? slot)) return null;
         return slot.Clone(out _);
     }
 
     public bool TryGetLatestFrame(string cameraId, out Bitmap? frame, out long sequence)
     {
+        if (!TryGetCamera(cameraId, out Camera? camera) || camera is null || !camera.Settings.Enabled)
+        {
+            frame = null;
+            sequence = 0;
+            return false;
+        }
         if (!_latestFrames.TryGetValue(cameraId, out LatestFrameSlot? slot))
         {
             frame = null;
@@ -1059,6 +1091,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
 public sealed record CameraStatusDto(
     string Id,
     string Name,
+    bool Enabled,
     bool Running,
     double Fps,
     double InferenceMs,

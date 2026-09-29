@@ -42,6 +42,12 @@ public sealed class MediaMtxWebRtcProxy : IDisposable
             return;
         }
 
+        if (!camera.Enabled)
+        {
+            await WriteErrorAsync(context, StatusCodes.Status404NotFound, "Camera is disabled.").ConfigureAwait(false);
+            return;
+        }
+
         if (!string.Equals(camera.CaptureBackend, "MediaMTX", StringComparison.OrdinalIgnoreCase))
         {
             await WriteErrorAsync(context, StatusCodes.Status409Conflict, "WHEP is available only when the camera receiver is MediaMTX.").ConfigureAwait(false);

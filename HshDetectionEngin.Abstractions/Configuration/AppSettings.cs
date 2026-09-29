@@ -66,6 +66,8 @@ public class CameraSettings
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Camera 1";
+    /// <summary>When false, this camera is kept in configuration but has no runtime, capture, processing, or stream.</summary>
+    public bool Enabled { get; set; } = true;
     /// <summary>Optional stable code used by external integrations.</summary>
     public string CameraCode { get; set; } = string.Empty;
     public string SourceUrl { get; set; } = "rtsp://192.168.1.100:554/stream";

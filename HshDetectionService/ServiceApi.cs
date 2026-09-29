@@ -334,11 +334,20 @@ public static class ServiceApi
             return Results.NoContent();
         });
 
-        app.MapGet("/api/v1/events", (long? afterSequence, int? limit, string? cameraId, string? scenario, DateTime? fromUtc, DateTime? toUtc, string? clientMode, bool? faceRequired, bool? plateRequired, bool? includeFace, bool? includePlate, bool? includeUnknownFace, int? windowMs, int? clientCooldownSeconds, string? clientCameraIds, string? clientRoiIds, DetectionRuntimeHost host) =>
+        app.MapGet("/api/v1/events", (long? afterSequence, int? limit, string? cameraId, string? scenario, DateTime? fromUtc, DateTime? toUtc, string? clientMode, bool? faceRequired, bool? plateRequired, bool? includeFace, bool? includePlate, bool? includeUnknownFace, int? windowMs, int? clientCooldownSeconds, string? clientCameraIds, string? clientRoiIds, string? clientProfiles, DetectionRuntimeHost host) =>
         {
             int requestedLimit = Math.Clamp(limit ?? 200, 1, 2000);
             ClientSubscription? subscription = null;
-            if (!string.IsNullOrWhiteSpace(clientMode))
+            if (!string.IsNullOrWhiteSpace(clientProfiles))
+            {
+                try
+                {
+                    List<ClientSubscriptionProfile>? profiles = JsonSerializer.Deserialize<List<ClientSubscriptionProfile>>(clientProfiles, ServiceJson.Options);
+                    if (profiles is { Count: > 0 }) subscription = new ClientSubscription { Profiles = profiles }.Normalize();
+                }
+                catch (JsonException) { /* fall back to the legacy single subscription shape */ }
+            }
+            if (subscription is null && !string.IsNullOrWhiteSpace(clientMode))
             {
                 subscription = new ClientSubscription
                 {
@@ -356,7 +365,8 @@ public static class ServiceApi
             }
 
             bool subscriptionHasFilter = subscription is not null &&
-                (!subscription.Mode.Equals("All", StringComparison.OrdinalIgnoreCase) ||
+                (subscription.Profiles.Count > 0 ||
+                 !subscription.Mode.Equals("All", StringComparison.OrdinalIgnoreCase) ||
                  subscription.FaceRequired ||
                  subscription.PlateRequired ||
                  !subscription.IncludeFace ||
@@ -719,44 +729,53 @@ public sealed class DetectionHub : Hub
     internal static bool Matches(DetectionEventEnvelope item, ClientSubscription subscription)
     {
         subscription.Normalize();
+        if (subscription.Profiles.Count > 0)
+            return subscription.Profiles.Any(profile => MatchesSingle(item, profile));
+        return MatchesSingle(item, subscription);
+    }
+
+    private static bool MatchesSingle(DetectionEventEnvelope item, ClientSubscriptionFilter profile)
+    {
+        profile.NormalizeFields();
         string? cameraId = item.Source["cameraId"]?.GetValue<string>();
         string? roiId = item.Source["roiId"]?.GetValue<string>();
-        if (subscription.CameraIds.Count > 0 &&
-            !subscription.CameraIds.Contains(cameraId ?? string.Empty, StringComparer.OrdinalIgnoreCase)) return false;
-        if (subscription.RoiIds.Count > 0 &&
-            !subscription.RoiIds.Contains(roiId ?? string.Empty, StringComparer.OrdinalIgnoreCase)) return false;
+        if (profile.CameraIds.Count > 0 &&
+            !profile.CameraIds.Contains(cameraId ?? string.Empty, StringComparer.OrdinalIgnoreCase)) return false;
+        if (profile.RoiIds.Count > 0 &&
+            !profile.RoiIds.Contains(roiId ?? string.Empty, StringComparer.OrdinalIgnoreCase)) return false;
         int associationAgeMs = item.Source["associationAgeMs"]?.GetValue<int>() ?? 0;
-        if (subscription.WindowMs > 0 && associationAgeMs > subscription.WindowMs) return false;
+        if (profile.WindowMs > 0 && associationAgeMs > profile.WindowMs) return false;
 
         bool hasPlate = item.Components.ContainsKey("plate");
         bool hasFace = item.Components.TryGetValue("face", out JsonObject? face);
         bool knownFace = hasFace && string.Equals(
             face?["recognitionStatus"]?.GetValue<string>(), "Matched", StringComparison.OrdinalIgnoreCase);
-        if (!subscription.IncludePlate && hasPlate && !hasFace) return false;
-        if (!subscription.IncludeFace && hasFace && !hasPlate) return false;
-        if (subscription.FaceRequired && !hasFace) return false;
-        if (subscription.PlateRequired && !hasPlate) return false;
+        if (!profile.IncludePlate && hasPlate && !hasFace) return false;
+        if (!profile.IncludeFace && hasFace && !hasPlate) return false;
+        if (profile.FaceRequired && !hasFace) return false;
+        if (profile.PlateRequired && !hasPlate) return false;
 
-        if (subscription.Mode.Equals("Plate", StringComparison.OrdinalIgnoreCase))
+        if (profile.Mode.Equals("Plate", StringComparison.OrdinalIgnoreCase))
         {
             if (!hasPlate) return false;
-            if (!subscription.IncludeUnknownFace && hasFace && !knownFace) return false;
+            if (!profile.IncludeUnknownFace && hasFace && !knownFace) return false;
             return true;
         }
 
-        if (subscription.Mode.Equals("KnownFace", StringComparison.OrdinalIgnoreCase))
+        if (profile.Mode.Equals("KnownFace", StringComparison.OrdinalIgnoreCase))
         {
             if (!knownFace) return false;
             return true;
         }
 
-        if (!subscription.IncludeUnknownFace && hasFace && !knownFace && !hasPlate) return false;
+        if (!profile.IncludeUnknownFace && hasFace && !knownFace && !hasPlate) return false;
         return hasPlate || hasFace;
     }
 
     private static bool PassesCooldown(string connectionId, DetectionEventEnvelope item, ClientSubscription subscription)
     {
-        if (subscription.CooldownSeconds <= 0) return true;
+        subscription.Normalize();
+        if (subscription.Profiles.Count == 0 && subscription.CooldownSeconds <= 0) return true;
         ConcurrentDictionary<string, DateTime> delivered = LastDelivered.GetOrAdd(
             connectionId,
             _ => new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase));
@@ -777,11 +796,30 @@ public sealed class DetectionHub : Hub
         DetectionEventEnvelope item,
         ClientSubscription subscription)
     {
+        subscription.Normalize();
+        if (subscription.Profiles.Count > 0)
+        {
+            foreach (ClientSubscriptionProfile profile in subscription.Profiles)
+            {
+                if (!MatchesSingle(item, profile)) continue;
+                if (profile.CooldownSeconds <= 0 || PassesCooldown(delivered, item, profile.Id, profile.CooldownSeconds)) return true;
+            }
+            return false;
+        }
         if (subscription.CooldownSeconds <= 0) return true;
-        string key = BuildCooldownKey(item);
+        return PassesCooldown(delivered, item, "legacy", subscription.CooldownSeconds);
+    }
+
+    private static bool PassesCooldown(
+        IDictionary<string, DateTime> delivered,
+        DetectionEventEnvelope item,
+        string profileId,
+        int cooldownSeconds)
+    {
+        string key = $"{profileId}:{BuildCooldownKey(item)}";
         DateTime now = DateTime.UtcNow;
         if (delivered.TryGetValue(key, out DateTime previous) &&
-            (now - previous).TotalSeconds < subscription.CooldownSeconds) return false;
+            (now - previous).TotalSeconds < cooldownSeconds) return false;
         delivered[key] = now;
         return true;
     }

@@ -118,7 +118,7 @@ public sealed partial class MainForm
         {
             camera.Stop();
         }
-        else
+        else if (camera.Settings.Enabled)
         {
             camera.Start();
         }
@@ -132,7 +132,7 @@ public sealed partial class MainForm
     {
         foreach (CameraRuntime camera in _cameras.Values.ToArray())
         {
-            if (!camera.IsRunning)
+            if (camera.Settings.Enabled && !camera.IsRunning)
             {
                 camera.Start();
             }
@@ -271,6 +271,7 @@ public sealed partial class MainForm
         clone.Id = id;
 
         target.Name = clone.Name;
+        target.Enabled = clone.Enabled;
         target.SourceUrl = clone.SourceUrl;
         target.ModelFile = clone.ModelFile;
         target.PlateEnabled = clone.PlateEnabled;

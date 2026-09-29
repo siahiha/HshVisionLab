@@ -35,6 +35,7 @@ public sealed class CameraSettingsForm : Form
     private readonly NumericUpDown _numFaceEventCooldown = new();
     private readonly NumericUpDown _numPlateEventCooldown = new();
     private readonly CheckBox _chkPlateEnabled = new();
+    private readonly CheckBox _chkCameraEnabled = new();
     private readonly CheckBox _chkCharacterRecognition = new();
     private readonly CheckBox _chkFaceEnabled = new();
     private readonly CheckBox _chkFaceRecognition = new();
@@ -180,6 +181,7 @@ public sealed class CameraSettingsForm : Form
         AddSection(general, "Camera connection");
         AddRow(general, "Camera name", _txtName);
         AddRow(general, "RTSP / camera source", _txtSource);
+        AddRow(general, "Enable camera", ConfigureCheckBox(_chkCameraEnabled));
         AddRow(general, "RTSP transport", ConfigureCombo(_cmbTransport, "TCP", "UDP"));
         AddRow(general, "RTSP receiver", ConfigureCombo(_cmbCaptureBackend, "FFmpeg", "LibVLC", "MediaMTX"));
         AddRow(general, "Reconnect delay (seconds)", ConfigureNumber(_numReconnect, 1, 120, 1, 0));
@@ -840,6 +842,7 @@ public sealed class CameraSettingsForm : Form
     {
         _txtName.Text = _settings.Name;
         _txtSource.Text = _settings.SourceUrl;
+        _chkCameraEnabled.Checked = _settings.Enabled;
         _cmbTransport.SelectedItem = _settings.Transport;
         _cmbCaptureBackend.SelectedItem = string.Equals(_settings.CaptureBackend, "LibVLC", StringComparison.OrdinalIgnoreCase)
             ? "LibVLC"
@@ -887,6 +890,7 @@ public sealed class CameraSettingsForm : Form
 
         _settings.Name = _txtName.Text.Trim();
         _settings.SourceUrl = _txtSource.Text.Trim();
+        _settings.Enabled = _chkCameraEnabled.Checked;
         _settings.Transport = _cmbTransport.SelectedItem?.ToString() ?? "TCP";
         _settings.CaptureBackend = _cmbCaptureBackend.SelectedItem?.ToString() ?? "FFmpeg";
         if (!CommitSelectedProperties() || !ValidateRoiNames()) return;

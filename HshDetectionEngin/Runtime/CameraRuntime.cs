@@ -16,6 +16,10 @@ namespace HshDetectionEngin;
 /// <summary>Independent processing service for one camera. No state is shared with another camera.</summary>
 public class CameraRuntime : IDisposable
 {
+    private const float OverlayReferenceWidth = 850f;
+    private const float OverlayMinFontSize = 17f;
+    private const float OverlayMaxFontSize = 28f;
+
     public CameraSettings Settings { get; }
     public IFrameSource FrameSource { get; private set; }
     private readonly bool _hasInjectedFrameSource;
@@ -160,7 +164,7 @@ public class CameraRuntime : IDisposable
             value => Volatile.Write(ref _lastInferenceMs, value));
         AttachFrameSource(FrameSource);
         Settings.EnsureProcessingDefaults();
-        RebuildRoiPipelines();
+        if (Settings.Enabled) RebuildRoiPipelines();
     }
 
     private static string GetCaptureBackend(CameraSettings settings)
@@ -392,12 +396,18 @@ public class CameraRuntime : IDisposable
     public void UpdateFromSettings()
     {
         Settings.EnsureProcessingDefaults();
-        RebuildRoiPipelines();
+        if (!Settings.Enabled) Stop();
+        if (Settings.Enabled) RebuildRoiPipelines();
     }
 
     public void Start()
     {
         if (_running) return;
+        if (!Settings.Enabled)
+        {
+            StatusChanged?.Invoke(this, "Camera is disabled.", true);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(Settings.SourceUrl)) { StatusChanged?.Invoke(this, "Camera source is empty.", true); return; }
         EnsureFrameSourceForSettings();
         RebuildRoiPipelines();
@@ -643,7 +653,6 @@ public class CameraRuntime : IDisposable
             if (Settings.DrawBoxes)
             {
                 DrawRois(preview, GetNamedRois(preview.Size));
-                DrawOverlay(preview);
                 DrawAnalysisDetections(preview, GetActiveAnalysisDetections(), frame.Size);
                 DrawProcessingOverlays(preview, overlays, frame.Size);
             }
@@ -651,6 +660,7 @@ public class CameraRuntime : IDisposable
             var bmp = preview.ToBitmap();
             if (Settings.DrawBoxes)
             {
+                DrawOverlay(bmp);
                 DrawMotionRois(bmp, GetMotionRois(bmp.Size, GetNamedRois(bmp.Size)));
                 DrawAnalysisLabels(bmp, GetActiveAnalysisDetections(), frame.Size);
                 DrawPlateLabels(bmp, frame.Size);
@@ -746,10 +756,27 @@ public class CameraRuntime : IDisposable
             ? text
             : detection.Label;
 
-    private void DrawOverlay(Mat frame)
+    private static float GetOverlayFontSize(int bitmapWidth, float scale = 1f) =>
+        Math.Clamp(bitmapWidth / OverlayReferenceWidth * scale, OverlayMinFontSize * scale, OverlayMaxFontSize * scale);
+
+    private static Font CreateOverlayFont(int bitmapWidth, float scale = 1f) =>
+        new("Tahoma", GetOverlayFontSize(bitmapWidth, scale), FontStyle.Bold, GraphicsUnit.Pixel);
+
+    private void DrawOverlay(Bitmap bitmap)
     {
-        string text=$"{Settings.Name} | FPS {_fps:0.0} | {LastInferenceMs:0.#} ms | {( _motionActive?"MOTION":"IDLE" )} | q:{FrameSource.QueueCount}";
-        CvInvoke.PutText(frame,text,new Point(8,22),FontFace.HersheySimplex,.55,new MCvScalar(80,200,255),1,LineType.AntiAlias,true);
+        using Graphics graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        using Font font = CreateOverlayFont(bitmap.Width, .80f);
+        string text = $"{Settings.Name} | FPS {_fps:0.0} | {LastInferenceMs:0.#} ms | {(_motionActive ? "MOTION" : "IDLE")} | q:{FrameSource.QueueCount}";
+        SizeF textSize = graphics.MeasureString(text, font);
+        RectangleF background = new(5f, 5f, Math.Min(bitmap.Width - 10f, textSize.Width + 18f), textSize.Height + 10f);
+        using Brush backgroundBrush = new SolidBrush(Color.FromArgb(185, 5, 13, 24));
+        using Pen border = new(Color.FromArgb(220, 255, 193, 7), 1f);
+        using Brush foreground = new SolidBrush(Color.FromArgb(255, 255, 224, 126));
+        graphics.FillRectangle(backgroundBrush, background);
+        graphics.DrawRectangle(border, background.X, background.Y, background.Width, background.Height);
+        graphics.DrawString(text, font, foreground, background.X + 8f, background.Y + 4f);
     }
 
     private void DrawAnalysisDetections(Mat frame, IReadOnlyList<AnalysisDetection> detections, Size sourceSize)
@@ -779,7 +806,7 @@ public class CameraRuntime : IDisposable
         using Graphics graphics = Graphics.FromImage(bitmap);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-        using Font font = new("Segoe UI", Math.Clamp(bitmap.Width / 1250f, 10f, 16f), FontStyle.Bold, GraphicsUnit.Pixel);
+        using Font font = CreateOverlayFont(bitmap.Width, .86f);
         using Brush shadow = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
         using StringFormat format = new(StringFormat.GenericTypographic)
         {
@@ -802,9 +829,16 @@ public class CameraRuntime : IDisposable
             int labelY = bounds.Bottom + (int)Math.Ceiling(font.GetHeight(graphics));
             if (labelY + font.Height > bitmap.Height) labelY = Math.Max(0, bounds.Y - font.Height - 2);
 
-            RectangleF textArea = new(bounds.X, labelY, Math.Max(1, bitmap.Width - bounds.X - 2), font.Height + 4);
-            using Brush foreground = new SolidBrush(
-                IsDetectionAcceptedForOverlay(detection) ? Color.LimeGreen : Color.Red);
+            SizeF labelSize = graphics.MeasureString(label, font);
+            float labelWidth = Math.Min(Math.Max(1f, bitmap.Width - bounds.X - 2f), labelSize.Width + 12f);
+            RectangleF labelBackground = new(bounds.X - 5f, labelY - 3f, labelWidth + 10f, labelSize.Height + 7f);
+            RectangleF textArea = new(bounds.X + 1f, labelY, labelWidth, labelSize.Height + 2f);
+            bool accepted = IsDetectionAcceptedForOverlay(detection);
+            using Brush backgroundBrush = new SolidBrush(Color.FromArgb(205, 4, 12, 22));
+            using Pen border = new(accepted ? Color.FromArgb(235, 55, 205, 105) : Color.FromArgb(235, 235, 75, 75), 1.5f);
+            using Brush foreground = new SolidBrush(accepted ? Color.FromArgb(255, 180, 255, 195) : Color.FromArgb(255, 255, 170, 170));
+            graphics.FillRectangle(backgroundBrush, labelBackground);
+            graphics.DrawRectangle(border, labelBackground.X, labelBackground.Y, labelBackground.Width, labelBackground.Height);
             DrawTextWithShadow(graphics, label, font, foreground, shadow, textArea, format);
         }
     }
@@ -1041,9 +1075,8 @@ public class CameraRuntime : IDisposable
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-            float baseSize = Math.Clamp(bitmap.Width / 1250f, 10f, 16f);
-            using Font plateFont = new("Segoe UI", baseSize, FontStyle.Bold, GraphicsUnit.Pixel);
-            using Font specFont = new("Segoe UI", Math.Max(9f, baseSize * 0.82f), FontStyle.Bold, GraphicsUnit.Pixel);
+            using Font plateFont = CreateOverlayFont(bitmap.Width);
+            using Font specFont = CreateOverlayFont(bitmap.Width, .86f);
             using Brush shadowBrush = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
 
             foreach (PlateOverlayInfo overlay in _plateOverlay.Values)
@@ -1065,7 +1098,8 @@ public class CameraRuntime : IDisposable
             using Pen statusPen = new(
                 overlay.Accepted ? Color.LimeGreen : Color.Red,
                 Math.Max(2f, bitmap.Width / 700f));
-            using Brush textBrush = new SolidBrush(overlay.Accepted ? Color.LimeGreen : Color.Red);
+            using Brush textBrush = new SolidBrush(Color.White);
+            using Brush specBrush = new SolidBrush(overlay.Accepted ? Color.FromArgb(255, 160, 255, 180) : Color.FromArgb(255, 255, 160, 160));
             graphics.DrawRectangle(statusPen, plateRectangle.X, plateRectangle.Y, plateRectangle.Width, plateRectangle.Height);
 
             string plateText = overlay.Text;
@@ -1073,8 +1107,8 @@ public class CameraRuntime : IDisposable
 
             SizeF plateSize = graphics.MeasureString(plateText, plateFont);
             SizeF specificationSize = graphics.MeasureString(specifications, specFont);
-            float labelWidth = Math.Max(plateSize.Width, specificationSize.Width) + 10f;
-            float labelHeight = plateSize.Height + specificationSize.Height + 6f;
+            float labelWidth = Math.Max(plateSize.Width, specificationSize.Width) + 18f;
+            float labelHeight = plateSize.Height + specificationSize.Height + 12f;
 
             float labelX = plateRectangle.Left;
             float labelY = plateRectangle.Bottom + 4f;
@@ -1089,6 +1123,12 @@ public class CameraRuntime : IDisposable
                 labelY = Math.Max(2f, plateRectangle.Top - labelHeight - 4f);
             }
 
+            RectangleF labelBackground = new(labelX - 7f, labelY - 5f, labelWidth + 14f, labelHeight + 10f);
+            using Brush labelBackgroundBrush = new SolidBrush(Color.FromArgb(205, 4, 12, 22));
+            using Pen labelBorder = new(overlay.Accepted ? Color.FromArgb(235, 55, 205, 105) : Color.FromArgb(235, 235, 75, 75), 1.5f);
+            graphics.FillRectangle(labelBackgroundBrush, labelBackground);
+            graphics.DrawRectangle(labelBorder, labelBackground.X, labelBackground.Y, labelBackground.Width, labelBackground.Height);
+
             // Plate number is deliberately outside the plate rectangle.
             // No character labels are drawn over the plate image.
             DrawTextWithShadow(graphics, plateText, plateFont, textBrush, shadowBrush, labelX, labelY);
@@ -1096,7 +1136,7 @@ public class CameraRuntime : IDisposable
                 graphics,
                 specifications,
                 specFont,
-                textBrush,
+                specBrush,
                 shadowBrush,
                 labelX,
                 labelY + plateSize.Height - 1f);

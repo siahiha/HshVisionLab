@@ -849,3 +849,21 @@ html[data-language="en"] .preview-toolbar span { margin-left: auto; margin-right
   .invocation-editor .form-grid, .invocation-editor .invocation-meta-grid, .invocation-editor .invocation-web-grid, .invocation-editor .invocation-sql-grid, .invocation-editor .invocation-filter-grid, .invocation-editor .invocation-retry-grid { grid-template-columns: 1fr; }
   .invocation-editor .invocation-meta-grid > .field:nth-child(2), .invocation-editor .invocation-filter-grid > .field:nth-child(2), .invocation-editor .invocation-retry-grid > .field { max-width: none; }
 }
+/* Multiple client-subscription profiles */
+.subscription-profiles { display: grid; gap: 12px; padding: 0 20px 20px; }
+.subscription-profile { border: 1px solid rgba(139, 177, 217, .14); border-radius: 10px; background: rgba(8, 19, 32, .34); overflow: hidden; }
+.subscription-profile-head { display: flex; align-items: end; gap: 10px; padding: 13px 17px 0; }
+.subscription-profile-head .field { flex: 1; }
+.subscription-profile-head .icon-button { margin-bottom: 1px; }
+.subscription-profile .form-grid { padding: 14px 17px; }
+.subscription-profile .trigger-scope { padding-inline: 17px; }
+.subscription-tabs { display: flex; align-items: stretch; gap: 2px; overflow-x: auto; padding: 0 20px; border-bottom: 1px solid var(--border); scrollbar-width: thin; scrollbar-color: rgba(93, 151, 213, .45) transparent; }
+.subscription-tab { position: relative; flex: 0 0 auto; display: grid; gap: 5px; min-width: 150px; max-width: 250px; padding: 12px 16px 11px; border: 0; border-bottom: 2px solid transparent; color: #7189a3; background: transparent; text-align: right; cursor: pointer; transition: color .18s ease, background .18s ease, border-color .18s ease; }
+.subscription-tab::before { content: ''; position: absolute; inset: 7px 0 7px; border-radius: 7px 7px 0 0; background: transparent; transition: background .18s ease; z-index: 0; }
+.subscription-tab > * { position: relative; z-index: 1; }
+.subscription-tab:hover { color: #b8d7f3; background: rgba(60, 142, 247, .045); }
+.subscription-tab.active { color: #e3f2ff; border-bottom-color: #4da2ff; background: rgba(60, 142, 247, .08); box-shadow: inset 0 -1px 0 rgba(116, 190, 255, .3); }
+.subscription-tab.active::before { background: linear-gradient(180deg, rgba(61, 143, 239, .16), rgba(61, 143, 239, .035)); }
+.subscription-tab b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 600; }
+.subscription-tab small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #607a96; font-size: 9px; }
+.subscription-tab.active small { color: #91bee5; }

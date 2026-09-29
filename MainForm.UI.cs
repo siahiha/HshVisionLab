@@ -640,7 +640,7 @@ public sealed partial class MainForm
         _cameraTilePictures.Clear();
         _cameraTileLabels.Clear();
 
-        var cameras = _cameras.Values.ToArray();
+        var cameras = _cameras.Values.Where(camera => camera.Settings.Enabled).ToArray();
         if (cameras.Length == 0)
         {
             _multiViewGrid.ColumnCount = 1;

@@ -2,6 +2,7 @@ export type Id = string;
 export interface CameraStatus {
   id: Id;
   name: string;
+  enabled: boolean;
   running: boolean;
   fps: number;
   inferenceMs: number;
@@ -39,6 +40,7 @@ export interface NamedRoi {
 export interface CameraSettings {
   id: Id;
   name: string;
+  enabled: boolean;
   cameraCode?: string;
   sourceUrl: string;
   modelFile: string;
@@ -203,7 +205,9 @@ export interface InvocationLog {
   error?: string;
   occurredAtUtc?: string;
 }
-export interface ClientSubscription {
+export interface ClientSubscriptionProfile {
+  id: string;
+  name: string;
   mode: "All" | "Plate" | "KnownFace";
   cameraIds: string[];
   roiIds: string[];
@@ -215,6 +219,9 @@ export interface ClientSubscription {
   includeArtifacts: boolean;
   windowMs: number;
   cooldownSeconds: number;
+}
+export interface ClientSubscription {
+  profiles: ClientSubscriptionProfile[];
 }
 export interface Artifact {
   artifactId: Id;
