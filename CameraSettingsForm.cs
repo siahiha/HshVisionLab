@@ -35,7 +35,6 @@ public sealed class CameraSettingsForm : Form
     private readonly NumericUpDown _numFaceUnknownMatch = new();
     private readonly NumericUpDown _numFaceEventCooldown = new();
     private readonly ComboBox _cmbPalmDetectorModel = new();
-    private readonly ComboBox _cmbPalmDetectorKind = new();
     private readonly ComboBox _cmbPalmDetectorInputSize = new();
     private readonly ComboBox _cmbPalmRecognitionModel = new();
     private readonly ComboBox _cmbPalmRecognitionInputSize = new();
@@ -277,11 +276,8 @@ public sealed class CameraSettingsForm : Form
         AddRow(properties, "Enabled", ConfigureCheckBox(_chkPlateEnabled));
         _cmbModel.SelectedIndexChanged += (_, _) => RefreshInputSizes();
         _cmbFaceModel.SelectedIndexChanged += (_, _) => RefreshFaceInputSizes();
-        _cmbPalmDetectorKind.SelectedIndexChanged += (_, _) => RefreshPalmInputSizes();
         _cmbPalmDetectorModel.SelectedIndexChanged += (_, _) =>
         {
-            string kind = InferPalmDetectorKind(_cmbPalmDetectorModel.SelectedItem?.ToString(), _cmbPalmDetectorKind.SelectedItem?.ToString());
-            if (!Equals(_cmbPalmDetectorKind.SelectedItem?.ToString(), kind)) _cmbPalmDetectorKind.SelectedItem = kind;
             RefreshPalmInputSizes();
         };
         AddRow(properties, "Model", ConfigureCombo(_cmbModel));
@@ -326,7 +322,6 @@ public sealed class CameraSettingsForm : Form
         AddSection(properties, "PALM DETECTION  •  BlazePalm or RTMDet localizes palms");
         AddRow(properties, "Enabled", ConfigureCheckBox(_chkPalmEnabled));
         AddRow(properties, "Detection model", ConfigureCombo(_cmbPalmDetectorModel));
-        AddRow(properties, "Detector", ConfigureCombo(_cmbPalmDetectorKind, "BlazePalm", "RTMDet"));
         AddRow(properties, "Input size", ConfigureCombo(_cmbPalmDetectorInputSize, "192", "320"));
         AddRow(properties, "Detection confidence", ConfigureNumber(_numPalmDetectionConfidence, 0.05m, 0.99m, 0.01m, 2));
         AddRow(properties, "NMS IoU", ConfigureNumber(_numPalmNms, 0.05m, 0.90m, 0.05m, 2));
@@ -801,11 +796,6 @@ public sealed class CameraSettingsForm : Form
         _cmbPalmDetectorModel.SelectedItem = _cmbPalmDetectorModel.Items.Contains(palm.DetectorModelFile)
             ? palm.DetectorModelFile
             : _cmbPalmDetectorModel.Items.Cast<string>().FirstOrDefault();
-        string palmDetectorKind = InferPalmDetectorKind(
-            _cmbPalmDetectorModel.SelectedItem?.ToString(), palm.DetectorKind);
-        _cmbPalmDetectorKind.SelectedItem = _cmbPalmDetectorKind.Items.Contains(palmDetectorKind)
-            ? palmDetectorKind
-            : _cmbPalmDetectorKind.Items.Cast<string>().FirstOrDefault();
         RefreshPalmInputSizes();
         _cmbPalmDetectorInputSize.SelectedItem = _cmbPalmDetectorInputSize.Items.Contains(palm.DetectorInputSize.ToString())
             ? palm.DetectorInputSize.ToString()
@@ -891,7 +881,7 @@ public sealed class CameraSettingsForm : Form
                 item.Threads = (int)_numPalmThreads.Value;
                 palmOptions.DetectorModelFile = _cmbPalmDetectorModel.SelectedItem?.ToString() ?? palmOptions.DetectorModelFile;
                 palmOptions.DetectorKind = InferPalmDetectorKind(
-                    palmOptions.DetectorModelFile, _cmbPalmDetectorKind.SelectedItem?.ToString() ?? palmOptions.DetectorKind);
+                    palmOptions.DetectorModelFile, palmOptions.DetectorKind);
                 palmOptions.DetectorInputSize = int.TryParse(_cmbPalmDetectorInputSize.SelectedItem?.ToString(), out int palmDetectorInputSize)
                     ? palmDetectorInputSize
                     : palmOptions.DetectorInputSize;
@@ -1367,7 +1357,7 @@ public sealed class CameraSettingsForm : Form
 
     private void RefreshPalmInputSizes()
     {
-        string detectorKind = _cmbPalmDetectorKind.SelectedItem?.ToString() ?? string.Empty;
+        string detectorKind = InferPalmDetectorKind(_cmbPalmDetectorModel.SelectedItem?.ToString(), null);
         string[] sizes = detectorKind.Equals("RTMDet", StringComparison.OrdinalIgnoreCase)
             ? ["320"]
             : ["192"];
