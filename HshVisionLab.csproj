@@ -40,6 +40,10 @@
           Link="Models\Palm\palm_blazepalm_full.onnx"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+    <None Include="Models\Palm\rtmdet_nano_hand.onnx"
+          Link="Models\Palm\rtmdet_nano_hand.onnx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
     <None Include="Models\Palm\palm_ccnet.onnx"
           Link="Models\Palm\palm_ccnet.onnx"
           CopyToOutputDirectory="PreserveNewest"

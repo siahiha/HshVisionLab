@@ -60,6 +60,7 @@ HshDetectionEngin.Tools/RawModels/
 # Palm runtime models used by the local/debug build.
 !Models/Palm/
 !Models/Palm/palm_blazepalm_full.onnx
+!Models/Palm/rtmdet_nano_hand.onnx
 
 # Runtime-ready plate detector and whole-plate OCR models.
 !HshDetectionEngin.Plate/Models/plate_yolo.onnx
