@@ -1,4 +1,5 @@
 using HshDetectionEngin.Face;
+using HshDetectionEngin.Palm;
 using HshDetectionEngin.Plate;
 
 namespace HshVisionLab;
@@ -33,12 +34,30 @@ public sealed class CameraSettingsForm : Form
     private readonly NumericUpDown _numFaceTopK = new();
     private readonly NumericUpDown _numFaceUnknownMatch = new();
     private readonly NumericUpDown _numFaceEventCooldown = new();
+    private readonly ComboBox _cmbPalmDetectorModel = new();
+    private readonly ComboBox _cmbPalmDetectorKind = new();
+    private readonly ComboBox _cmbPalmDetectorInputSize = new();
+    private readonly ComboBox _cmbPalmRecognitionModel = new();
+    private readonly ComboBox _cmbPalmRecognitionInputSize = new();
+    private readonly NumericUpDown _numPalmDetectionConfidence = new();
+    private readonly NumericUpDown _numPalmNms = new();
+    private readonly NumericUpDown _numPalmMaxHands = new();
+    private readonly NumericUpDown _numPalmRecognitionThreshold = new();
+    private readonly NumericUpDown _numPalmRecordConfidence = new();
+    private readonly NumericUpDown _numPalmIou = new();
+    private readonly NumericUpDown _numPalmTrackMisses = new();
+    private readonly NumericUpDown _numPalmMaxFps = new();
+    private readonly NumericUpDown _numPalmThreads = new();
+    private readonly NumericUpDown _numPalmBuffer = new();
+    private readonly NumericUpDown _numPalmEventCooldown = new();
     private readonly NumericUpDown _numPlateEventCooldown = new();
     private readonly CheckBox _chkPlateEnabled = new();
     private readonly CheckBox _chkCameraEnabled = new();
     private readonly CheckBox _chkCharacterRecognition = new();
     private readonly CheckBox _chkFaceEnabled = new();
     private readonly CheckBox _chkFaceRecognition = new();
+    private readonly CheckBox _chkPalmEnabled = new();
+    private readonly CheckBox _chkPalmRecognition = new();
     private readonly TreeView _trvProcessing = new();
     private readonly ComboBox _cmbAddProcessing = new();
     private readonly Button _btnAddProcessing = new();
@@ -46,10 +65,12 @@ public sealed class CameraSettingsForm : Form
     private readonly ToolTip _processingToolTip = new();
     private readonly List<(Control Label, Control Value)> _plateProperties = [];
     private readonly List<(Control Label, Control Value)> _faceProperties = [];
+    private readonly List<(Control Label, Control Value)> _palmProperties = [];
     private readonly List<(Control Label, Control Value)> _genericProperties = [];
     private readonly List<(Control Label, Control Value)> _roiProperties = [];
     private readonly List<Control> _plateSectionLabels = [];
     private readonly List<Control> _faceSectionLabels = [];
+    private readonly List<Control> _palmSectionLabels = [];
     private readonly List<Control> _genericSectionLabels = [];
     private readonly List<Control> _roiSectionLabels = [];
     private readonly TextBox _txtSelectedRoiName = new();
@@ -136,7 +157,13 @@ public sealed class CameraSettingsForm : Form
                     "Face detection",
                     AnalysisKind.Face,
                     typeof(FaceProcessingOptions),
-                    "face")
+                    "face"),
+                new ProcessingModuleDescriptor(
+                    ProcessingType.Palm,
+                    "Palm detection and recognition",
+                    AnalysisKind.Palm,
+                    typeof(PalmProcessingOptions),
+                    "palm")
             ];
         }
 
@@ -250,6 +277,8 @@ public sealed class CameraSettingsForm : Form
         AddRow(properties, "Enabled", ConfigureCheckBox(_chkPlateEnabled));
         _cmbModel.SelectedIndexChanged += (_, _) => RefreshInputSizes();
         _cmbFaceModel.SelectedIndexChanged += (_, _) => RefreshFaceInputSizes();
+        _cmbPalmDetectorKind.SelectedIndexChanged += (_, _) => RefreshPalmInputSizes();
+        _cmbPalmDetectorModel.SelectedIndexChanged += (_, _) => RefreshPalmInputSizes();
         AddRow(properties, "Model", ConfigureCombo(_cmbModel));
         AddRow(properties, "Input size", ConfigureCombo(_cmbInputSize));
         AddRow(properties, "Preprocessing", ConfigureCombo(_cmbPreprocessing, "None", "Standard", "Advanced"));
@@ -288,6 +317,31 @@ public sealed class CameraSettingsForm : Form
         AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numFaceEventCooldown, 0, 3600, 1, 0));
         AddRow(properties, "Tracking IoU", ConfigureNumber(_numFaceIou, 0.05m, 0.90m, 0.05m, 2));
         AddRow(properties, "Track max misses", ConfigureNumber(_numFaceTrackMisses, 1, 60, 1, 0));
+
+        AddSection(properties, "PALM DETECTION  •  BlazePalm or RTMDet localizes palms");
+        AddRow(properties, "Enabled", ConfigureCheckBox(_chkPalmEnabled));
+        AddRow(properties, "Detection model", ConfigureCombo(_cmbPalmDetectorModel));
+        AddRow(properties, "Detector", ConfigureCombo(_cmbPalmDetectorKind, "BlazePalm", "RTMDet"));
+        AddRow(properties, "Input size", ConfigureCombo(_cmbPalmDetectorInputSize, "192", "320"));
+        AddRow(properties, "Detection confidence", ConfigureNumber(_numPalmDetectionConfidence, 0.05m, 0.99m, 0.01m, 2));
+        AddRow(properties, "NMS IoU", ConfigureNumber(_numPalmNms, 0.05m, 0.90m, 0.05m, 2));
+        AddRow(properties, "Max hands", ConfigureNumber(_numPalmMaxHands, 1, 10, 1, 0));
+
+        AddSection(properties, "PALM IDENTIFICATION  •  CCNet or PPNet compares palm identity");
+        AddRow(properties, "Enable identification", ConfigureCheckBox(_chkPalmRecognition));
+        AddRow(properties, "Recognition model", ConfigureCombo(_cmbPalmRecognitionModel));
+        AddRow(properties, "Recognition input size", ConfigureCombo(_cmbPalmRecognitionInputSize, "64", "96", "128", "160", "224", "256"));
+        AddRow(properties, "Known-palm threshold", ConfigureNumber(_numPalmRecognitionThreshold, 0.05m, 0.99m, 0.01m, 2));
+
+        AddSection(properties, "PALM TRACKING AND RECORDING");
+        AddRow(properties, "Max processing FPS", ConfigureNumber(_numPalmMaxFps, 1, 30, 1, 0));
+        AddRow(properties, "Threads (ONNX Runtime IntraOp)", ConfigureNumber(_numPalmThreads, 1, Math.Max(1, Math.Min(16, Environment.ProcessorCount)), 1, 0));
+        AddRow(properties, "Buffer count (0 = newest only)", ConfigureNumber(_numPalmBuffer, 0, 10, 1, 0));
+        AddRow(properties, "History record confidence", ConfigureNumber(_numPalmRecordConfidence, 0.05m, 0.99m, 0.01m, 2));
+        AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numPalmEventCooldown, 0, 3600, 1, 0));
+        AddRow(properties, "Tracking IoU", ConfigureNumber(_numPalmIou, 0.05m, 0.90m, 0.05m, 2));
+        AddRow(properties, "Track max misses", ConfigureNumber(_numPalmTrackMisses, 1, 60, 1, 0));
+
         AddSection(properties, "MODULE OPTIONS  •  custom processing");
         AddRow(properties, "Enabled", ConfigureCheckBox(_chkGenericEnabled));
         AddRow(properties, "Max processing FPS", ConfigureNumber(_numGenericMaxFps, 1, 30, 1, 0));
@@ -305,18 +359,32 @@ public sealed class CameraSettingsForm : Form
         _numThreads.ValueChanged += (_, _) =>
         {
             if (_numFaceThreads.Value != _numThreads.Value) _numFaceThreads.Value = _numThreads.Value;
+            if (_numPalmThreads.Value != _numThreads.Value) _numPalmThreads.Value = _numThreads.Value;
         };
         _numFaceThreads.ValueChanged += (_, _) =>
         {
             if (_numThreads.Value != _numFaceThreads.Value) _numThreads.Value = _numFaceThreads.Value;
+            if (_numPalmThreads.Value != _numFaceThreads.Value) _numPalmThreads.Value = _numFaceThreads.Value;
+        };
+        _numPalmThreads.ValueChanged += (_, _) =>
+        {
+            if (_numThreads.Value != _numPalmThreads.Value) _numThreads.Value = _numPalmThreads.Value;
+            if (_numFaceThreads.Value != _numPalmThreads.Value) _numFaceThreads.Value = _numPalmThreads.Value;
         };
         _numPlateBuffer.ValueChanged += (_, _) =>
         {
             if (_numFaceBuffer.Value != _numPlateBuffer.Value) _numFaceBuffer.Value = _numPlateBuffer.Value;
+            if (_numPalmBuffer.Value != _numPlateBuffer.Value) _numPalmBuffer.Value = _numPlateBuffer.Value;
         };
         _numFaceBuffer.ValueChanged += (_, _) =>
         {
             if (_numPlateBuffer.Value != _numFaceBuffer.Value) _numPlateBuffer.Value = _numFaceBuffer.Value;
+            if (_numPalmBuffer.Value != _numFaceBuffer.Value) _numPalmBuffer.Value = _numFaceBuffer.Value;
+        };
+        _numPalmBuffer.ValueChanged += (_, _) =>
+        {
+            if (_numPlateBuffer.Value != _numPalmBuffer.Value) _numPlateBuffer.Value = _numPalmBuffer.Value;
+            if (_numFaceBuffer.Value != _numPalmBuffer.Value) _numFaceBuffer.Value = _numPalmBuffer.Value;
         };
         propertyScroll.Controls.Add(properties);
         processingSplit.Panel2.Controls.Add(propertyScroll);
@@ -395,6 +463,7 @@ public sealed class CameraSettingsForm : Form
         if (title.StartsWith("Plate", StringComparison.OrdinalIgnoreCase) ||
             title.StartsWith("Detection", StringComparison.OrdinalIgnoreCase)) _plateSectionLabels.Add(label);
         if (title.StartsWith("Face", StringComparison.OrdinalIgnoreCase)) _faceSectionLabels.Add(label);
+        if (title.StartsWith("Palm", StringComparison.OrdinalIgnoreCase)) _palmSectionLabels.Add(label);
         if (title.StartsWith("MODULE", StringComparison.OrdinalIgnoreCase)) _genericSectionLabels.Add(label);
         if (title.StartsWith("ROI", StringComparison.OrdinalIgnoreCase)) _roiSectionLabels.Add(label);
     }
@@ -417,6 +486,7 @@ public sealed class CameraSettingsForm : Form
         if (_currentSection.StartsWith("Plate", StringComparison.OrdinalIgnoreCase) ||
             _currentSection.StartsWith("Detection", StringComparison.OrdinalIgnoreCase)) _plateProperties.Add((label, control));
         if (_currentSection.StartsWith("Face", StringComparison.OrdinalIgnoreCase)) _faceProperties.Add((label, control));
+        if (_currentSection.StartsWith("Palm", StringComparison.OrdinalIgnoreCase)) _palmProperties.Add((label, control));
         if (_currentSection.StartsWith("MODULE", StringComparison.OrdinalIgnoreCase)) _genericProperties.Add((label, control));
         if (_currentSection.StartsWith("ROI", StringComparison.OrdinalIgnoreCase)) _roiProperties.Add((label, control));
     }
@@ -602,14 +672,17 @@ public sealed class CameraSettingsForm : Form
         string editorKey = _selectedProcessing is null ? string.Empty : GetEditorKey(_selectedProcessing.Kind);
         bool plate = editorKey.Equals("plate", StringComparison.OrdinalIgnoreCase);
         bool face = editorKey.Equals("face", StringComparison.OrdinalIgnoreCase);
-        bool genericProcessing = _selectedProcessing is not null && !plate && !face;
+        bool palm = editorKey.Equals("palm", StringComparison.OrdinalIgnoreCase);
+        bool genericProcessing = _selectedProcessing is not null && !plate && !face && !palm;
         bool roi = _selectedProcessing is null && _selectedTarget?.Roi is not null;
         foreach ((Control label, Control value) in _plateProperties) { label.Visible = plate; value.Visible = plate; }
         foreach ((Control label, Control value) in _faceProperties) { label.Visible = face; value.Visible = face; }
+        foreach ((Control label, Control value) in _palmProperties) { label.Visible = palm; value.Visible = palm; }
         foreach ((Control label, Control value) in _genericProperties) { label.Visible = genericProcessing; value.Visible = genericProcessing; }
         foreach ((Control label, Control value) in _roiProperties) { label.Visible = roi; value.Visible = roi; }
         foreach (Control label in _plateSectionLabels) label.Visible = plate;
         foreach (Control label in _faceSectionLabels) label.Visible = face;
+        foreach (Control label in _palmSectionLabels) label.Visible = palm;
         foreach (Control label in _genericSectionLabels) label.Visible = genericProcessing;
         foreach (Control label in _roiSectionLabels) label.Visible = roi;
 
@@ -687,8 +760,10 @@ public sealed class CameraSettingsForm : Form
     {
         PlateProcessingOptions plate = item.GetOptions<PlateProcessingOptions>();
         FaceProcessingOptions face = item.GetOptions<FaceProcessingOptions>();
+        PalmProcessingOptions palm = item.GetOptions<PalmProcessingOptions>();
         _chkPlateEnabled.Checked = item.Enabled;
         _chkFaceEnabled.Checked = item.Enabled;
+        _chkPalmEnabled.Checked = item.Enabled;
         _cmbModel.SelectedItem = _cmbModel.Items.Contains(plate.ModelFile) ? plate.ModelFile : _cmbModel.Items.Cast<string>().FirstOrDefault();
         RefreshInputSizes();
         _cmbInputSize.SelectedItem = _cmbInputSize.Items.Contains(plate.InputSize.ToString()) ? plate.InputSize.ToString() : _cmbInputSize.Items.Cast<string>().FirstOrDefault();
@@ -718,6 +793,34 @@ public sealed class CameraSettingsForm : Form
         _numFaceTrackMisses.Value = Math.Clamp(face.TrackMaxMisses, 1, 60);
         _chkFaceRecognition.Checked = face.RecognitionEnabled;
 
+        _cmbPalmDetectorModel.SelectedItem = _cmbPalmDetectorModel.Items.Contains(palm.DetectorModelFile)
+            ? palm.DetectorModelFile
+            : _cmbPalmDetectorModel.Items.Cast<string>().FirstOrDefault();
+        _cmbPalmDetectorKind.SelectedItem = _cmbPalmDetectorKind.Items.Contains(palm.DetectorKind)
+            ? palm.DetectorKind
+            : _cmbPalmDetectorKind.Items.Cast<string>().FirstOrDefault();
+        RefreshPalmInputSizes();
+        _cmbPalmDetectorInputSize.SelectedItem = _cmbPalmDetectorInputSize.Items.Contains(palm.DetectorInputSize.ToString())
+            ? palm.DetectorInputSize.ToString()
+            : _cmbPalmDetectorInputSize.Items.Cast<string>().FirstOrDefault();
+        _numPalmDetectionConfidence.Value = (decimal)Math.Clamp(palm.DetectionConfidence, 0.05f, 0.99f);
+        _numPalmNms.Value = (decimal)Math.Clamp(palm.NmsIoU, 0.05f, 0.90f);
+        _numPalmMaxHands.Value = Math.Clamp(palm.MaxHands, 1, 10);
+        _chkPalmRecognition.Checked = palm.RecognitionEnabled;
+        _cmbPalmRecognitionModel.SelectedItem = _cmbPalmRecognitionModel.Items.Contains(palm.RecognitionModelFile)
+            ? palm.RecognitionModelFile
+            : _cmbPalmRecognitionModel.Items.Cast<string>().FirstOrDefault();
+        _cmbPalmRecognitionInputSize.SelectedItem = _cmbPalmRecognitionInputSize.Items.Contains(palm.RecognitionInputSize.ToString())
+            ? palm.RecognitionInputSize.ToString()
+            : _cmbPalmRecognitionInputSize.Items.Cast<string>().FirstOrDefault();
+        _numPalmRecognitionThreshold.Value = (decimal)Math.Clamp(palm.RecognitionThreshold, 0.05f, 0.99f);
+        _numPalmMaxFps.Value = Math.Clamp(item.MaxFps, 1, 30);
+        _numPalmThreads.Value = Math.Clamp(item.Threads, 1, (int)_numPalmThreads.Maximum);
+        _numPalmRecordConfidence.Value = (decimal)Math.Clamp(palm.RecordConfidence, 0.05f, 0.99f);
+        _numPalmEventCooldown.Value = Math.Clamp(palm.EventCooldownSeconds, 0, 3600);
+        _numPalmIou.Value = (decimal)Math.Clamp(palm.MatchIou, 0.05f, 0.90f);
+        _numPalmTrackMisses.Value = Math.Clamp(palm.TrackMaxMisses, 1, 60);
+
         _chkCharacterRecognition.Checked = plate.CharacterRecognitionEnabled;
         _cmbCharacterModel.SelectedItem = _cmbCharacterModel.Items.Contains(plate.CharacterModelFile)
             ? plate.CharacterModelFile
@@ -741,9 +844,11 @@ public sealed class CameraSettingsForm : Form
             string editorKey = GetEditorKey(item.Kind);
             bool isPlateEditor = editorKey.Equals("plate", StringComparison.OrdinalIgnoreCase);
             bool isFaceEditor = editorKey.Equals("face", StringComparison.OrdinalIgnoreCase);
+            bool isPalmEditor = editorKey.Equals("palm", StringComparison.OrdinalIgnoreCase);
             PlateProcessingOptions plateOptions = item.GetOptions<PlateProcessingOptions>();
             FaceProcessingOptions faceOptions = item.GetOptions<FaceProcessingOptions>();
-            if (!isPlateEditor && !isFaceEditor)
+            PalmProcessingOptions palmOptions = item.GetOptions<PalmProcessingOptions>();
+            if (!isPlateEditor && !isFaceEditor && !isPalmEditor)
             {
                 item.Enabled = _chkGenericEnabled.Checked;
                 item.MaxFps = (int)_numGenericMaxFps.Value;
@@ -771,6 +876,31 @@ public sealed class CameraSettingsForm : Form
                 faceOptions.NmsThreshold = (float)_numFaceNms.Value;
                 faceOptions.TopK = (int)_numFaceTopK.Value;
                 item.SetOptions(faceOptions);
+            }
+            else if (isPalmEditor)
+            {
+                item.Enabled = _chkPalmEnabled.Checked;
+                item.MaxFps = (int)_numPalmMaxFps.Value;
+                item.Threads = (int)_numPalmThreads.Value;
+                palmOptions.DetectorModelFile = _cmbPalmDetectorModel.SelectedItem?.ToString() ?? palmOptions.DetectorModelFile;
+                palmOptions.DetectorKind = _cmbPalmDetectorKind.SelectedItem?.ToString() ?? palmOptions.DetectorKind;
+                palmOptions.DetectorInputSize = int.TryParse(_cmbPalmDetectorInputSize.SelectedItem?.ToString(), out int palmDetectorInputSize)
+                    ? palmDetectorInputSize
+                    : palmOptions.DetectorInputSize;
+                palmOptions.DetectionConfidence = (float)_numPalmDetectionConfidence.Value;
+                palmOptions.NmsIoU = (float)_numPalmNms.Value;
+                palmOptions.MaxHands = (int)_numPalmMaxHands.Value;
+                palmOptions.RecognitionEnabled = _chkPalmRecognition.Checked;
+                palmOptions.RecognitionModelFile = _cmbPalmRecognitionModel.SelectedItem?.ToString() ?? palmOptions.RecognitionModelFile;
+                palmOptions.RecognitionInputSize = int.TryParse(_cmbPalmRecognitionInputSize.SelectedItem?.ToString(), out int palmRecognitionInputSize)
+                    ? palmRecognitionInputSize
+                    : palmOptions.RecognitionInputSize;
+                palmOptions.RecognitionThreshold = (float)_numPalmRecognitionThreshold.Value;
+                palmOptions.RecordConfidence = (float)_numPalmRecordConfidence.Value;
+                palmOptions.EventCooldownSeconds = (int)_numPalmEventCooldown.Value;
+                palmOptions.MatchIou = (float)_numPalmIou.Value;
+                palmOptions.TrackMaxMisses = (int)_numPalmTrackMisses.Value;
+                item.SetOptions(palmOptions);
             }
             else
             {
@@ -853,9 +983,12 @@ public sealed class CameraSettingsForm : Form
         LoadCharacterModels();
         LoadFaceModels();
         LoadFaceRecognitionModels();
+        LoadPalmModels();
+        LoadPalmRecognitionModels();
         _settings.EnsureProcessingDefaults();
         _numPlateBuffer.Value = Math.Clamp(_settings.BufferCount, 0, 10);
         _numFaceBuffer.Value = Math.Clamp(_settings.BufferCount, 0, 10);
+        _numPalmBuffer.Value = Math.Clamp(_settings.BufferCount, 0, 10);
         _numThreads.Value = Math.Clamp(_settings.Threads, 1, (int)_numThreads.Maximum);
         RefreshProcessingList();
         _numReconnect.Value = Math.Clamp(_settings.ReconnectDelaySec, 1, 120);
@@ -1127,6 +1260,54 @@ public sealed class CameraSettingsForm : Form
         _cmbFaceRecognitionModel.Items.Clear(); _cmbFaceRecognitionModel.Items.AddRange(modelNames);
     }
 
+    private void LoadPalmModels()
+    {
+        string[] modelDirectories = GetModelDirectories("Palm", "HshDetectionEngin.Palm");
+        string[] modelNames = modelDirectories
+            .Where(Directory.Exists)
+            .SelectMany(directory => Directory.EnumerateFiles(directory))
+            .Where(path => path.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase) ||
+                           path.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
+            .Select(path => path.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase)
+                ? Path.ChangeExtension(Path.GetFileName(path), ".onnx")
+                : Path.GetFileName(path))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Where(name => (name!.Contains("palm", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("hand", StringComparison.OrdinalIgnoreCase)) &&
+                           !name.Contains("ccnet", StringComparison.OrdinalIgnoreCase) &&
+                           !name.Contains("ppnet", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+
+        if (modelNames.Length == 0) modelNames = ["palm_blazepalm_full.onnx", "rtmdet_nano_hand.onnx"];
+        _cmbPalmDetectorModel.Items.Clear();
+        _cmbPalmDetectorModel.Items.AddRange(modelNames);
+    }
+
+    private void LoadPalmRecognitionModels()
+    {
+        string[] modelDirectories = GetModelDirectories("Palm", "HshDetectionEngin.Palm");
+        string[] modelNames = modelDirectories
+            .Where(Directory.Exists)
+            .SelectMany(directory => Directory.EnumerateFiles(directory))
+            .Where(path => path.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase) ||
+                           path.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
+            .Select(path => path.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase)
+                ? Path.ChangeExtension(Path.GetFileName(path), ".onnx")
+                : Path.GetFileName(path))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Where(name => name!.Contains("ccnet", StringComparison.OrdinalIgnoreCase) ||
+                           name.Contains("ppnet", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+
+        if (modelNames.Length == 0) modelNames = ["palm_ccnet.onnx", "palm_ppnet.onnx"];
+        _cmbPalmRecognitionModel.Items.Clear();
+        _cmbPalmRecognitionModel.Items.AddRange(modelNames);
+    }
+
     private static string[] GetModelDirectories(string capability, string projectDirectory)
     {
         List<string> directories =
@@ -1161,6 +1342,21 @@ public sealed class CameraSettingsForm : Form
         foreach (int size in sizes.OrderBy(size => size)) _cmbFaceInputSize.Items.Add(size.ToString());
         if (previous is not null && _cmbFaceInputSize.Items.Contains(previous)) _cmbFaceInputSize.SelectedItem = previous;
         else if (_cmbFaceInputSize.Items.Count > 0) _cmbFaceInputSize.SelectedIndex = 0;
+    }
+
+    private void RefreshPalmInputSizes()
+    {
+        string detectorKind = _cmbPalmDetectorKind.SelectedItem?.ToString() ?? string.Empty;
+        string[] sizes = detectorKind.Equals("RTMDet", StringComparison.OrdinalIgnoreCase)
+            ? ["320"]
+            : ["192"];
+        string? previous = _cmbPalmDetectorInputSize.SelectedItem?.ToString();
+        _cmbPalmDetectorInputSize.Items.Clear();
+        _cmbPalmDetectorInputSize.Items.AddRange(sizes);
+        if (previous is not null && _cmbPalmDetectorInputSize.Items.Contains(previous))
+            _cmbPalmDetectorInputSize.SelectedItem = previous;
+        else if (_cmbPalmDetectorInputSize.Items.Count > 0)
+            _cmbPalmDetectorInputSize.SelectedIndex = 0;
     }
 
     private void RefreshInputSizes()
