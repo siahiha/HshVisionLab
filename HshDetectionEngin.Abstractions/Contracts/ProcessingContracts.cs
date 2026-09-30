@@ -18,7 +18,7 @@ public interface IFrameSource : IDisposable
     bool TryDequeueFrame(out Mat frame, int timeoutMs, CancellationToken cancellationToken);
 }
 
-public enum AnalysisKind { Unknown, Plate, Face, Object, Vehicle, Custom }
+public enum AnalysisKind { Unknown, Plate, Face, Palm, Object, Vehicle, Custom }
 
 /// <summary>Geometry that a processing module wants to draw on the preview.</summary>
 public enum ProcessingOverlayKind

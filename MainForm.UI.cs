@@ -15,6 +15,7 @@ public sealed partial class MainForm
     private Button _btnManageCameras = null!;
     private Button _btnSaveAll = null!;
     private Button _btnManageFaces = null!;
+    private Button _btnManagePalms = null!;
     private Button _btnStartAll = null!;
     private Button _btnStopAll = null!;
     private Button _btnBackToThumbnails = null!;
@@ -110,7 +111,7 @@ public sealed partial class MainForm
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 8,
+            ColumnCount = 9,
             RowCount = 1
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -131,6 +132,7 @@ public sealed partial class MainForm
         _btnManageCameras = MakeButton(string.Empty, BgButton);
         _btnSaveAll = MakeButton(string.Empty, BgButton);
         _btnManageFaces = MakeButton(string.Empty, BgButton);
+        _btnManagePalms = MakeButton(string.Empty, BgButton);
         _btnStartAll = MakeButton(string.Empty, AccentGreen);
         _btnStopAll = MakeButton(string.Empty, AccentRed);
         _btnBackToThumbnails = MakeButton(string.Empty, BgButton);
@@ -138,6 +140,7 @@ public sealed partial class MainForm
         StyleMainActionButton(_btnManageCameras, "view_module", "Manage cameras", BgButton);
         StyleMainActionButton(_btnSaveAll, "save", "Save", BgButton);
         StyleMainActionButton(_btnManageFaces, "face", "Face database", BgButton);
+        StyleMainActionButton(_btnManagePalms, "pan_tool", "Palm database", BgButton);
         StyleMainActionButton(_btnStartAll, "play_arrow", "Start All", AccentGreen);
         StyleMainActionButton(_btnStopAll, "stop", "Stop All", AccentRed);
         StyleMainActionButton(_btnBackToThumbnails, "view_module", "Thumbnails", BgButton);
@@ -147,6 +150,7 @@ public sealed partial class MainForm
         _btnManageCameras.Click += (_, _) => ShowCameraManager();
         _btnSaveAll.Click += (_, _) => OnSaveSettingsClick();
         _btnManageFaces.Click += (_, _) => ManageFaceDatabase();
+        _btnManagePalms.Click += (_, _) => ManagePalmDatabase();
         _btnStartAll.Click += (_, _) => StartAllCameras();
         _btnStopAll.Click += (_, _) => StopAllCameras();
         _btnBackToThumbnails.Click += (_, _) => ShowThumbnails();
@@ -158,8 +162,9 @@ public sealed partial class MainForm
         layout.Controls.Add(_btnStopAll, 3, 0);
         layout.Controls.Add(_btnSaveAll, 4, 0);
         layout.Controls.Add(_btnManageFaces, 5, 0);
-        layout.Controls.Add(_btnBackToThumbnails, 6, 0);
-        layout.Controls.Add(_btnLanguage, 7, 0);
+        layout.Controls.Add(_btnManagePalms, 6, 0);
+        layout.Controls.Add(_btnBackToThumbnails, 7, 0);
+        layout.Controls.Add(_btnLanguage, 8, 0);
         _topBar.Controls.Add(layout);
         Controls.Add(_topBar);
     }

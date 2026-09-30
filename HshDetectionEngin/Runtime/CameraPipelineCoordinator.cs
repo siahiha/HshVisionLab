@@ -452,7 +452,9 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             ? binding.Settings.GetOptions<FaceProcessingOptions>().EventCooldownSeconds
             : binding.Settings.Kind == ProcessingType.Plate
                 ? binding.Settings.GetOptions<PlateProcessingOptions>().EventCooldownSeconds
-                : 0;
+                : binding.Settings.Kind == ProcessingType.Palm
+                    ? binding.Settings.GetOptions<PalmProcessingOptions>().EventCooldownSeconds
+                    : 0;
         metadata["HistoryEventCooldownSeconds"] = Math.Clamp(historyCooldownSeconds, 0, 3600);
         foreach ((string key, object? value) in binding.DetectionMetadata)
             metadata[key] = value;

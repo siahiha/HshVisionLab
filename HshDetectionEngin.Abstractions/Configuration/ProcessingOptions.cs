@@ -40,6 +40,25 @@ public sealed class FaceProcessingOptions
     public int EventCooldownSeconds { get; set; } = 60;
 }
 
+/// <summary>Settings owned by the palm detection and recognition module.</summary>
+public sealed class PalmProcessingOptions
+{
+    public string DetectorModelFile { get; set; } = "palm_blazepalm_full.onnx";
+    public string DetectorKind { get; set; } = "BlazePalm";
+    public int DetectorInputSize { get; set; } = 192;
+    public float DetectionConfidence { get; set; } = 0.55f;
+    public float NmsIoU { get; set; } = 0.30f;
+    public int MaxHands { get; set; } = 2;
+    public string RecognitionModelFile { get; set; } = "palm_ccnet.onnx";
+    public int RecognitionInputSize { get; set; } = 128;
+    public bool RecognitionEnabled { get; set; } = true;
+    public float RecognitionThreshold { get; set; } = 0.55f;
+    public float RecordConfidence { get; set; } = 0.55f;
+    public float MatchIou { get; set; } = 0.25f;
+    public int TrackMaxMisses { get; set; } = 10;
+    public int EventCooldownSeconds { get; set; } = 60;
+}
+
 public sealed partial class CameraProcessingSettings
 {
     private static readonly JsonSerializerOptions OptionsJson = new()
@@ -106,6 +125,7 @@ public sealed partial class CameraProcessingSettings
         }
 
         bool face = Kind == ProcessingType.Face;
+        bool palm = Kind == ProcessingType.Palm;
         if (face)
         {
             FaceProcessingOptions value = new()
@@ -124,6 +144,27 @@ public sealed partial class CameraProcessingSettings
                 TopK = Legacy("FaceTopK", 5000),
                 UnknownMatchThreshold = Legacy("FaceUnknownMatchThreshold", 0.35f),
                 EventCooldownSeconds = Legacy("FaceEventCooldownSeconds", 60)
+            };
+            SetOptions(value);
+        }
+        else if (palm)
+        {
+            PalmProcessingOptions value = new()
+            {
+                DetectorModelFile = Legacy("PalmDetectorModelFile", "palm_blazepalm_full.onnx"),
+                DetectorKind = Legacy("PalmDetectorKind", "BlazePalm"),
+                DetectorInputSize = Legacy("PalmDetectorInputSize", 192),
+                DetectionConfidence = Legacy("PalmDetectionConfidence", 0.55f),
+                NmsIoU = Legacy("PalmNmsIoU", 0.30f),
+                MaxHands = Legacy("PalmMaxHands", 2),
+                RecognitionModelFile = Legacy("PalmRecognitionModelFile", "palm_ccnet.onnx"),
+                RecognitionInputSize = Legacy("PalmRecognitionInputSize", 128),
+                RecognitionEnabled = Legacy("PalmRecognitionEnabled", true),
+                RecognitionThreshold = Legacy("PalmRecognitionThreshold", 0.55f),
+                RecordConfidence = Legacy("PalmRecordConfidence", 0.55f),
+                MatchIou = Legacy("PalmMatchIou", 0.25f),
+                TrackMaxMisses = Legacy("PalmTrackMaxMisses", 10),
+                EventCooldownSeconds = Legacy("PalmEventCooldownSeconds", 60)
             };
             SetOptions(value);
         }

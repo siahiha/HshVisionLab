@@ -587,11 +587,12 @@ public class CameraRuntime : IDisposable
     private static string GetDetectionOwnerKey(AnalysisDetection detection) =>
         $"{GetRoiKey(detection)}:{GetProcessingItemKey(detection)}";
 
-    private float GetFaceRecordConfidence(AnalysisDetection detection)
+    private static float GetAnalysisRecordConfidence(AnalysisDetection detection)
     {
-        return detection.Metadata?.TryGetValue("FaceRecordConfidence", out object? value) == true
+        string key = detection.Kind == AnalysisKind.Palm ? "PalmRecordConfidence" : "FaceRecordConfidence";
+        return detection.Metadata?.TryGetValue(key, out object? value) == true
             ? Convert.ToSingle(value, System.Globalization.CultureInfo.InvariantCulture)
-            : Settings.FaceRecordConfidence;
+            : detection.Confidence;
     }
 
     /// <summary>
@@ -621,11 +622,12 @@ public class CameraRuntime : IDisposable
             ? new MCvScalar(0, 220, 0)
             : new MCvScalar(0, 0, 255);
 
-    private int GetFaceEventCooldownSeconds(AnalysisDetection detection)
+    private static int GetAnalysisEventCooldownSeconds(AnalysisDetection detection)
     {
-        return detection.Metadata?.TryGetValue("FaceEventCooldownSeconds", out object? value) == true
+        string key = detection.Kind == AnalysisKind.Palm ? "PalmEventCooldownSeconds" : "FaceEventCooldownSeconds";
+        return detection.Metadata?.TryGetValue(key, out object? value) == true
             ? Math.Clamp(Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture), 0, 3600)
-            : Math.Clamp(Settings.FaceEventCooldownSeconds, 0, 3600);
+            : 60;
     }
 
     private void PublishPreview(Mat frame)
@@ -979,25 +981,26 @@ public class CameraRuntime : IDisposable
     private void PublishAnalysisHistory(Mat frame, IReadOnlyList<AnalysisDetection> detections)
     {
         foreach (AnalysisDetection detection in detections.Where(d =>
-            d.Kind == AnalysisKind.Face &&
+            (d.Kind == AnalysisKind.Face || d.Kind == AnalysisKind.Palm) &&
             IsDetectionAcceptedForOverlay(d) &&
-            d.Confidence >= GetFaceRecordConfidence(d)))
+            d.Confidence >= GetAnalysisRecordConfidence(d)))
         {
             DateTime now = DateTime.UtcNow;
             string processingKey = GetProcessingItemKey(detection);
-            string trackKey = $"face:{processingKey}:track:{detection.TrackId?.ToString() ?? detection.Label}";
+            string kindKey = detection.Kind == AnalysisKind.Palm ? "palm" : "face";
+            string trackKey = $"{kindKey}:{processingKey}:track:{detection.TrackId?.ToString() ?? detection.Label}";
             string? identityKey = detection.Metadata?.TryGetValue("IdentityId", out object? identity) == true && identity is string identityText && !string.IsNullOrWhiteSpace(identityText)
-                ? $"face:{processingKey}:identity:{identityText}" : null;
+                ? $"{kindKey}:{processingKey}:identity:{identityText}" : null;
             lock (_overlayGate)
             {
                 bool sameTrackRecently = _analysisHistoryTimes.TryGetValue(trackKey, out DateTime trackPrevious)
                     && (now - trackPrevious).TotalSeconds < 5;
                 bool sameIdentityRecently = identityKey is not null && _analysisHistoryTimes.TryGetValue(identityKey, out DateTime identityPrevious)
-                    && (now - identityPrevious).TotalSeconds < GetFaceEventCooldownSeconds(detection);
+                    && (now - identityPrevious).TotalSeconds < GetAnalysisEventCooldownSeconds(detection);
                 if (sameTrackRecently || sameIdentityRecently) continue;
                 _analysisHistoryTimes[trackKey] = now;
                 if (identityKey is not null) _analysisHistoryTimes[identityKey] = now;
-                int identityCooldownSeconds = GetFaceEventCooldownSeconds(detection);
+                int identityCooldownSeconds = GetAnalysisEventCooldownSeconds(detection);
                 foreach (string oldKey in _analysisHistoryTimes
                     .Where(x =>
                     {

@@ -6,7 +6,7 @@ using Microsoft.Win32;
 namespace HshDetectionEngin.Licensing;
 
 [Flags]
-public enum LicensedFeature { None = 0, Plate = 1, Face = 2 }
+public enum LicensedFeature { None = 0, Plate = 1, Face = 2, Palm = 4 }
 
 public sealed class LicenseClaims
 {

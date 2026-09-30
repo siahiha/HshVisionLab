@@ -9,6 +9,7 @@ public readonly struct ProcessingType : IEquatable<ProcessingType>
 {
     public static readonly ProcessingType Plate = new("Plate");
     public static readonly ProcessingType Face = new("Face");
+    public static readonly ProcessingType Palm = new("Palm");
 
     public string Value { get; }
 

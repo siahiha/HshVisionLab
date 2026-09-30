@@ -10,6 +10,7 @@ using HshDetectionEngin;
 using HshDetectionEngin.Capture;
 using HshDetectionEngin.Face;
 using HshDetectionEngin.Licensing;
+using HshDetectionEngin.Palm;
 using HshDetectionEngin.Plate;
 using Microsoft.AspNetCore.SignalR;
 
@@ -37,6 +38,8 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private Task? _eventWorker;
     private FaceDatabase? _faceDatabase;
     private FaceModule? _faceModule;
+    private PalmDatabase? _palmDatabase;
+    private PalmModule? _palmModule;
     private ProcessingRegistry? _registry;
     private LicenseValidationResult? _license;
     private AppSettings _settings = new();
@@ -67,6 +70,8 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     public ArtifactStore Artifacts => _artifactStore;
     public FaceDatabase FaceDatabase => _faceDatabase ?? throw new InvalidOperationException("Face database is not ready.");
     public FaceModule FaceModule => _faceModule ?? throw new InvalidOperationException("Face module is not ready.");
+    public PalmDatabase PalmDatabase => _palmDatabase ?? throw new InvalidOperationException("Palm database is not ready.");
+    public PalmModule PalmModule => _palmModule ?? throw new InvalidOperationException("Palm module is not ready.");
     public LicenseValidationResult License => _license ?? throw new InvalidOperationException("License is not ready.");
     public ProcessingRegistry ProcessingModules => _registry ?? throw new InvalidOperationException("Processing registry is not ready.");
     public bool IsReady { get; private set; }
@@ -90,9 +95,12 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             _license = LicenseValidator.Load(_paths.LicensePath);
             _faceDatabase = FaceDatabase.Load(_paths.FaceDatabasePath);
             _faceModule = new FaceModule(_faceDatabase, _license);
+            _palmDatabase = PalmDatabase.Load(_paths.PalmDatabasePath);
+            _palmModule = new PalmModule(_palmDatabase, _license);
             _registry = new ProcessingRegistry();
             _registry.Register(PlateModule.CreateRegistration(_license));
             _registry.Register(_faceModule.CreateRegistration());
+            _registry.Register(_palmModule.CreateRegistration());
 
             _eventWorker = Task.Run(() => ProcessEventQueueAsync(_shutdown.Token), CancellationToken.None);
             _associationTimer.Change(500, 500);
@@ -139,6 +147,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             try { await _eventWorker.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); } catch { }
         }
         _faceDatabase?.Dispose();
+        _palmDatabase?.Dispose();
         _eventStore.Dispose();
         _associationTimer.Dispose();
         try { await MediaMtxRuntime.Shared.StopAsync().WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); } catch { }
@@ -330,12 +339,44 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         }
     }
 
+    public async Task<PalmSample> EnrollPalmSampleAsync(string? personId, string? personName, byte[] image, string fileName, CancellationToken cancellationToken)
+    {
+        if (image.Length == 0) throw new InvalidDataException("Palm image is empty.");
+        CameraProcessingSettings processing = FindPalmProcessingSettings();
+        using PalmPipeline pipeline = PalmModule.CreatePipeline(processing, maxFpsOverride: 0, requireRecognition: true)
+            ?? throw new InvalidOperationException("Palm detection or recognition model is unavailable.");
+
+        string temporaryPath = Path.Combine(Paths.MediaDirectory, $"palm-enroll-{Guid.NewGuid():N}{Path.GetExtension(fileName)}");
+        await File.WriteAllBytesAsync(temporaryPath, image, cancellationToken);
+        try
+        {
+            using Mat source = CvInvoke.Imread(temporaryPath, ImreadModes.AnyColor);
+            PalmEnrollment enrollment = pipeline.CreateEnrollment(source);
+            PalmIdentity? person = string.IsNullOrWhiteSpace(personId) ? null : PalmDatabase.Identities.FirstOrDefault(item => item.Id == personId);
+            if (person is null && string.IsNullOrWhiteSpace(personName)) throw new InvalidOperationException("A palm owner id or name is required.");
+            return PalmDatabase.RegisterSample(person?.Name ?? personName!, enrollment.Embedding, enrollment.PalmImage,
+                Path.GetFileName(fileName), personId: person?.Id, detectionConfidence: enrollment.DetectionConfidence);
+        }
+        finally
+        {
+            try { File.Delete(temporaryPath); } catch { }
+        }
+    }
+
     private CameraProcessingSettings FindFaceProcessingSettings()
     {
         CameraProcessingSettings? item = _settings.Cameras
             .SelectMany(camera => camera.Rois.SelectMany(roi => roi.Processing))
             .FirstOrDefault(item => item.Enabled && item.Kind == ProcessingType.Face);
         return item ?? throw new InvalidOperationException("At least one enabled Face processing task is required for enrollment.");
+    }
+
+    private CameraProcessingSettings FindPalmProcessingSettings()
+    {
+        CameraProcessingSettings? item = _settings.Cameras
+            .SelectMany(camera => camera.Rois.SelectMany(roi => roi.Processing))
+            .FirstOrDefault(item => item.Enabled && item.Kind == ProcessingType.Palm);
+        return item ?? throw new InvalidOperationException("At least one enabled Palm processing task is required for enrollment.");
     }
 
     private Camera CreateCamera(CameraSettings settings)
@@ -385,7 +426,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private void Camera_PipelineResultsReady(CameraRuntime camera, IReadOnlyList<AnalysisDetection> detections)
     {
         AnalysisDetection[] accepted = detections
-            .Where(detection => (detection.Kind == AnalysisKind.Plate || detection.Kind == AnalysisKind.Face) && IsAccepted(detection))
+            .Where(detection => (detection.Kind == AnalysisKind.Plate || detection.Kind == AnalysisKind.Face || detection.Kind == AnalysisKind.Palm) && IsAccepted(detection))
             .ToArray();
         accepted = FilterRepeatedDetections(camera.Settings.Id, accepted);
         if (accepted.Length == 0) return;
@@ -671,7 +712,12 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 firstFrame = false;
             }
 
-            string cropType = component.Detection.Kind == AnalysisKind.Face ? "DetectionCrop" : "PlateCrop";
+            string cropType = component.Detection.Kind switch
+            {
+                AnalysisKind.Face => "DetectionCrop",
+                AnalysisKind.Palm => "PalmCrop",
+                _ => "PlateCrop"
+            };
             envelope.Artifacts.Add(_artifactStore.SaveBitmap(eventId, cropType, component.Crop, component.SourceFrameSequence, retention));
 
             if (TryGetMetadataBytes(component.Detection, "AlignedFaceJpeg", out byte[]? alignedFace) && alignedFace is not null)
@@ -704,6 +750,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         string roiId = GetMetadataString(primary.Detection, "RoiId") ?? string.Empty;
         bool hasPlate = work.Components.Any(item => item.Detection.Kind == AnalysisKind.Plate);
         bool hasFace = work.Components.Any(item => item.Detection.Kind == AnalysisKind.Face);
+        bool hasPalm = work.Components.Any(item => item.Detection.Kind == AnalysisKind.Palm);
 
         var envelope = new DetectionEventEnvelope
         {
@@ -712,10 +759,12 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                 ? "PlateFaceMatched"
                 : hasFace
                     ? (IsUnknown(primary.Detection) ? "FaceUnknown" : "FaceRecognized")
-                    : "PlateDetected",
+                    : hasPalm
+                        ? (IsUnknown(primary.Detection) ? "PalmUnknown" : "PalmRecognized")
+                        : "PlateDetected",
             Scenario = hasPlate && hasFace
                 ? "PlateFaceAssociation"
-                : hasFace ? "FaceRecognition" : "PlateOnly",
+                : hasFace ? "FaceRecognition" : hasPalm ? "PalmRecognition" : "PlateOnly",
             OccurredAtUtc = work.Timestamp,
             ReceivedAtUtc = DateTime.UtcNow,
             Source = new JsonObject
@@ -750,7 +799,12 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
 
         foreach (PendingComponent component in work.Components)
         {
-            string key = component.Detection.Kind == AnalysisKind.Face ? "face" : "plate";
+            string key = component.Detection.Kind switch
+            {
+                AnalysisKind.Face => "face",
+                AnalysisKind.Palm => "palm",
+                _ => "plate"
+            };
             envelope.Components[key] = BuildDetectionComponent(component.Detection, component.FullFrame.Size);
         }
 
@@ -800,6 +854,25 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             component["recognitionModel"] = GetMetadataString(detection, "RecognitionModel");
             component["hasCharacterDetails"] = GetMetadataBool(detection, "HasCharacterDetails");
             component["characters"] = GetMetadataNode(detection, "Characters") ?? new JsonArray();
+        }
+        else if (detection.Kind == AnalysisKind.Palm)
+        {
+            string? identityId = GetMetadataString(detection, "IdentityId");
+            float similarity = GetMetadataFloat(detection, "Similarity");
+            bool recognized = GetMetadataBool(detection, "Recognized");
+            bool unknown = string.IsNullOrWhiteSpace(identityId) || detection.Label.StartsWith("Unknown", StringComparison.OrdinalIgnoreCase);
+            component["label"] = !recognized ? "Palm" : unknown ? "Unknown" : detection.Label;
+            component["recognitionStatus"] = !recognized ? "NotAttempted" : unknown ? "Unknown" : "Matched";
+            component["recognition"] = new JsonObject
+            {
+                ["personId"] = unknown || !recognized ? null : identityId,
+                ["name"] = unknown || !recognized ? null : detection.Label,
+                ["personNumber"] = unknown || !recognized ? 0 : GetMetadataInt(detection, "PersonNumber"),
+                ["isUnknown"] = unknown,
+                ["similarity"] = recognized && !unknown ? similarity : null,
+                ["minimumSimilarity"] = GetMetadataFloat(detection, "PalmRecognitionThreshold"),
+                ["matchedSampleId"] = unknown || !recognized ? null : GetMetadataString(detection, "MatchedSampleId")
+            };
         }
 
         return component;

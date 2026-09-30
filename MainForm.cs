@@ -4,6 +4,7 @@ using Emgu.CV;
 using Emgu.CV.CvEnum;
 using HshDetectionEngin.Face;
 using HshDetectionEngin.Licensing;
+using HshDetectionEngin.Palm;
 using HshDetectionEngin.Plate;
 
 namespace HshVisionLab;
@@ -13,8 +14,11 @@ public sealed partial class MainForm : Form
     private readonly AppSettings _appSettings;
     private readonly FaceDatabase _faceDatabase;
     private readonly string _faceDatabasePath;
+    private readonly PalmDatabase _palmDatabase;
+    private readonly string _palmDatabasePath;
     private readonly LicenseValidationResult _license;
     private readonly FaceModule _faceModule;
+    private readonly PalmModule _palmModule;
     private readonly ProcessingRegistry _processingCatalog;
     private readonly Dictionary<string, CameraRuntime> _cameras = new();
     private readonly Dictionary<string, Bitmap> _latestFrames = new();
@@ -36,10 +40,13 @@ public sealed partial class MainForm : Form
     {
         _appSettings = AppSettings.Load();
         _faceDatabasePath = Path.Combine(AppContext.BaseDirectory, "face-database.db");
+        _palmDatabasePath = Path.Combine(AppContext.BaseDirectory, "palm-database.db");
         _license = LicenseValidator.Load(Path.Combine(AppContext.BaseDirectory, "license.hshlic"));
         _faceDatabase = FaceDatabase.Load(_faceDatabasePath);
+        _palmDatabase = PalmDatabase.Load(_palmDatabasePath);
         _faceModule = new FaceModule(_faceDatabase, _license);
-        _processingCatalog = CreateProcessingCatalog(_faceModule, _license);
+        _palmModule = new PalmModule(_palmDatabase, _license);
+        _processingCatalog = CreateProcessingCatalog(_faceModule, _palmModule, _license);
         BuildUi();
         UiLocalization.Apply(this);
         _btnLanguage.Text = UiLocalization.IsPersian ? "English" : "فارسی";
@@ -149,11 +156,12 @@ public sealed partial class MainForm : Form
         _cameras.Add(settings.Id, runtime);
     }
 
-    private static ProcessingRegistry CreateProcessingCatalog(FaceModule faceModule, LicenseValidationResult license)
+    private static ProcessingRegistry CreateProcessingCatalog(FaceModule faceModule, PalmModule palmModule, LicenseValidationResult license)
     {
         var catalog = new ProcessingRegistry();
         catalog.Register(PlateModule.CreateRegistration(license));
         catalog.Register(faceModule.CreateRegistration());
+        catalog.Register(palmModule.CreateRegistration());
         return catalog;
     }
 
@@ -246,6 +254,84 @@ public sealed partial class MainForm : Form
     {
         using var form = new FaceDatabaseForm(_faceDatabase, RegisterFaceFromImage, ImportFacesFromFolder, AddFaceSampleToPerson);
         form.ShowDialog(this);
+    }
+
+    private void ManagePalmDatabase()
+    {
+        using var form = new PalmDatabaseForm(_palmDatabase, RegisterPalmFromImage, AddPalmSampleToPerson);
+        form.ShowDialog(this);
+    }
+
+    private bool TryGetPalmProcessingContext(out CameraRuntime? camera, out CameraProcessingSettings? processing)
+    {
+        IEnumerable<CameraRuntime> candidates = _active is null
+            ? _cameras.Values
+            : new[] { _active }.Concat(_cameras.Values.Where(item => !ReferenceEquals(item, _active)));
+
+        foreach (CameraRuntime candidate in candidates)
+        {
+            if (!candidate.Settings.Enabled) continue;
+            candidate.Settings.EnsureProcessingDefaults();
+            CameraProcessingSettings? item = candidate.Settings.Rois
+                .SelectMany(roi => roi.Processing)
+                .FirstOrDefault(value => value.Enabled && value.Kind == ProcessingType.Palm);
+            if (item is not null)
+            {
+                camera = candidate;
+                processing = item;
+                return true;
+            }
+        }
+
+        camera = null;
+        processing = null;
+        return false;
+    }
+
+    private bool RegisterPalmFromImage(string name, string imagePath)
+    {
+        if (!TryGetPalmProcessingContext(out _, out CameraProcessingSettings? processing) || processing is null)
+        {
+            MessageBox.Show(this, "Enable Palm processing on at least one camera first.", "Palm database", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
+
+        PalmPipeline? pipeline = _palmModule.CreatePipeline(processing, maxFpsOverride: 0, requireRecognition: true);
+        if (pipeline is null)
+        {
+            MessageBox.Show(this, "Palm detection or recognition model is unavailable.", "Palm database", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        try
+        {
+            using Mat image = CvInvoke.Imread(imagePath, ImreadModes.AnyColor);
+            using (pipeline) pipeline.RegisterIdentity(name, image, Path.GetFileName(imagePath));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Palm database", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
+        }
+    }
+
+    private bool AddPalmSampleToPerson(string personId, string imagePath)
+    {
+        PalmIdentity? person = _palmDatabase.Identities.FirstOrDefault(item => item.Id == personId);
+        if (person is null) throw new InvalidOperationException("The selected palm identity no longer exists.");
+        if (!TryGetPalmProcessingContext(out _, out CameraProcessingSettings? processing) || processing is null)
+            throw new InvalidOperationException("Enable Palm processing on at least one camera first.");
+        PalmPipeline? pipeline = _palmModule.CreatePipeline(processing, maxFpsOverride: 0, requireRecognition: true)
+            ?? throw new InvalidOperationException("Palm detection or recognition model is unavailable.");
+        using (pipeline)
+        using (Mat image = CvInvoke.Imread(imagePath, ImreadModes.AnyColor))
+        {
+            PalmEnrollment enrollment = pipeline.CreateEnrollment(image);
+            _palmDatabase.RegisterSample(person.Name, enrollment.Embedding, enrollment.PalmImage,
+                Path.GetFileName(imagePath), personId: person.Id, detectionConfidence: enrollment.DetectionConfidence);
+        }
+        return true;
     }
 
     private bool TryGetFaceProcessingContext(out CameraRuntime? camera, out CameraProcessingSettings? processing)
@@ -594,6 +680,7 @@ public sealed partial class MainForm : Form
         }
 
         _faceDatabase.Dispose();
+        _palmDatabase.Dispose();
 
         base.OnFormClosing(e);
     }

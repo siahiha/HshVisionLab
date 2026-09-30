@@ -32,6 +32,7 @@ public sealed class ServicePaths
     public string DetectionSettingsPath => Path.Combine(ConfigDirectory, "settings.json");
     public string ServiceSettingsPath => Path.Combine(ConfigDirectory, "service-settings.json");
     public string FaceDatabasePath => Path.Combine(DatabaseDirectory, "face-database.db");
+    public string PalmDatabasePath => Path.Combine(DatabaseDirectory, "palm-database.db");
     public string EventDatabasePath => Path.Combine(DatabaseDirectory, "events.db");
     public string LicensePath => Path.Combine(LicenseDirectory, "license.hshlic");
 

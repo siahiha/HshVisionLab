@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Drawing;
 using HshDetectionEngin;
 using HshDetectionEngin.Face;
+using HshDetectionEngin.Palm;
 using HshDetectionEngin.Plate;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.SignalR;
@@ -552,6 +553,29 @@ public static class ServiceApi
             string path = Path.Combine(host.Paths.BackupDirectory, $"face-database-{DateTime.UtcNow:yyyyMMdd-HHmmss}.db");
             host.FaceDatabase.Save(path);
             return Results.Ok(new { path, sizeBytes = new FileInfo(path).Length });
+        });
+
+        app.MapGet("/api/v1/palm/people", (DetectionRuntimeHost host) => Results.Ok(host.PalmDatabase.Identities));
+        app.MapGet("/api/v1/palm/people/{personId}/samples", (string personId, DetectionRuntimeHost host) =>
+            Results.Ok(host.PalmDatabase.GetSamples().Where(sample => sample.PersonId == personId)));
+        app.MapGet("/api/v1/palm/database/health", (DetectionRuntimeHost host) => Results.Ok(new
+        {
+            databasePath = host.PalmDatabase.DatabasePath,
+            people = host.PalmDatabase.Identities.Count,
+            samples = host.PalmDatabase.GetSamples().Count,
+            sizeBytes = File.Exists(host.PalmDatabase.DatabasePath) ? new FileInfo(host.PalmDatabase.DatabasePath).Length : 0
+        }));
+        app.MapPost("/api/v1/palm/samples", async (HttpRequest request, DetectionRuntimeHost host, CancellationToken cancellationToken) =>
+        {
+            IFormCollection form = await request.ReadFormAsync(cancellationToken);
+            IFormFile? file = form.Files.FirstOrDefault();
+            if (file is null || file.Length == 0) return Results.BadRequest(new { error = "An image file is required." });
+            string? personId = form["personId"].FirstOrDefault();
+            string? personName = form["personName"].FirstOrDefault();
+            await using var stream = new MemoryStream();
+            await file.CopyToAsync(stream, cancellationToken);
+            PalmSample sample = await host.EnrollPalmSampleAsync(personId, personName, stream.ToArray(), file.FileName, cancellationToken);
+            return Results.Ok(sample);
         });
 
         app.MapPost("/api/v1/face/people/{personId}/samples", async (HttpRequest request, string personId, DetectionRuntimeHost host, CancellationToken cancellationToken) =>

@@ -268,7 +268,9 @@ public class CameraSettings
             item.Options ??= [];
             item.Type = NormalizeProcessingType(item.Type);
             item.Name = string.IsNullOrWhiteSpace(item.Name)
-                ? item.Kind == ProcessingType.Face ? "Face detection" : "Plate detection"
+                ? item.Kind == ProcessingType.Face ? "Face detection"
+                    : item.Kind == ProcessingType.Palm ? "Palm detection and recognition"
+                    : "Plate detection"
                 : item.Name.Trim();
             item.MaxFps = Math.Clamp(
                 item.MaxFps <= 0 ? item.Kind == ProcessingType.Face ? FaceMaxFps : MaxFps : item.MaxFps,
@@ -283,6 +285,7 @@ public class CameraSettings
     {
         ProcessingType parsed = ProcessingType.Parse(value);
         if (parsed == ProcessingType.Face) return ProcessingType.Face.Value;
+        if (parsed == ProcessingType.Palm) return ProcessingType.Palm.Value;
         if (parsed == ProcessingType.Plate || string.IsNullOrWhiteSpace(parsed.Value)) return ProcessingType.Plate.Value;
         return parsed.Value;
     }
@@ -299,15 +302,18 @@ public class CameraSettings
     {
         ProcessingType normalizedType = string.IsNullOrWhiteSpace(type.Value) ? ProcessingType.Plate : type;
         bool face = normalizedType == ProcessingType.Face;
+        bool palm = normalizedType == ProcessingType.Palm;
         return new CameraProcessingSettings
         {
             Type = normalizedType.Value,
-            Name = name ?? (face ? "Face detection" : normalizedType.Value),
+            Name = name ?? (face ? "Face detection" : palm ? "Palm detection and recognition" : normalizedType.Value),
             Enabled = true,
             MaxFps = face ? FaceMaxFps : MaxFps,
             Threads = Threads,
             Options = face
                 ? CreateFaceProcessingOptions()
+                : palm
+                    ? CreatePalmProcessingOptions()
                 : normalizedType == ProcessingType.Plate
                     ? CreatePlateProcessingOptions()
                     : []
@@ -343,6 +349,9 @@ public class CameraSettings
             UnknownMatchThreshold = FaceUnknownMatchThreshold,
             EventCooldownSeconds = FaceEventCooldownSeconds
         }, JsonOpts)?.AsObject() ?? [];
+
+    private JsonObject CreatePalmProcessingOptions() =>
+        JsonSerializer.SerializeToNode(new PalmProcessingOptions(), JsonOpts)?.AsObject() ?? [];
 
     public CameraSettings CreateEffectiveSettings(CameraProcessingSettings item)
     {
