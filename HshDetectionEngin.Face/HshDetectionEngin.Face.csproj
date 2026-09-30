@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\HshDetectionEngin.Abstractions\HshDetectionEngin.Abstractions.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin.Identity\HshDetectionEngin.Identity.csproj" />
     <ProjectReference Include="..\HshDetectionEngin.Licensing\HshDetectionEngin.Licensing.csproj" />
     <PackageReference Include="Emgu.CV" Version="4.13.0.5924" />
     <PackageReference Include="Emgu.CV.Bitmap" Version="4.13.0.5924" />

@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Emgu.CV;
 using Emgu.CV.CvEnum;
 using HshDetectionEngin.Face;
+using HshDetectionEngin.Identity;
 using HshDetectionEngin.Licensing;
 using HshDetectionEngin.Palm;
 using HshDetectionEngin.Plate;
@@ -13,9 +14,9 @@ public sealed partial class MainForm : Form
 {
     private readonly AppSettings _appSettings;
     private readonly FaceDatabase _faceDatabase;
-    private readonly string _faceDatabasePath;
+    private readonly IdentityDatabase _identityDatabase;
+    private readonly string _identityDatabasePath;
     private readonly PalmDatabase _palmDatabase;
-    private readonly string _palmDatabasePath;
     private readonly LicenseValidationResult _license;
     private readonly FaceModule _faceModule;
     private readonly PalmModule _palmModule;
@@ -39,11 +40,14 @@ public sealed partial class MainForm : Form
     public MainForm(bool deferStartupInitialization = true)
     {
         _appSettings = AppSettings.Load();
-        _faceDatabasePath = Path.Combine(AppContext.BaseDirectory, "face-database.db");
-        _palmDatabasePath = Path.Combine(AppContext.BaseDirectory, "palm-database.db");
+        _identityDatabasePath = Path.Combine(AppContext.BaseDirectory, "identity-database.db");
         _license = LicenseValidator.Load(Path.Combine(AppContext.BaseDirectory, "license.hshlic"));
-        _faceDatabase = FaceDatabase.Load(_faceDatabasePath);
-        _palmDatabase = PalmDatabase.Load(_palmDatabasePath);
+        _identityDatabase = IdentityDatabase.Load(
+            _identityDatabasePath,
+            Path.Combine(AppContext.BaseDirectory, "face-database.db"),
+            Path.Combine(AppContext.BaseDirectory, "palm-database.db"));
+        _faceDatabase = FaceDatabase.FromStore(_identityDatabase);
+        _palmDatabase = PalmDatabase.FromStore(_identityDatabase);
         _faceModule = new FaceModule(_faceDatabase, _license);
         _palmModule = new PalmModule(_palmDatabase, _license);
         _processingCatalog = CreateProcessingCatalog(_faceModule, _palmModule, _license);
@@ -250,15 +254,11 @@ public sealed partial class MainForm : Form
         SafeInvoke(() => AddPlateCard(crop, camera.Settings.Name, label, item.Detection.Confidence, item.Timestamp));
     }
 
-    private void ManageFaceDatabase()
+    private void ManageIdentityDatabase()
     {
-        using var form = new FaceDatabaseForm(_faceDatabase, RegisterFaceFromImage, ImportFacesFromFolder, AddFaceSampleToPerson);
-        form.ShowDialog(this);
-    }
-
-    private void ManagePalmDatabase()
-    {
-        using var form = new PalmDatabaseForm(_palmDatabase, RegisterPalmFromImage, AddPalmSampleToPerson);
+        using var form = new IdentityDatabaseForm(_identityDatabase, _faceDatabase, _palmDatabase,
+            RegisterFaceFromImage, AddFaceSampleToPerson, ImportFacesFromFolder,
+            RegisterPalmFromImage, AddPalmSampleToPerson);
         form.ShowDialog(this);
     }
 
@@ -380,7 +380,7 @@ public sealed partial class MainForm : Form
             using Mat image = CvInvoke.Imread(imagePath, ImreadModes.AnyColor);
             using (pipeline)
             {
-                pipeline.RegisterIdentity(name, image, _faceDatabasePath, Path.GetFileName(imagePath));
+                pipeline.RegisterIdentity(name, image, _identityDatabasePath, Path.GetFileName(imagePath));
             }
             return true;
         }
@@ -410,7 +410,7 @@ public sealed partial class MainForm : Form
             FaceEnrollment enrollment = pipeline.CreateEnrollment(image);
             _faceDatabase.RegisterSample(person.Name, enrollment.Embedding, enrollment.FaceImage,
                 Path.GetFileName(imagePath), personId: person.Id, detectionConfidence: enrollment.DetectionConfidence);
-            _faceDatabase.Save(_faceDatabasePath);
+            _faceDatabase.Save(_identityDatabasePath);
         }
         return true;
     }
@@ -679,8 +679,7 @@ public sealed partial class MainForm : Form
             camera.Dispose();
         }
 
-        _faceDatabase.Dispose();
-        _palmDatabase.Dispose();
+        _identityDatabase.Dispose();
 
         base.OnFormClosing(e);
     }

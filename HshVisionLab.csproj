@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="HshDetectionEngin.Face\HshDetectionEngin.Face.csproj" />
+    <ProjectReference Include="HshDetectionEngin.Identity\HshDetectionEngin.Identity.csproj" />
     <ProjectReference Include="HshDetectionEngin.Palm\HshDetectionEngin.Palm.csproj" />
     <ProjectReference Include="HshDetectionEngin.Plate\HshDetectionEngin.Plate.csproj" />
     <ProjectReference Include="HshDetectionEngin\HshDetectionEngin.csproj" />
@@ -111,6 +112,7 @@
     <Compile Remove="HshDetectionEngin.Abstractions\**\*.cs" />
     <Compile Remove="HshDetectionEngin.Plate\**\*.cs" />
     <Compile Remove="HshDetectionEngin.Face\**\*.cs" />
+    <Compile Remove="HshDetectionEngin.Identity\**\*.cs" />
     <Compile Remove="HshDetectionEngin.Palm\**\*.cs" />
     <Compile Remove="HshDetectionEngin.Licensing\**\*.cs" />
     <!-- Old build artifacts can remain after removing the legacy CLI project. -->

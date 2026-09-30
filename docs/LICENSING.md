@@ -8,7 +8,7 @@
 
 - `LicenseId`، نام مشتری و `MachineId`
 - بازهٔ `NotBeforeUtc` تا `ExpiresUtc`
-- featureهای `Plate` و `Face`
+- featureهای `Plate`، `Face` و `Palm`
 
 امضا با RSA و SHA-256 ساخته می‌شود. `LicenseValidator` کلید عمومی کامپایل‌شده در [Licensing.cs](../HshDetectionEngin.Licensing/Licensing.cs) را استفاده می‌کند، سپس امضا، بازهٔ تاریخ و شناسهٔ دستگاه را بررسی می‌کند. نبود فایل، امضای نامعتبر، انقضا یا دستگاه متفاوت، لایسنس را نامعتبر می‌کند.
 
@@ -36,7 +36,7 @@
 
 - فرم اصلی مشتریان جدول شرکت، رابط، تلفن، موبایل و تعداد لایسنس‌ها را نشان می‌دهد. `New customer`، `Edit`، `Manage licenses`، `Delete` و کادر `Search customers...` عملیات اصلی آن هستند؛ دوبارکلیک ردیف نیز مدیریت لایسنس همان مشتری را باز می‌کند. مشتری دارای لایسنس قابل حذف نیست.
 - پنجرهٔ ساخت/ویرایش مشتری فیلدهای نام شرکت اجباری، نام رابط، تلفن، موبایل، آدرس و توضیحات دارد. ذخیره بدون نام شرکت با پیام هشدار متوقف می‌شود.
-- پنجرهٔ `Licenses - <company>` دو بخش دارد: فرم صدور و آرشیو. فرم صدور مسیر private key، درخواست مشتری، تاریخ انقضا و checkboxهای `Plate detection` و `Face detection and recognition` را دارد. `Browse...` کلید PEM را انتخاب و مسیر آخرین انتخاب را نگه می‌دارد؛ `Generate pair...` private/public PEM تولید می‌کند و مسیر public key را برای جایگزینی در `LicenseValidator.PublicKeyPem` گزارش می‌دهد.
+- پنجرهٔ `Licenses - <company>` دو بخش دارد: فرم صدور و آرشیو. فرم صدور مسیر private key، درخواست مشتری، تاریخ انقضا و checkboxهای `Plate detection`، `Face detection and recognition` و `Palm detection and recognition` را دارد. `Browse...` کلید PEM را انتخاب و مسیر آخرین انتخاب را نگه می‌دارد؛ `Generate pair...` private/public PEM تولید می‌کند و مسیر public key را برای جایگزینی در `LicenseValidator.PublicKeyPem` گزارش می‌دهد.
 - `Issue and archive license` ابتدا request معتبر، کلید موجود و حداقل یک feature را بررسی می‌کند، سپس فایل را در آرشیو می‌سازد و metadata را ذخیره می‌کند. جدول آرشیو زمان صدور، featureها، تاریخ انقضا، device و مسیر فایل را نشان می‌دهد؛ `Save selected license as...` فقط ردیف انتخاب‌شده را به مسیر دلخواه با پسوند `.hshlic` کپی می‌کند.
 
 ## ابزار صادرکننده و آرشیو
@@ -58,7 +58,7 @@ LicenseIssuer فقط روی workstation امن صادرکننده استفاده
 
 ## مرز توزیع
 
-بستهٔ اولیهٔ مشتری باید runtime، مدل‌های package شده و `license.hshlic` را داشته باشد. `face-database.db` فایل SQLite دادهٔ runtime است و در صورت استفاده از ثبت هویت، کنار executable ایجاد و نگهداری می‌شود؛ تصویر crop‌شده و embedding نیز داخل همین فایل هستند و این فایل بخشی از ابزار صادرکننده نیست. `face-database.json` قدیمی در اولین اجرای نسخهٔ جدید فقط برای مهاجرت خوانده می‌شود. این موارد نباید به مشتری داده شوند:
+بستهٔ اولیهٔ مشتری باید runtime، مدل‌های package شده و `license.hshlic` را داشته باشد. `identity-database.db` فایل SQLite دادهٔ runtime است و در صورت استفاده از ثبت هویت، کنار executable ایجاد و نگهداری می‌شود؛ اطلاعات شخص، پلاک، تصویر crop‌شده و embeddingهای Face/Palm داخل همین فایل هستند و این فایل بخشی از ابزار صادرکننده نیست. `face-database.db` و `palm-database.db` قدیمی در اولین اجرای نسخهٔ جدید فقط برای مهاجرت خوانده می‌شوند. این موارد نباید به مشتری داده شوند:
 
 - `vendor-private.pem` یا هر private key دیگر
 - `HshDetectionEngin.LicenseIssuer.exe`

@@ -35,7 +35,7 @@ POST /api/v1/service/reload
 POST /api/v1/service/validate-configuration
 ```
 
-`ready` فقط وقتی موفق باشد که configuration، license، مدل‌های لازم و Face Database آماده باشند. status باید وضعیت هر camera، task، pipeline، stream و queue را جداگانه نشان دهد.
+`ready` فقط وقتی موفق باشد که configuration، license، مدل‌های لازم و Identity Database آماده باشند. status باید وضعیت هر camera، task، pipeline، stream و queue را جداگانه نشان دهد.
 
 در پیاده‌سازی فعلی `GET /api/v1/service/status` علاوه بر `eventSequence` مقدار `droppedEventCount` را برمی‌گرداند. این مقدار تعداد رخدادهایی است که به‌علت پرشدن صف bounded ذخیره‌سازی کنار گذاشته شده‌اند؛ صفر بودن آن نشانهٔ عقب‌نماندن worker ذخیره‌سازی است.
 
@@ -135,9 +135,9 @@ GET /api/v1/models/{capability}
 
 آپلود مدل در نسخهٔ اول از API انجام نشود؛ مدل‌ها بخشی از deployment هستند و API فقط آن‌ها را فهرست و validate می‌کند.
 
-## 7. Face Database
+## 7. Identity Database
 
-سرویس تنها مالک `FaceDatabase` است. API باید به جای دادن embedding خام به UI، enrollment را در خود سرویس انجام دهد تا مدل، alignment و threshold یکسان بمانند.
+سرویس تنها مالک `IdentityDatabase` است. این دیتابیس، شخص، پلاک‌ها، نمونه‌های چهره و نمونه‌های کف‌دست را در یک فایل نگه می‌دارد. routeهای `face` برای سازگاری API باقی مانده‌اند، اما personId آن‌ها به همان شخص مشترک با Palm و Plate اشاره می‌کند. API باید به جای دادن embedding خام به UI، enrollment را در خود سرویس انجام دهد تا مدل، alignment و threshold یکسان بمانند.
 
 ```text
 GET    /api/v1/face/people
@@ -161,7 +161,18 @@ POST   /api/v1/face/database/backup
 POST   /api/v1/face/database/restore
 ```
 
-`POST /samples` باید multipart image بگیرد، یک چهرهٔ معتبر را detect و align کند، embedding را در سرویس تولید و سپس با `FaceDatabase.RegisterSample` ذخیره کند. embedding ارسالی از UI فقط برای migration کنترل‌شده پذیرفته شود.
+`POST /samples` باید multipart image بگیرد، یک چهرهٔ معتبر را detect و align کند، embedding را در سرویس تولید و سپس در `IdentityDatabase` ذخیره کند. embedding ارسالی از UI فقط برای migration کنترل‌شده پذیرفته شود.
+
+### Palm و اشخاص مشترک
+
+```text
+GET  /api/v1/palm/people
+GET  /api/v1/palm/people/{personId}/samples
+GET  /api/v1/palm/database/health
+POST /api/v1/palm/samples
+```
+
+در `POST /api/v1/palm/samples`، `personId` می‌تواند به شخصی اشاره کند که قبلاً از Face یا مدیریت پلاک ایجاد شده است؛ در صورت نبود آن، سرویس می‌تواند بر اساس `personName` شخص را ایجاد کند. Palm person database جداگانه‌ای ندارد. Web UI فعلاً در این تغییرات دست‌نخورده است و این routeها قرارداد سرویس/Backend هستند.
 
 ## 8. Trigger و Webhook
 

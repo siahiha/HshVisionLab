@@ -9,12 +9,12 @@
 سرویس مسئول موارد زیر است:
 
 - اتصال و reconnect مستقل برای دوربین‌ها
-- اجرای pipelineهای Plate و Face فعلی
+- اجرای pipelineهای Plate، Face و Palm فعلی
 - زمان‌بندی و محدودکردن نرخ inference
 - نگهداری آخرین فریم و آخرین وضعیت Drawing
 - تولید و ذخیرهٔ رخدادهای معتبر
 - اجرای Triggerها و تحویل قابل‌اعتماد رخداد
-- API مدیریت تنظیمات و Face Database
+- API مدیریت تنظیمات و Identity Database مشترک اشخاص، پلاک‌ها، Face و Palm
 - انتشار stream تصویری از طریق WebRTC
 - احراز هویت، health check، logging و metrics
 
@@ -29,6 +29,8 @@ HshDetectionService
  ├── HshDetectionEngin
  ├── HshDetectionEngin.Abstractions
  ├── HshDetectionEngin.Face
+ ├── HshDetectionEngin.Palm
+ ├── HshDetectionEngin.Identity
  ├── HshDetectionEngin.Plate
  └── HshDetectionEngin.Licensing
 ```
@@ -37,8 +39,8 @@ HshDetectionService
 
 1. مسیرهای داده را resolve می‌کند.
 2. تنظیمات و license را validate می‌کند.
-3. `FaceDatabase` را یک‌بار باز می‌کند.
-4. `PlateModule` و `FaceModule` را در `ProcessingRegistry` ثبت می‌کند.
+3. `IdentityDatabase` را یک‌بار باز می‌کند و adapterهای Face/Palm را روی همان storage می‌سازد.
+4. `PlateModule`، `FaceModule` و `PalmModule` را در `ProcessingRegistry` ثبت می‌کند.
 5. برای هر دوربین یک `CameraRuntime` می‌سازد.
 6. از رویدادهای runtime یک adapter سرویس ایجاد می‌کند.
 7. دوربین‌ها را مستقل start می‌کند.

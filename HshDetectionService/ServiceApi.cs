@@ -550,7 +550,7 @@ public static class ServiceApi
         }));
         app.MapPost("/api/v1/face/database/backup", (DetectionRuntimeHost host) =>
         {
-            string path = Path.Combine(host.Paths.BackupDirectory, $"face-database-{DateTime.UtcNow:yyyyMMdd-HHmmss}.db");
+            string path = Path.Combine(host.Paths.BackupDirectory, $"identity-database-{DateTime.UtcNow:yyyyMMdd-HHmmss}.db");
             host.FaceDatabase.Save(path);
             return Results.Ok(new { path, sizeBytes = new FileInfo(path).Length });
         });

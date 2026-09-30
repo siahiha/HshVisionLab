@@ -7,7 +7,7 @@
 خروجی:
 
 - تأیید data root
-- تأیید مالکیت service روی settings و Face Database
+- تأیید مالکیت service روی settings و Identity Database
 - تأیید مدل `Processing Item = Detection Task`
 - تأیید cursor/replay
 - تأیید API versioning و authentication
@@ -85,11 +85,11 @@
 - apply فقط runtime متاثر را rebuild کند.
 - دو client هم‌زمان باعث overwrite خاموش نشوند.
 
-## مرحلهٔ پنج: Face Database API
+## مرحلهٔ پنج: Identity Database API
 
 خروجی:
 
-- people/sample CRUD
+- people/plate/Face/Palm sample CRUD
 - enrollment از image
 - move/delete/rename
 - similarity search
@@ -154,8 +154,8 @@
 
 - انتخاب Local Mode یا Service Mode
 - اتصال به API
-- import اولیهٔ settings و Face Database
-- مدیریت دوربین، task، Face Database و trigger از UI
+- import اولیهٔ settings و Identity Database
+- مدیریت دوربین، task، Identity Database و trigger از UI
 - نمایش رخدادهای replayشده و live
 
 در Service Mode، UI نباید فایل‌های اصلی سرویس را با instance جداگانهٔ `FaceDatabase` باز کند.
@@ -170,6 +170,6 @@
 - کند شدن encoder
 - اتصال هم‌زمان چند WebRTC client
 - تغییر تنظیمات هم‌زمان از دو UI
-- restore نامعتبر Face Database
+- restore نامعتبر Identity Database
 - عدم دسترسی service account به مدل یا data root
 - عدم مجوز license برای Face یا Plate

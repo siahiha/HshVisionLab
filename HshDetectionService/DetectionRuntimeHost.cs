@@ -9,6 +9,7 @@ using Emgu.CV.CvEnum;
 using HshDetectionEngin;
 using HshDetectionEngin.Capture;
 using HshDetectionEngin.Face;
+using HshDetectionEngin.Identity;
 using HshDetectionEngin.Licensing;
 using HshDetectionEngin.Palm;
 using HshDetectionEngin.Plate;
@@ -37,6 +38,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _eventWorker;
     private FaceDatabase? _faceDatabase;
+    private IdentityDatabase? _identityDatabase;
     private FaceModule? _faceModule;
     private PalmDatabase? _palmDatabase;
     private PalmModule? _palmModule;
@@ -68,9 +70,9 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     public ServicePaths Paths => _paths;
     public EventStore Events => _eventStore;
     public ArtifactStore Artifacts => _artifactStore;
-    public FaceDatabase FaceDatabase => _faceDatabase ?? throw new InvalidOperationException("Face database is not ready.");
+    public FaceDatabase FaceDatabase => _faceDatabase ?? throw new InvalidOperationException("Identity database is not ready.");
     public FaceModule FaceModule => _faceModule ?? throw new InvalidOperationException("Face module is not ready.");
-    public PalmDatabase PalmDatabase => _palmDatabase ?? throw new InvalidOperationException("Palm database is not ready.");
+    public PalmDatabase PalmDatabase => _palmDatabase ?? throw new InvalidOperationException("Identity database is not ready.");
     public PalmModule PalmModule => _palmModule ?? throw new InvalidOperationException("Palm module is not ready.");
     public LicenseValidationResult License => _license ?? throw new InvalidOperationException("License is not ready.");
     public ProcessingRegistry ProcessingModules => _registry ?? throw new InvalidOperationException("Processing registry is not ready.");
@@ -93,9 +95,10 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             ServiceSettingsDocument service = _settingsStore.Service;
             _eventQueue = CreateEventQueue(service.Runtime?.MaxEventQueueLength ?? 10_000);
             _license = LicenseValidator.Load(_paths.LicensePath);
-            _faceDatabase = FaceDatabase.Load(_paths.FaceDatabasePath);
+            _identityDatabase = IdentityDatabase.Load(_paths.IdentityDatabasePath, _paths.FaceDatabasePath, _paths.PalmDatabasePath);
+            _faceDatabase = FaceDatabase.FromStore(_identityDatabase);
             _faceModule = new FaceModule(_faceDatabase, _license);
-            _palmDatabase = PalmDatabase.Load(_paths.PalmDatabasePath);
+            _palmDatabase = PalmDatabase.FromStore(_identityDatabase);
             _palmModule = new PalmModule(_palmDatabase, _license);
             _registry = new ProcessingRegistry();
             _registry.Register(PlateModule.CreateRegistration(_license));
@@ -146,8 +149,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         {
             try { await _eventWorker.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); } catch { }
         }
-        _faceDatabase?.Dispose();
-        _palmDatabase?.Dispose();
+        _identityDatabase?.Dispose();
         _eventStore.Dispose();
         _associationTimer.Dispose();
         try { await MediaMtxRuntime.Shared.StopAsync().WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); } catch { }

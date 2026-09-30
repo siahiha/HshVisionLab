@@ -4,7 +4,7 @@
 
 ## 1. خروجی مورد انتظار
 
-`HshVisionLab` یک برنامهٔ WinForms ویندوزی برای مدیریت هم‌زمان چند دوربین مستقل است. هر دوربین باید بتواند از RTSP، Webcam یا فایل ویدئویی فریم بگیرد، یک یا چند ROI چندضلعی را تحلیل کند، Motion Gate داشته باشد و قابلیت Plate، Face یا هر دو را اجرا کند.
+`HshVisionLab` یک برنامهٔ WinForms ویندوزی برای مدیریت هم‌زمان چند دوربین مستقل است. هر دوربین باید بتواند از RTSP، Webcam یا فایل ویدئویی فریم بگیرد، یک یا چند ROI چندضلعی را تحلیل کند، Motion Gate داشته باشد و قابلیت Plate، Face، Palm یا ترکیب آن‌ها را اجرا کند.
 
 رفتارهای ضروری محصول:
 
@@ -12,14 +12,16 @@
 - فریم‌های قدیمی برای حفظ latency حذف می‌شوند؛ سیستم برای پردازش همهٔ فریم‌ها طراحی نشده است.
 - Plate شامل YOLO، OCR پلاک ایرانی، track و history است.
 - Face شامل YuNet، track مبتنی بر IoU، شناسایی اختیاری SFace و پایگاه‌دادهٔ embedding محلی است.
+- Palm شامل BlazePalm/RTMDet، track، enrollment و شناسایی اختیاری CCNet/PPNet است.
+- Identity شامل یک SQLite مرکزی با `People`، `PersonPlates`، `FaceSamples` و `PalmSamples` و یک فرم Windows برای مدیریت همهٔ modalityهاست.
 - قابلیت‌ها فقط با لایسنس معتبر همان feature اجرا می‌شوند.
-- UI و بستهٔ مشتری نباید مدل خام ONNX/PyTorch، ابزار Python یا کلید خصوصی صادرکننده را داشته باشند.
+- UI و بستهٔ مشتری نباید مدل خام ONNX/PyTorch، ابزار Python یا کلید خصوصی صادرکننده را داشته باشند؛ مدل‌های raw detector Palm در نسخهٔ فعلی استثناء مستندشدهٔ runtime هستند و CCNet/PPNet جداگانه نصب می‌شود.
 
 تمام entry pointهای WinForms باید `Main` با `[STAThread]` داشته باشند؛ `SaveFileDialog`، Clipboard و سایر OLE APIها در thread غیر-STA خطا می‌دهند.
 
 ## 2. ساختار Solution و وابستگی‌ها
 
-فایل solution، `HshVisionLab.sln`، هشت پروژه دارد:
+فایل solution، `HshVisionLab.sln`، یازده پروژه دارد:
 
 | پروژه | خروجی | مسئولیت |
 | --- | --- | --- |
@@ -28,15 +30,19 @@
 | `HshDetectionEngin` | `HshDetectionEngin.dll` | capture، Motion، ROI، runtime loop، `CameraPipelineCoordinator` و policyهای render/overlay/history |
 | `HshDetectionEngin.Plate` | `HshDetectionEngin.Plate.dll` | YOLO، OCR، preprocessing، tracker و loader مدل Plate |
 | `HshDetectionEngin.Face` | `HshDetectionEngin.Face.dll` | YuNet، SFace، Face tracker، preprocessing و FaceDatabase |
+| `HshDetectionEngin.Palm` | `HshDetectionEngin.Palm.dll` | BlazePalm/RTMDet، palm tracker، enrollment و palmprint recognition |
+| `HshDetectionEngin.Identity` | `HshDetectionEngin.Identity.dll` | دیتابیس مرکزی People، پلاک‌ها و نمونه‌های modalityها |
 | `HshDetectionEngin.Licensing` | `HshDetectionEngin.Licensing.dll` | fingerprint دستگاه، درخواست، صدور و اعتبارسنجی لایسنس RSA |
 | `HshDetectionEngin.LicenseRequest` | `HshDetectionEngin.LicenseRequest.exe` | ابزار مشتری برای ساخت درخواست فعال‌سازی |
 | `HshDetectionEngin.LicenseIssuer` | `HshDetectionEngin.LicenseIssuer.exe` | ابزار امن صادرکننده برای مدیریت مشتری و صدور/آرشیو لایسنس |
 
 ```text
-HshVisionLab ─────────> Engin, Plate, Face, Abstractions
+HshVisionLab ─────────> Engin, Plate, Face, Palm, Identity, Abstractions
 Engin ────────────────> Abstractions, Licensing
 Plate ────────────────> Abstractions
 Face ─────────────────> Abstractions, Licensing
+Palm ─────────────────> Abstractions, Identity, Licensing
+Identity ─────────────> Microsoft.Data.Sqlite
 LicenseRequest ───────> Licensing
 LicenseIssuer ────────> Licensing
 ```
@@ -154,7 +160,7 @@ UI مقدار `InputSize` را از catalog مدل می‌گیرد و فقط ا�
 
 `FaceConfidence` threshold پذیرش detector و `FaceRecordConfidence` threshold ثبت رخداد/رنگ overlay است. Face فقط وقتی وارد tracking، recognition و history می‌شود که هم از `FaceConfidence` عبور کرده باشد و هم `FaceRecordConfidence` را پاس کند؛ بنابراین confidence پایین‌تر از threshold تشخیص، حتی اگر از record threshold بیشتر باشد، در لیست ثبت نمی‌شود. پیش‌فرض هر دو مقدار `0.80` است. تنظیمات موجود در `settings.json` برای حفظ انتخاب کاربر خودکار overwrite نمی‌شوند و در صورت نیاز باید Detection confidence از UI تنظیم شود. Face پایین‌تر از threshold پذیرش، در بازهٔ تصویری مجاز قرمز و Face قابل ثبت سبز نمایش داده می‌شود. متن شامل نام یا Unknown، TrackId و confidence است و زیر کادر قرار می‌گیرد؛ فقط در نزدیکی لبهٔ پایین به بالای آن منتقل می‌شود. برچسب Face با رسم Unicode/GDI+ و فونت `Segoe UI` روی bitmap preview نوشته می‌شود تا نام‌های فارسی به `????` تبدیل نشوند. overlayهای Face پس از حدود 2.5 ثانیه حذف می‌شوند.
 
-`face-database.db` کنار executable نگهداری می‌شود و یک SQLite database واحد برای اطلاعات شخص، نمونه‌های چهره، تصویر crop‌شده و embedding است؛ فایل تصویر جداگانه برای رکوردها استفاده نمی‌شود. هر شخص `PersonNumber` ثابت دارد و هر نمونه `SampleNumber` مستقل؛ برای هر شخص حداکثر 10 نمونه پذیرفته می‌شود. `CreatedAtUtc`، نام فایل ورودی و فرمت نیز در رکورد نمونه نگه‌داری می‌شوند. تصویر enrollment ابتدا با YuNet تشخیص داده، با پنج landmark هم‌تراز و سپس به‌صورت JPEG در BLOB ذخیره می‌شود؛ تصویر بدون چهره یا چندچهره‌ای قابل ثبت نیست. ورود پوشه‌ای همهٔ فایل‌های تصویری را پردازش می‌کند و بعد از رسیدن به سقف 10 نمونه، موارد باقی‌مانده را گزارش می‌دهد. چهرهٔ ناشناس جدید در مسیر دوربین به‌صورت شخص `Unknown #NNNN` در database دائمی ثبت می‌شود و در اجراهای بعدی نیز با `FaceUnknownMatchThreshold` قابل تطبیق است؛ پس از تغییر نام، `IsUnknown` خاموش می‌شود و نمونه‌ها در شناسایی افراد نام‌دار نیز استفاده می‌شوند. برای جلوگیری از پرشدن سریع database، از یک فرد ناشناس حداکثر هر 10 ثانیه یک نمونهٔ جدید ذخیره می‌شود. مقایسهٔ database بین نمونه‌ها بر اساس cosine similarity embedding انجام می‌شود و UI نمونه‌های مشابه را کنار هم نشان می‌دهد، امکان ادغام دو شخص را دارد و تصاویر جفت‌ها را همراه گزارش CSV به پوشهٔ انتخاب‌شده export می‌کند. `FaceDatabase.Save(null)` یا `Save` با مسیر خالی، database پیش‌فرض کنار application را checkpoint می‌کند؛ مسیر غیرخالی به فایل `.db` مقصد export می‌شود. برای مهاجرت، اگر `face-database.db` وجود نداشته باشد، `face-database.json` قدیمی خوانده می‌شود؛ رکوردهای قدیمی که تصویر ندارند با وضعیت تصویر گمشده حفظ می‌شوند.
+`identity-database.db` کنار executable نگهداری می‌شود و SQLite مرکزی برای اطلاعات شخص، پلاک، نمونه‌های Face و Palm، تصویر crop‌شده و embedding است؛ فایل تصویر جداگانه برای رکوردها استفاده نمی‌شود. هر شخص `PersonNumber` ثابت و هر modality `SampleNumber` مستقل دارد. FaceDatabase و PalmDatabase در کد موتور adapter سازگارکنندهٔ همین دیتابیس هستند. فرم Windows با عنوان `Identity database` مدیریت شخص، پلاک و نمونه‌های هر دو modality را انجام می‌دهد. برای migration، اگر دیتابیس مرکزی تازه باشد، `face-database.db` و `palm-database.db` قدیمی خوانده می‌شوند و پس از آن runtime فقط `identity-database.db` را باز نگه می‌دارد.
 
 ## 7. تنظیمات و سازگاری
 
@@ -166,6 +172,8 @@ UI مقدار `InputSize` را از catalog مدل می‌گیرد و فقط ا�
 | قابلیت‌ها و schema | `ProcessingSchemaVersion`، `PlateEnabled`، `FaceEnabled`، `Processing` legacy |
 | Plate | `Options: PlateProcessingOptions` در `Rois[].Processing[]` به‌همراه `MaxFps` و `Threads` |
 | Face | `Options: FaceProcessingOptions` در `Rois[].Processing[]` به‌همراه `MaxFps` و `Threads` |
+| Palm | `Options: PalmProcessingOptions` در `Rois[].Processing[]` به‌همراه `MaxFps` و `Threads` |
+| Identity | `identity-database.db` با جدول‌های `People`، `PersonPlates`، `FaceSamples` و `PalmSamples` |
 | Motion و UI | `DrawBoxes`، `DetectionOverlayHoldMs`، `MotionGateEnabled`، `MotionFps`، `MotionThreshold`، `MotionChangedPercent`، `MotionRoiScalePercent`، `MotionHoldMs`، `ActiveDetectionFps`، `IdleDetectionFps` |
 | ROI و پردازش | `Rois[].Name`، `Rois[].Enabled`، `Rois[].Points`، `Rois[].Processing[]` و `RoiEnabled` |
 
@@ -181,9 +189,9 @@ UI مقدار `InputSize` را از catalog مدل می‌گیرد و فقط ا�
 - محوطهٔ کاری دو ستون دارد: ستون چپ برای preview و ستون راست با عرض ثابت ۳۹۰ پیکسل برای `Detected events`. بنابراین نسبت ۷۲/۲۸ درصدی بخشی از قرارداد UI نیست. رخدادها به‌صورت کارت شامل تصویر، دوربین، label، confidence و زمان نمایش داده می‌شوند و history UI حداکثر ۱۰۰ کارت دارد. نوار وضعیت نیز state، FPS، زمان inference، resolution و dropped frames را نشان می‌دهد.
 - پنل ROI در نمای چنددوربینه مخفی است. هنگام بزرگ‌نمایی، پنل کامل ROI بلافاصله در ستون راست و زیر `Detected events` با ارتفاع حدود ۲۳۰ پیکسل باز می‌شود؛ دکمهٔ آیکنِ تنها برای بازکردن پنل وجود ندارد و پنل نباید روی تصویر دوربین overlay شود. دوبارکلیک تصویر بزرگ یا دکمهٔ `Thumbnails` به نمای چنددوربینه برمی‌گردد و پنل ROI را مخفی می‌کند.
 - پنل ROI شامل فهرست ROI و پنج کنترل افزودن، ویرایش نقاط، تغییر نام، حذف و پاک‌کردن همه است. نوار این پنج دکمه به‌صورت افقی و با `DockStyle.Left` چیده می‌شود؛ اندازهٔ هر دکمه `30×27`، فونت `Segoe UI` با اندازهٔ 7.5 و حالت Bold و تراز آیکون `MiddleCenter` است و آیکون‌ها از طریق ویژگی `Button.Image` تنظیم می‌شوند تا با دکمه‌های عملیات کارت دوربین هماهنگ باشند. نام ROI در همان دوربین باید یکتا باشد. حالت ویرایش با یک polygon خالی شروع می‌شود؛ با کلیک چپ روی تصویر نقاط جدید اضافه و با کلیک راست آخرین نقطه حذف می‌شود، کلیک خارج از ناحیهٔ واقعی تصویر letterbox نادیده گرفته می‌شود، مختصات در `0..1` محدود می‌شوند و پایان ویرایش حداقل سه نقطه لازم دارد. polygon جدید جایگزین نقاط قبلی همان ROI می‌شود.
-- پنجرهٔ تنظیمات دوربین modal و دارای تب‌های `General` و `Processing` است. `General` تنظیمات نام، source، transport، `CaptureBackend`، reconnect، رسم overlay، Motion Gate و نرخ‌های Active/Idle را دارد. `CaptureBackend` بین `FFmpeg` (پیش‌فرض)، `LibVLC` و `MediaMTX` انتخاب می‌شود؛ `LibVLC` برای RTSPهایی است که در VLC پایدارتر از OpenCV FFmpeg هستند و به VLC 3.x x64 نصب‌شده یا `VLC_HOME` نیاز دارد و `MediaMTX` path مستقل و WHEP خام مرورگر را فراهم می‌کند. در `Processing` درخت ROIها و آیتم‌های Plate/Face زیر هر ROI دیده می‌شود؛ ترتیب درخت ترتیب اجراست و انتخاب هر ROI یا آیتم، property editor مربوط به همان موجودیت را نشان می‌دهد. هر آیتم model، input size و پارامترهای مستقل خود را دارد؛ تنظیمات Face در زمان اجرای pipeline، overlay و history از همان آیتم خوانده می‌شوند. کنترل Threads در بخش‌های Plate و Face برای آیتم انتخاب‌شده sync است، درحالی‌که Buffer count در سطح دوربین مشترک است. تنظیمات سطح دوربین فقط default ساخت آیتم جدید هستند. ROI بدون آیتم inference اجرا نمی‌کند.
+- پنجرهٔ تنظیمات دوربین modal و دارای تب‌های `General` و `Processing` است. `General` تنظیمات نام، source، transport، `CaptureBackend`، reconnect، رسم overlay، Motion Gate و نرخ‌های Active/Idle را دارد. `CaptureBackend` بین `FFmpeg` (پیش‌فرض)، `LibVLC` و `MediaMTX` انتخاب می‌شود؛ `LibVLC` برای RTSPهایی است که در VLC پایدارتر از OpenCV FFmpeg هستند و به VLC 3.x x64 نصب‌شده یا `VLC_HOME` نیاز دارد و `MediaMTX` path مستقل و WHEP خام مرورگر را فراهم می‌کند. در `Processing` درخت ROIها و آیتم‌های Plate/Face/Palm زیر هر ROI دیده می‌شود؛ Palm سه بخش detection، identification و tracking/recording دارد و Detector از مدل انتخابی تعیین می‌شود. هر آیتم model، input size و پارامترهای مستقل خود را دارد و ROI بدون آیتم inference اجرا نمی‌کند.
 - `Save` تنظیمات پنجره را پس از اعتبارسنجی نام و source و یکتا بودن نام ROIها در همان دوربین اعمال می‌کند و `Cancel` تغییرات را کنار می‌گذارد. ویرایش دوربین روی clone تنظیمات انجام می‌شود تا تغییرات قبل از تأیید به runtime اعمال نشوند. فهرست مدل‌ها از packageهای `.hshmodel` در `Models` کنار executable تغذیه می‌شود؛ در اجرای Debug، پوشه‌های مدل پروژه نیز برای تست شناسایی می‌شوند.
-- پنجرهٔ `Face database` گرید هر نمونه را با crop، شمارهٔ شخص، نام، نوع، شمارهٔ نمونه، confidence تشخیص، تاریخ، فایل منبع و وضعیت `Ready` یا `Image missing` نشان می‌دهد. ستون نام با دوبارکلیک یا `F2` مستقیماً قابل ویرایش است؛ خروج از سلول نام را پس از کنترل خالی‌نبودن و یکتا بودن در SQLite ذخیره می‌کند و نام همهٔ نمونه‌های همان شخص را تغییر می‌دهد. `Group by person` برای هر شخص یک ردیف سرگروه با علامت `-`/`+` ایجاد می‌کند و با کلیک، نمونه‌های آن گروه را جمع یا باز می‌کند. `Move selected sample` نمونهٔ موجود، ازجمله نمونهٔ ناشناس، را به شخص نام‌دار مقصد منتقل می‌کند و `Add to selected person` برای فایل تصویر جدید است. عملیات افزودن تصویر برای شخص جدید، import پوشه، حذف نمونه، حذف شخص و rename شخص در همین پنجره‌اند. این پنجره و پنجرهٔ Similarity نیز با زبان انتخاب‌شده نمایش داده می‌شوند.
+- پنجرهٔ `Identity database` فهرست اشخاص و تب‌های `Plates`، `Face samples` و `Palm samples` دارد. از این فرم می‌توان شخص ساخت/rename/delete کرد، پلاک اضافه یا حذف کرد، نمونه‌های Face/Palm را به شخص موجود افزود یا حذف کرد و import پوشهٔ Face و similarity را اجرا کرد. همهٔ این داده‌ها در `identity-database.db` و با `PersonId` مشترک ذخیره می‌شوند.
 - دکمهٔ `Restore Defaults` در فرم تنظیمات دوربین سه پروفایل `Weak / virtual 6-core`، `Balanced / normal system` و `High performance / realtime` دارد. پروفایل حداقل، مدل‌های INT8 موجود برای Plate و Face را نیز انتخاب می‌کند و در صورت نبود مدل در بسته fallback دارد. پروفایل High Performance دقیقاً ۴ thread استفاده می‌کند. پروفایل‌ها FPS، threads، input size، Face `TopK`، motion و buffer را برای دوربین و processing itemهای ROI تنظیم می‌کنند، thresholdهای تشخیص/شناسایی را تغییر نمی‌دهند و برای ذخیره باید `Save` زده شود.
 - نسخهٔ وب همین جریان عملیاتی را در `DetectionManagerUi` ارائه می‌کند؛ قرارداد دقیق آن در [WEB-UI-RECONSTRUCTION-SPEC.md](WEB-UI-RECONSTRUCTION-SPEC.md) است: پنل `Detected events` تشخیص را با crop و جزئیات متنی نشان می‌دهد، tile فقط Start/Stop/Edit/Fullscreen دارد، پنل `وضعیت runtime` زیر layout زندهٔ داشبورد قرار دارد و نمای متمرکز ذره‌بین فقط workspace میانی را با تصویر دوربین جایگزین می‌کند. ابزارهای ROI (`ویرایش`، `ROI جدید`، `حذف`، `ذخیره`، `لغو` و بازگشت) حالت خودکار edit ندارند. در حالت MediaMTX، تصویر WHEP خام است و Drawingهای ROI/تشخیص با SVG Overlay سمت کلاینت می‌آیند.
 - پنجرهٔ `Similar face samples` threshold پیش‌فرض `0.40`، هماهنگ با threshold شناسایی SFace، و گزینهٔ `Only different people` که به‌صورت پیش‌فرض خاموش است دارد. در حالت پیش‌فرض جفت‌های مشابه متعلق به یک `PersonId` نیز نمایش داده می‌شوند؛ با فعال‌کردن گزینه فقط افراد متفاوت مقایسه می‌شوند. برای هر جفت similarity و اطلاعات دو نمونه نمایش داده می‌شود؛ ادغام شخص دوم در اول فقط تا سقف ۱۰ نمونه انجام می‌شود. export پوشهٔ `FaceSimilarity_yyyyMMdd_HHmmss`، زیرپوشهٔ `Pairs` و فایل `similarity-report.csv` می‌سازد.
@@ -195,6 +203,8 @@ UI مقدار `InputSize` را از catalog مدل می‌گیرد و فقط ا�
 | Plate | `HshDetectionEngin.Plate/Models/*.hshmodel` | Release: `Models/Plate` یا `Models` کنار executable؛ Debug: پوشهٔ مدل پروژه نیز fallback است |
 | Face detection | `face_yunet_2023mar.hshmodel` و `face_yunet_2023mar_int8.hshmodel` | Release: `Models/Face` یا `Models` کنار executable؛ Debug: پوشهٔ مدل پروژه نیز fallback است |
 | Face recognition | `face_recognition_sface_2021dec.hshmodel` | Release: `Models/Face` یا `Models` کنار executable؛ Debug: پوشهٔ مدل پروژه نیز fallback است |
+| Palm detection | `Models/Palm/palm_blazepalm_full.onnx` و `Models/Palm/rtmdet_nano_hand.onnx` | هر دو برای Windows/Service کپی می‌شوند؛ BlazePalm ورودی `1x192x192x3` و RTMDet ورودی `1x3x320x320` دارد |
+| Palm recognition | external `palm_ccnet.onnx` یا `palm_ppnet.onnx` | مدل در `Models/Palm` کنار executable نصب می‌شود؛ نبود آن detection را غیرفعال نمی‌کند اما recognition/enrollment در دسترس نیست |
 
 مدل خام و ابزار تبدیل فقط برای توسعه در `HshDetectionEngin.Tools/RawModels` و `HshDetectionEngin.Tools/ModelTools` هستند. `HshDetectionEngin.Tools/BuildArtifacts` خروجی‌های آزمایشی/قدیمی را نگه می‌دارد و جزو runtime نیست.
 
@@ -202,7 +212,7 @@ package فعلی مدل header `HSHM0001`، IV شانزده‌بایتی و ciph
 
 ## 9. لایسنس و ابزارهای عملیاتی
 
-`license.hshlic` شامل payload JSON Base64شده و امضای RSA-SHA256 است. `LicenseClaims` شامل `Version`، `LicenseId`، `CustomerName`، `MachineId`، `NotBeforeUtc`، `ExpiresUtc` و featureهای `Plate`/`Face` است. Runtime public key کامپایل‌شده در `HshDetectionEngin.Licensing/Licensing.cs`، مقدار `LicenseValidator.PublicKeyPem`، را بررسی می‌کند و MachineId و بازهٔ اعتبار را validate می‌کند.
+`license.hshlic` شامل payload JSON Base64شده و امضای RSA-SHA256 است. `LicenseClaims` شامل `Version`، `LicenseId`، `CustomerName`، `MachineId`، `NotBeforeUtc`، `ExpiresUtc` و featureهای `Plate`/`Face`/`Palm` است. Runtime public key کامپایل‌شده در `HshDetectionEngin.Licensing/Licensing.cs`، مقدار `LicenseValidator.PublicKeyPem`، را بررسی می‌کند و MachineId و بازهٔ اعتبار را validate می‌کند.
 
 `LicenseRequest` روی دستگاه مشتری fingerprint را از `HKLM\\SOFTWARE\\Microsoft\\Cryptography:MachineGuid` (یا fallback نام دستگاه/OS) می‌سازد و درخواست Base64 را به‌صورت کد یا فایل `.hshrequest` ذخیره می‌کند. این درخواست راز نیست.
 
@@ -237,17 +247,18 @@ LicenseIssuer، private key، Tools، مدل‌های خام و فایل‌ها�
 
 ## 11. معیار پذیرش بازسازی
 
-- solution شامل همان هشت پروژه باشد و هر سه برنامهٔ WinForms با STA اجرا شوند.
+- solution شامل همان یازده پروژه باشد و هر سه entry point برنامهٔ Windows با STA اجرا شوند.
 - RTSP، Webcam index `0` و فایل ویدئویی با reconnect کار کنند.
 - newest-frame semantics برقرار باشد و preview از 15 FPS بیشتر نشود.
 - هر دوربین ROI، Motion، settings و pipelineهای مستقل داشته باشد.
-- Plate-only، Face-only و Plate+Face از UI قابل تنظیم باشند.
+- Plate-only، Face-only، Palm-only و ترکیب قابلیت‌ها از UI قابل تنظیم باشند.
+- فرم `Identity database` بتواند یک شخص، پلاک‌های او، نمونه‌های Face و نمونه‌های Palm را با یک `PersonId` مشترک مدیریت کند.
 - Face در هر اندازهٔ ROI بدون خطای `FaceDetectorYN.InputSize` کار کند.
 - Unknownهای Face به‌عنوان افراد `Unknown #NNNN` در database دائمی با crop و embedding ذخیره شوند، در اجراهای بعدی برای مشاهدات مشابه قابل تطبیق باشند و cooldown/سقف نمونه رعایت شود.
 - UI برای همان متن پلاک در همان دوربین تا 30 ثانیه suppression دارد؛ deduplication داخلی `CameraRuntime.History` برای پلاک یکسان کمتر از 5 ثانیه است. Face بر اساس cooldown تنظیمی و محدودیت track deduplicate می‌شود.
 - نبود مدل یا feature یک قابلیت، قابلیت دیگر یا کل دوربین را متوقف نکند.
 - LicenseRequest بتواند کد و فایل ذخیره کند؛ LicenseIssuer مشتری، آرشیو، صدور و Save As را مدیریت کند.
-- بستهٔ مشتری فاقد private key و مدل خام باشد.
+- بستهٔ مشتری فاقد private key باشد؛ مدل‌های raw Palm فقط طبق استثناء مستندشدهٔ `Models/Palm` توزیع شوند و CCNet/PPNet external باقی بمانند.
 
 ## 12. نقشهٔ مستندات
 

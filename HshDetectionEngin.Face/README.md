@@ -16,7 +16,7 @@
 
 ## شناسایی و database
 
-با SFace و `FaceDatabase`، embedding همهٔ نمونه‌های یک شخص مقایسه می‌شود و بالاترین similarity نتیجهٔ آن شخص است. database فعلی SQLite (`face-database.db`) است و اطلاعات شخص، حداکثر 10 نمونهٔ هر شخص، تاریخ ایجاد، embedding و تصویر crop‌شدهٔ aligned را در یک فایل نگه می‌دارد. چهرهٔ ناشناس جدید به‌صورت `Unknown #NNNN` در database ثبت می‌شود؛ برای جلوگیری از ثبت تکراری، از هر فرد ناشناس حداکثر هر 10 ثانیه یک نمونهٔ جدید ذخیره می‌شود. Rename از گرید، فرد را از حالت ناشناس خارج می‌کند و نمونه‌هایش در شناسایی نام‌دار استفاده می‌شوند. `PersonNumber` بین نمونه‌های یک شخص مشترک و `SampleNumber` برای هر عکس مستقل است.
+با SFace و `FaceDatabase`، embedding همهٔ نمونه‌های یک شخص مقایسه می‌شود و بالاترین similarity نتیجهٔ آن شخص است. `FaceDatabase` اکنون adapter دیتابیس مرکزی `identity-database.db` است؛ جدول `People` با Palm و پلاک مشترک است و دادهٔ اختصاصی چهره در `FaceSamples` قرار دارد. چهرهٔ ناشناس جدید به‌صورت `Unknown #NNNN` در database ثبت می‌شود؛ برای جلوگیری از ثبت تکراری، از هر فرد ناشناس حداکثر هر 10 ثانیه یک نمونهٔ جدید ذخیره می‌شود. Rename از فرم هویت، فرد را از حالت ناشناس خارج می‌کند و نمونه‌هایش در شناسایی نام‌دار استفاده می‌شوند. `PersonNumber` بین modalityهای یک شخص مشترک و `SampleNumber` برای هر نوع نمونه مستقل است.
 
 ```csharp
 using HshDetectionEngin.Face;
@@ -25,7 +25,7 @@ using HshDetectionEngin.Licensing;
 var license = LicenseValidator.Load(
     Path.Combine(AppContext.BaseDirectory, "license.hshlic"));
 var database = FaceDatabase.Load(
-    Path.Combine(AppContext.BaseDirectory, "face-database.db"));
+    Path.Combine(AppContext.BaseDirectory, "identity-database.db"));
 
 using var pipeline = new FacePipeline(
     Path.Combine(AppContext.BaseDirectory, "Models", "Face", "face_yunet_2023mar.hshmodel"),
@@ -34,7 +34,7 @@ using var pipeline = new FacePipeline(
     license: license);
 ```
 
-برای enrollment با تصویر، از `FacePipeline.RegisterIdentity(name, faceImage, databasePath, sourceFileName)` استفاده کنید. API تصویر را بررسی می‌کند، دقیقاً یک چهره می‌خواهد، landmarkها را هم‌تراز می‌کند، crop JPEG و embedding را داخل SQLite ثبت می‌کند و سقف 10 نمونه را enforce می‌کند. اگر `databasePath` تهی یا `null` باشد، `FaceDatabase.Save` فایل `face-database.db` را کنار application checkpoint می‌کند؛ اگر مسیر دیگری داده شود، database با `VACUUM INTO` به فایل `.db` مقصد export می‌شود. تصویر بسیار کوچک، تار یا شدیداً پوشیده ممکن است برای ثبت مناسب نباشد؛ اگر SFace برای pipeline فعال نباشد، enrollment خطا می‌دهد. `FaceDatabase.GetSamples(includeImages: true)` برای نمایش تصویر در گرید و `FindSimilar` برای مقایسهٔ نمونه‌ها استفاده می‌شوند.
+برای enrollment با تصویر، از `FacePipeline.RegisterIdentity(name, faceImage, databasePath, sourceFileName)` استفاده کنید. API تصویر را بررسی می‌کند، دقیقاً یک چهره می‌خواهد، landmarkها را هم‌تراز می‌کند، crop JPEG و embedding را داخل `identity-database.db` ثبت می‌کند و سقف 10 نمونه را enforce می‌کند. `FaceDatabase` در این نسخه adapter سازگارکنندهٔ جدول `FaceSamples` در دیتابیس مرکزی است؛ فرم Windows با عنوان `Identity database` نیز شخص، پلاک، Face و Palm را یکجا مدیریت می‌کند. تصویر بسیار کوچک، تار یا شدیداً پوشیده ممکن است برای ثبت مناسب نباشد؛ اگر SFace برای pipeline فعال نباشد، enrollment خطا می‌دهد. `FaceDatabase.GetSamples(includeImages: true)` برای نمایش تصویر در گرید و `FindSimilar` برای مقایسهٔ نمونه‌ها استفاده می‌شوند.
 
 ## رفتار UI/Runtime
 

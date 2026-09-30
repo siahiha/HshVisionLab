@@ -2,9 +2,9 @@
 
 ## 1. اصل مالکیت
 
-سرویس تنها processای است که configuration فعال و Face Database را برای runtime باز نگه می‌دارد. `HshVisionLab` در حالت مدیریت از API استفاده می‌کند و هم‌زمان فایل‌های سرویس را با `File.ReadAllText` یا یک `FaceDatabase` دوم باز نمی‌کند.
+سرویس تنها processای است که configuration فعال و Identity Database را برای runtime باز نگه می‌دارد. `HshVisionLab` در حالت مدیریت از API استفاده می‌کند و هم‌زمان فایل‌های سرویس را با `File.ReadAllText` یا یک database دوم باز نمی‌کند.
 
-این تصمیم به‌خصوص برای Face Database مهم است، چون implementation فعلی علاوه بر SQLite snapshotهای in-memory دارد و چند process مستقل می‌توانند viewهای ناسازگار داشته باشند.
+این تصمیم برای Identity Database مهم است، چون implementation فعلی باید فقط یک instance مرکزی SQLite را باز نگه دارد تا viewهای People، Plate، Face و Palm بین processها ناسازگار نشوند.
 
 ## 2. data root
 
@@ -17,7 +17,7 @@
  │    ├── service-settings.json
  │    └── settings.backup.*.json
  ├── database\
- │    ├── face-database.db
+ │    ├── identity-database.db
  │    ├── events.db
  │    └── backups\
  ├── models\
@@ -66,9 +66,21 @@
 تغییر `corsOrigins` در زمان start سرویس خوانده می‌شود و پس از ذخیره‌سازی نیازمند
 restart سرویس است.
 
-### `face-database.db`
+### `identity-database.db`
 
-همان schema فعلی `People` و `FaceSamples` باقی می‌ماند. schema جدیدی برای جایگزینی Face Database فعلی لازم نیست؛ فقط ownership به سرویس منتقل می‌شود.
+این فایل مرجع مشترک اشخاص است و جدول‌های زیر را دارد:
+
+```text
+People(PersonId, PersonNumber, Name, IsUnknown, CreatedAtUtc, UpdatedAtUtc)
+PersonPlates(PlateId, PersonId, PlateText, NormalizedText, IsPrimary, Notes, ...)
+FaceSamples(SampleId, PersonId, SampleNumber, FaceImage, Embedding, ...)
+PalmSamples(SampleId, PersonId, SampleNumber, PalmImage, Embedding, ...)
+```
+
+`PersonId` تنها رابطهٔ هویتی مشترک بین modalityهاست. یک نفر می‌تواند چند پلاک
+و چند نمونهٔ Face/Palm داشته باشد. در اولین اجرای دیتابیس مرکزی، داده‌های
+`face-database.db` و `palm-database.db` قدیمی import می‌شوند؛ پس از migration
+سرویس فقط `identity-database.db` را باز نگه می‌دارد.
 
 ### `events.db`
 
@@ -84,7 +96,7 @@ ServiceOperations
 VehiclePersonAssociations
 ```
 
-دیتابیس رخداد نباید در transactionهای inference یا Face Database قفل ایجاد کند.
+دیتابیس رخداد نباید در transactionهای inference یا Identity Database قفل ایجاد کند.
 
 ## 4. revision و atomic write
 
@@ -118,7 +130,7 @@ VehiclePersonAssociations
 1. UI فایل‌های محلی را صرفاً برای Import انتخاب می‌کند.
 2. سرویس schema و model referenceها را validate می‌کند.
 3. `settings.json` در config root سرویس ذخیره می‌شود.
-4. Face Database از طریق backup/checkpoint یا import کنترل‌شده منتقل می‌شود.
+4. Identity Database از طریق backup/checkpoint یا import کنترل‌شده منتقل می‌شود.
 5. سرویس database را باز می‌کند و تعداد People/Samples را گزارش می‌دهد.
 6. UI پس از موفقیت به Service Mode تغییر می‌کند.
 
@@ -142,9 +154,9 @@ API باید روی همهٔ تغییرات write این موارد را برگ�
 
 merge خودکار JSON در سرویس انجام نشود؛ چون برای ROI و task می‌تواند نتیجهٔ غیرقابل‌پیش‌بینی بسازد.
 
-## 7. Face Database API و consistency
+## 7. Identity Database API و consistency
 
-تمام عملیات Face Database از یک service-owned instance انجام شوند:
+تمام عملیات Identity Database از یک service-owned instance انجام شوند:
 
 - rename
 - delete person
@@ -158,12 +170,12 @@ merge خودکار JSON در سرویس انجام نشود؛ چون برای RO
 
 restore باید عملیاتی جدا باشد:
 
-1. ورود به maintenance mode برای Face recognition
+1. ورود به maintenance mode برای Identity recognition
 2. validate backup
 3. ساخت temporary database
 4. اجرای migration/schema check
 5. swap اتمیک
-6. reload FaceModule/pipelines
+6. reload Face/Palm modules and pipelines
 7. خروج از maintenance mode
 
 ## 8. retention و فضای دیسک

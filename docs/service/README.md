@@ -8,14 +8,14 @@
 
 ## تصمیم‌های اصلی
 
-1. سرویس مالک اصلی تنظیمات فعال، Face Database و Event Store است.
+1. سرویس مالک اصلی تنظیمات فعال، Identity Database و Event Store است.
 2. `HshVisionLab` در حالت Service Manager از API سرویس استفاده می‌کند و فایل‌های سرویس را مستقیم باز نمی‌کند.
 3. هر `CameraSettings.Rois[].Processing[]` در نسخهٔ اول یک Detection Task است؛ مدل جدید و تکراری برای Task ایجاد نمی‌شود.
 4. نرخ Rendering مستقل از نرخ inference است.
 5. مسیر MediaMTX در وب WHEP خام را ارسال می‌کند و Overlay تشخیص جداگانه روی کلاینت رسم می‌شود؛ مسیر composited WebRTC برای clientهای legacy باقی می‌ماند و inference هیچ‌وقت منتظر encoder یا کلاینت نمی‌ماند.
 6. رخداد قبل از broadcast در Event Store ثبت می‌شود و کلاینت با cursor ترتیبی replay می‌کند.
 7. SignalR/WebSocket برای کنترل، رخداد و signaling و WebRTC برای ویدئوی زنده استفاده می‌شود.
-8. رخدادهای عملیاتی در `events.db` جدا از `face-database.db` ذخیره می‌شوند.
+8. رخدادهای عملیاتی در `events.db` جدا از `identity-database.db` ذخیره می‌شوند؛ Identity Database شامل People، Plate، Face و Palm است.
 
 ## اسناد
 
@@ -35,8 +35,8 @@
 ## وضعیت پیاده‌سازی
 
 - پروژهٔ مستقل `HshDetectionService` با `net8.0-windows` به Solution اضافه شده است.
-- فایل‌های `settings.json`، `service-settings.json`، `face-database.db`، `events.db` و artifactها در data root سرویس نگهداری می‌شوند.
-- endpointهای مدیریت تنظیمات، دوربین، ROI، task، Face Database، trigger، event، snapshot و Overlay زنده فعال هستند.
+- فایل‌های `settings.json`، `service-settings.json`، `identity-database.db`، `events.db` و artifactها در data root سرویس نگهداری می‌شوند.
+- endpointهای مدیریت تنظیمات، دوربین، ROI، task، Identity Database (Face/Palm/Plate)، trigger، event، snapshot و Overlay زنده فعال هستند.
 - endpoint offer و فریم composited برای clientهای legacy فعال‌اند؛ مسیر UI وب برای
   دوربین MediaMTX از WHEP خام استفاده می‌کند و SVG Overlay را جداگانه می‌گیرد.
 - WHEP proxy برای دوربین‌های MediaMTX فعال است؛ UI وب ویدئوی خام را از WHEP می‌گیرد و `/api/v1/streams/{cameraId}/overlay` را جداگانه مصرف می‌کند.
