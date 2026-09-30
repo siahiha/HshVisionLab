@@ -49,6 +49,9 @@ public sealed class PalmDatabase : IDisposable
     public PalmMatch IdentifyOrCreateUnknown(IReadOnlyList<float> embedding, float minimumSimilarity, float unknownSimilarity,
         byte[]? palmImage = null, string originalFileName = "runtime-palm.jpg", float detectionConfidence = 0) =>
         MapMatch(_store.IdentifyOrCreateUnknownPalm(embedding, minimumSimilarity, unknownSimilarity, palmImage, originalFileName, detectionConfidence))!;
+    public PalmMatch RegisterUnknownObservation(byte[] palmImage, string originalFileName, float detectionConfidence, string? personId = null) =>
+        MapMatch(_store.RegisterUnknownPalmObservation(palmImage, originalFileName, detectionConfidence, personId))!;
+    public bool MoveSample(string sampleId, string targetPersonId) => _store.MovePalmSample(sampleId, targetPersonId);
     public bool RemoveSample(string sampleId) => _store.RemovePalmSample(sampleId);
 
     private PalmIdentity MapPerson(IdentityPersonRecord person) => new()

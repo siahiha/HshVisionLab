@@ -382,6 +382,25 @@ public sealed class IdentityDatabase : IDisposable
         }
     }
 
+    /// <summary>Creates a visible unknown Palm record even when no embedding model is available.</summary>
+    public IdentityMatch RegisterUnknownPalmObservation(byte[] palmImage, string fileName, float detectionConfidence,
+        string? personId = null)
+    {
+        if (palmImage.Length == 0) throw new ArgumentException("A palm image is required.", nameof(palmImage));
+        lock (_gate)
+        {
+            IdentityPersonRecord person = personId is null
+                ? CreatePerson($"Unknown Palm #{NextPersonNumberUnsafe():0000}", true)
+                : FindPersonUnsafe(personId) ?? throw new InvalidOperationException("The unknown Palm person does not exist.");
+            IdentityPalmSampleRecord[] samples = GetPalmSamples(person.Id).ToArray();
+            IdentityPalmSampleRecord? sample = samples.Length == 0 ||
+                DateTime.UtcNow - samples.Max(item => item.CreatedAtUtc) >= TimeSpan.FromSeconds(10)
+                ? RegisterPalmSample(person.Name, [], palmImage, fileName, person.Id, detectionConfidence, DateTime.UtcNow)
+                : samples.OrderByDescending(item => item.CreatedAtUtc).First();
+            return new IdentityMatch(person.Id, person.Name, 0f, person.PersonNumber, true, sample.Id);
+        }
+    }
+
     public bool RemoveFaceSample(string sampleId) => RemoveSample("FaceSamples", "SampleId", sampleId);
     public bool RemovePalmSample(string sampleId) => RemoveSample("PalmSamples", "SampleId", sampleId);
 
@@ -393,6 +412,20 @@ public sealed class IdentityDatabase : IDisposable
             if (target is null || source is null || GetFaceSamples(false, targetPersonId).Count >= MaxSamplesPerPerson) return false;
             using SqliteCommand command = CreateCommand("UPDATE FaceSamples SET PersonId=$person,PersonNumber=$number,PersonName=$name,SampleNumber=$sample WHERE SampleId=$id;");
             Add(command, "$person", target.Id); Add(command, "$number", target.PersonNumber); Add(command, "$name", target.Name); Add(command, "$sample", NextSampleNumberUnsafe("FaceSamples", target.Id)); Add(command, "$id", sampleId);
+            return command.ExecuteNonQuery() > 0;
+        }
+    }
+
+    public bool MovePalmSample(string sampleId, string targetPersonId)
+    {
+        lock (_gate)
+        {
+            IdentityPersonRecord? target = FindPersonUnsafe(targetPersonId);
+            IdentityPalmSampleRecord? source = GetPalmSamples().FirstOrDefault(item => item.Id == sampleId);
+            if (target is null || source is null || source.PersonId == target.Id || GetPalmSamples(target.Id).Count >= MaxSamplesPerPerson) return false;
+            using SqliteCommand command = CreateCommand("UPDATE PalmSamples SET PersonId=$person,PersonNumber=$number,PersonName=$name,SampleNumber=$sample WHERE SampleId=$id;");
+            Add(command, "$person", target.Id); Add(command, "$number", target.PersonNumber); Add(command, "$name", target.Name);
+            Add(command, "$sample", NextSampleNumberUnsafe("PalmSamples", target.Id)); Add(command, "$id", sampleId);
             return command.ExecuteNonQuery() > 0;
         }
     }

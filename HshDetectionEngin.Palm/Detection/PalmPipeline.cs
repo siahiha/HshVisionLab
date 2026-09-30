@@ -40,6 +40,7 @@ public sealed class PalmPipeline : IProcessingPipeline
     private readonly bool _detectorUsesNhwc;
     private readonly string? _recognizerInput;
     private readonly List<Track> _tracks = [];
+    private readonly Dictionary<int, PalmMatch> _detectionOnlyUnknowns = [];
     private int _nextTrackId = 1;
 
     public string Name => $"{_detectorKind} Palm Detection + {(_recognizer is null ? "Detection" : "Palmprint Recognition")}";
@@ -87,7 +88,41 @@ public sealed class PalmPipeline : IProcessingPipeline
             accepted.Add((candidate.Bounds, candidate.Confidence, label, metadata));
         }
         List<AnalysisDetection> detections = UpdateTracks(accepted);
+        if (_recognizer is null && _database is not null)
+            detections = RegisterDetectionOnlyUnknowns(detections);
         return new PipelineResult { Detections = detections };
+    }
+
+    private List<AnalysisDetection> RegisterDetectionOnlyUnknowns(List<AnalysisDetection> detections)
+    {
+        PalmDatabase database = _database!;
+        for (int index = 0; index < detections.Count; index++)
+        {
+            AnalysisDetection detection = detections[index];
+            if (detection.TrackId is not int trackId ||
+                detection.Metadata?.TryGetValue("PalmImageJpeg", out object? imageValue) != true ||
+                imageValue is not byte[] image || image.Length == 0)
+                continue;
+
+            if (!_detectionOnlyUnknowns.TryGetValue(trackId, out PalmMatch? match))
+            {
+                match = database.RegisterUnknownObservation(image, "runtime-palm-detection.jpg", detection.Confidence);
+                _detectionOnlyUnknowns[trackId] = match;
+            }
+
+            var metadata = new Dictionary<string, object?>(detection.Metadata ?? new Dictionary<string, object?>())
+            {
+                ["Recognized"] = true,
+                ["RecognitionAvailable"] = false,
+                ["IdentityId"] = match.Id,
+                ["Similarity"] = match.Similarity,
+                ["PersonNumber"] = match.PersonNumber,
+                ["IsUnknown"] = true,
+                ["MatchedSampleId"] = match.MatchedSampleId
+            };
+            detections[index] = detection with { Label = match.Name, Metadata = metadata };
+        }
+        return detections;
     }
 
     public PalmEnrollment CreateEnrollment(Mat sourceImage)
@@ -212,7 +247,11 @@ public sealed class PalmPipeline : IProcessingPipeline
             best ??= new Track { Id = _nextTrackId++ }; if (!_tracks.Contains(best)) _tracks.Add(best); best.Bounds = detection.Bounds; best.Misses = 0; used.Add(best.Id);
             results.Add(new AnalysisDetection(AnalysisKind.Palm, detection.Label, detection.Confidence, detection.Bounds, best.Id, detection.Metadata));
         }
-        foreach (Track track in _tracks) if (!used.Contains(track.Id)) track.Misses++; _tracks.RemoveAll(x => x.Misses > _options.TrackMaxMisses); return results;
+        foreach (Track track in _tracks) if (!used.Contains(track.Id)) track.Misses++;
+        _tracks.RemoveAll(x => x.Misses > _options.TrackMaxMisses);
+        foreach (int key in _detectionOnlyUnknowns.Keys.Where(key => _tracks.All(track => track.Id != key)).ToList())
+            _detectionOnlyUnknowns.Remove(key);
+        return results;
     }
 
     private List<Candidate> Nms(List<Candidate> candidates)

@@ -91,7 +91,7 @@ public sealed class IdentityDatabaseForm : Form
         var tabs = new TabControl { Dock = DockStyle.Fill };
         tabs.TabPages.Add(BuildPlatesTab());
         tabs.TabPages.Add(BuildSamplesTab("Face samples", _faceSamples, AddFaceSample, DeleteFaceSample, import: true));
-        tabs.TabPages.Add(BuildSamplesTab("Palm samples", _palmSamples, AddPalmSample, DeletePalmSample, import: false));
+        tabs.TabPages.Add(BuildSamplesTab("Palm samples", _palmSamples, AddPalmSample, DeletePalmSample, import: false, assign: AssignPalmSample));
         details.Controls.Add(tabs, 0, 1);
         root.Controls.Add(details, 1, 0);
 
@@ -118,7 +118,7 @@ public sealed class IdentityDatabaseForm : Form
         page.Controls.Add(_plates); page.Controls.Add(actions); return page;
     }
 
-    private TabPage BuildSamplesTab(string title, DataGridView grid, Action add, Action remove, bool import)
+    private TabPage BuildSamplesTab(string title, DataGridView grid, Action add, Action remove, bool import, Action? assign = null)
     {
         var page = new TabPage(title);
         grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Person #", DataPropertyName = "PersonNumber", Width = 80 });
@@ -129,6 +129,10 @@ public sealed class IdentityDatabaseForm : Form
         var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
         Button removeButton = MakeButton("Delete sample"); Button addButton = MakeButton("Add image");
         removeButton.Click += (_, _) => remove(); addButton.Click += (_, _) => add(); actions.Controls.AddRange([removeButton, addButton]);
+        if (assign is not null)
+        {
+            Button assignButton = MakeButton("Assign to person"); assignButton.Click += (_, _) => assign(); actions.Controls.Add(assignButton);
+        }
         if (import)
         {
             Button importButton = MakeButton("Import folder"); importButton.Click += (_, _) => ImportFaceFolder(); actions.Controls.Add(importButton);
@@ -234,6 +238,35 @@ public sealed class IdentityDatabaseForm : Form
     private void DeletePalmSample()
     {
         if (_palmSamples.CurrentRow?.DataBoundItem is SampleRow row) { _palms.RemoveSample(row.Id); RefreshDetails(); }
+    }
+
+    private void AssignPalmSample()
+    {
+        if (_palmSamples.CurrentRow?.DataBoundItem is not SampleRow row) return;
+        IdentityPersonRecord[] choices = _personRows.Where(person => person.Id != _selected?.Id).ToArray();
+        IdentityPersonRecord? target = ChoosePerson(choices);
+        if (target is null) return;
+        try
+        {
+            if (!_palms.MoveSample(row.Id, target.Id)) throw new InvalidOperationException("The Palm sample could not be assigned. The target may already have the maximum number of samples.");
+            RefreshPeople();
+        }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private static IdentityPersonRecord? ChoosePerson(IReadOnlyList<IdentityPersonRecord> people)
+    {
+        if (people.Count == 0) return null;
+        using var dialog = new Form { Text = "Assign Palm to person", Size = new Size(430, 360), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false };
+        var list = new ListBox { Dock = DockStyle.Fill, DisplayMember = nameof(IdentityPersonRecord.Name) };
+        foreach (IdentityPersonRecord person in people) list.Items.Add(person);
+        list.SelectedIndex = 0;
+        var ok = new Button { Text = "Assign", AutoSize = true, DialogResult = DialogResult.OK };
+        var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+        buttons.Controls.AddRange([cancel, ok]);
+        dialog.Controls.Add(list); dialog.Controls.Add(buttons); dialog.AcceptButton = ok; dialog.CancelButton = cancel;
+        return dialog.ShowDialog() == DialogResult.OK && list.SelectedItem is IdentityPersonRecord selected ? selected : null;
     }
     private static DataGridView CreateGrid() => new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, MultiSelect = false, AutoGenerateColumns = false };
     private static Button MakeButton(string text) => new() { Text = text, AutoSize = true, MinimumSize = new Size(110, 32), Padding = new Padding(8, 4, 8, 4) };

@@ -14,12 +14,14 @@ The defaults select BlazePalm plus CCNet. The model can be changed from the
 Palm processing options without changing code. PPNet is supported as a generic
 embedding model when its exported ONNX graph follows the same input contract.
 
-At runtime, every accepted palm is embedded and searched in the shared
-`identity-database.db`. A known match is emitted with the person's name and
-identity metadata. If no known match passes `RecognitionThreshold`, the
+At runtime, an accepted palm is searched in the shared `identity-database.db`.
+When the recognition model is available, the palm is embedded: a known match
+is emitted with the person's name and identity metadata, otherwise the
 embedding is compared with persisted unknown palms using
-`UnknownMatchThreshold`; an unknown person such as `Unknown Palm #0001` is
-created and sampled with the same cooldown/capacity rules as Face.
+`UnknownMatchThreshold`. When no recognition model is available, the detector
+still stores a detection-only crop as `Unknown Palm #0001` (without an
+embedding) so it is visible in the Windows identity manager and can be assigned
+to a person; real matching becomes available after adding an embedding sample.
 
 Recommended upstream sources:
 

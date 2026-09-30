@@ -13,7 +13,7 @@
 - Face با YuNet، IoU tracking، preprocessing مستقل، SFace اختیاری و FaceDatabase؛ Unknownهای runtime به‌صورت افراد `Unknown #NNNN` با crop و embedding در database دائمی ذخیره می‌شوند و برای هر نفر حداکثر ۱۰ نمونه ثبت می‌شود.
 - Face database پیشرفته با SQLite، ذخیرهٔ BLOB تصویر crop‌شده و embedding، تاریخ ایجاد، `PersonNumber` مشترک، سقف 10 نمونه برای هر نفر، گرید تصویری، ورود پوشه‌ای، بررسی تشابه، ادغام اشخاص و export تصاویر جفت‌شده/گزارش CSV.
 - Identity database مرکزی با `People`، `PersonPlates`، `FaceSamples` و `PalmSamples`؛ هر شخص یک `PersonId` مشترک دارد و فرم Windows تب‌های مشخصات، پلاک، چهره و کف دست را مدیریت می‌کند.
-- Palm با BlazePalm/RTMDet، tracker، enrollment و شناسایی اختیاری CCNet/PPNet؛ هر کف‌دست پذیرفته‌شده در `identity-database.db` جست‌وجو می‌شود، match شناخته‌شده با نام/metadata به overlay و history می‌رود و match‌نشده به‌صورت `Unknown Palm #NNNN` ذخیره می‌شود؛ مدل‌های detector در `Models/Palm` و مدل recognition بزرگ به‌صورت external نصب می‌شود.
+- Palm با BlazePalm/RTMDet، tracker، enrollment و شناسایی اختیاری CCNet/PPNet؛ هر کف‌دست پذیرفته‌شده در `identity-database.db` جست‌وجو می‌شود، match شناخته‌شده با نام/metadata به overlay و history می‌رود و match‌نشده به‌صورت `Unknown Palm #NNNN` ذخیره می‌شود. اگر مدل recognition موجود نباشد، crop تشخیص‌داده‌شده به‌صورت رکورد ناشناس بدون embedding ذخیره می‌شود تا در فرم Windows قابل انتساب به شخص باشد؛ مدل‌های detector در `Models/Palm` و مدل recognition بزرگ به‌صورت external نصب می‌شود.
 - settings چنددوربینه با ROIهای نام‌گذاری‌شده و فهرست مستقل `NamedRoi.Processing` برای هر دوربین.
 - packageهای `.hshmodel`، مدل‌های raw ONNX Palm، لایسنس RSA دستگاه‌محور و featureهای Plate/Face/Palm.
 - LicenseRequest با save/copy درخواست فعال‌سازی و entry point STA.
