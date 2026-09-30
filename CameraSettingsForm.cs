@@ -278,7 +278,12 @@ public sealed class CameraSettingsForm : Form
         _cmbModel.SelectedIndexChanged += (_, _) => RefreshInputSizes();
         _cmbFaceModel.SelectedIndexChanged += (_, _) => RefreshFaceInputSizes();
         _cmbPalmDetectorKind.SelectedIndexChanged += (_, _) => RefreshPalmInputSizes();
-        _cmbPalmDetectorModel.SelectedIndexChanged += (_, _) => RefreshPalmInputSizes();
+        _cmbPalmDetectorModel.SelectedIndexChanged += (_, _) =>
+        {
+            string kind = InferPalmDetectorKind(_cmbPalmDetectorModel.SelectedItem?.ToString(), _cmbPalmDetectorKind.SelectedItem?.ToString());
+            if (!Equals(_cmbPalmDetectorKind.SelectedItem?.ToString(), kind)) _cmbPalmDetectorKind.SelectedItem = kind;
+            RefreshPalmInputSizes();
+        };
         AddRow(properties, "Model", ConfigureCombo(_cmbModel));
         AddRow(properties, "Input size", ConfigureCombo(_cmbInputSize));
         AddRow(properties, "Preprocessing", ConfigureCombo(_cmbPreprocessing, "None", "Standard", "Advanced"));
@@ -796,8 +801,10 @@ public sealed class CameraSettingsForm : Form
         _cmbPalmDetectorModel.SelectedItem = _cmbPalmDetectorModel.Items.Contains(palm.DetectorModelFile)
             ? palm.DetectorModelFile
             : _cmbPalmDetectorModel.Items.Cast<string>().FirstOrDefault();
-        _cmbPalmDetectorKind.SelectedItem = _cmbPalmDetectorKind.Items.Contains(palm.DetectorKind)
-            ? palm.DetectorKind
+        string palmDetectorKind = InferPalmDetectorKind(
+            _cmbPalmDetectorModel.SelectedItem?.ToString(), palm.DetectorKind);
+        _cmbPalmDetectorKind.SelectedItem = _cmbPalmDetectorKind.Items.Contains(palmDetectorKind)
+            ? palmDetectorKind
             : _cmbPalmDetectorKind.Items.Cast<string>().FirstOrDefault();
         RefreshPalmInputSizes();
         _cmbPalmDetectorInputSize.SelectedItem = _cmbPalmDetectorInputSize.Items.Contains(palm.DetectorInputSize.ToString())
@@ -883,7 +890,8 @@ public sealed class CameraSettingsForm : Form
                 item.MaxFps = (int)_numPalmMaxFps.Value;
                 item.Threads = (int)_numPalmThreads.Value;
                 palmOptions.DetectorModelFile = _cmbPalmDetectorModel.SelectedItem?.ToString() ?? palmOptions.DetectorModelFile;
-                palmOptions.DetectorKind = _cmbPalmDetectorKind.SelectedItem?.ToString() ?? palmOptions.DetectorKind;
+                palmOptions.DetectorKind = InferPalmDetectorKind(
+                    palmOptions.DetectorModelFile, _cmbPalmDetectorKind.SelectedItem?.ToString() ?? palmOptions.DetectorKind);
                 palmOptions.DetectorInputSize = int.TryParse(_cmbPalmDetectorInputSize.SelectedItem?.ToString(), out int palmDetectorInputSize)
                     ? palmDetectorInputSize
                     : palmOptions.DetectorInputSize;
@@ -1159,6 +1167,19 @@ public sealed class CameraSettingsForm : Form
         if (!string.IsNullOrWhiteSpace(preferred) && combo.Items.Contains(preferred)) return preferred;
         if (!string.IsNullOrWhiteSpace(fallback) && combo.Items.Contains(fallback)) return fallback;
         return combo.Items.Count > 0 ? combo.Items[0]?.ToString() ?? fallback : fallback;
+    }
+
+    private static string InferPalmDetectorKind(string? modelFile, string? fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(modelFile))
+        {
+            if (modelFile.Contains("rtmdet", StringComparison.OrdinalIgnoreCase) ||
+                modelFile.Contains("hand", StringComparison.OrdinalIgnoreCase)) return "RTMDet";
+            if (modelFile.Contains("blaze", StringComparison.OrdinalIgnoreCase) ||
+                modelFile.Contains("palm", StringComparison.OrdinalIgnoreCase)) return "BlazePalm";
+        }
+
+        return string.Equals(fallback, "RTMDet", StringComparison.OrdinalIgnoreCase) ? "RTMDet" : "BlazePalm";
     }
 
     private bool ValidateRoiNames()

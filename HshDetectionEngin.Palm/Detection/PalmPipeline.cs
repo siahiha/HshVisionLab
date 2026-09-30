@@ -36,6 +36,7 @@ public sealed class PalmPipeline : IProcessingPipeline
     private readonly PalmDatabase? _database;
     private readonly string _detectorKind;
     private readonly string _detectorInput;
+    private readonly bool _detectorUsesNhwc;
     private readonly string? _recognizerInput;
     private readonly List<Track> _tracks = [];
     private int _nextTrackId = 1;
@@ -48,11 +49,11 @@ public sealed class PalmPipeline : IProcessingPipeline
         LicenseValidator.Require(license, LicensedFeature.Palm);
         _options = options;
         _detectorKind = options.DetectorKind.Equals("RTMDet", StringComparison.OrdinalIgnoreCase) ? "RTMDet-nano" : "BlazePalm";
-        _detector = CreateSession(detectorPath, options, out _detectorInput);
+        _detector = CreateSession(detectorPath, options, out _detectorInput, out _detectorUsesNhwc);
         _database = database;
         if (options.RecognitionEnabled && database is not null && !string.IsNullOrWhiteSpace(recognitionPath))
         {
-            _recognizer = CreateSession(recognitionPath, options, out string recognizerInput);
+            _recognizer = CreateSession(recognitionPath, options, out string recognizerInput, out _);
             _recognizerInput = recognizerInput;
         }
     }
@@ -106,8 +107,12 @@ public sealed class PalmPipeline : IProcessingPipeline
     private List<Candidate> DetectBlazePalm(Mat source)
     {
         int size = Math.Clamp(_options.DetectorInputSize, 64, 1024);
-        float[] input = PrepareBlazeInput(source, size);
-        using OrtValue tensor = OrtValue.CreateTensorValueFromMemory(input, [1, 3, size, size]);
+        using Mat prepared = PrepareBlazeImage(source, size, out float ratio, out int padX, out int padY);
+        float[] input = _detectorUsesNhwc
+            ? CopyImageToNhwc(prepared, [0, 0, 0], [255, 255, 255])
+            : CopyImageToNchw(prepared, [0, 0, 0], [255, 255, 255]);
+        long[] shape = _detectorUsesNhwc ? [1, size, size, 3] : [1, 3, size, size];
+        using OrtValue tensor = OrtValue.CreateTensorValueFromMemory(input, shape);
         using RunOptions runOptions = new();
         using var outputs = _detector.Run(runOptions, new Dictionary<string, OrtValue> { [_detectorInput] = tensor }, _detector.OutputNames);
         float[]? scores = null; float[]? regressors = null;
@@ -125,14 +130,22 @@ public sealed class PalmPipeline : IProcessingPipeline
             float confidence = Sigmoid(scores[i]);
             if (confidence < _options.DetectionConfidence) continue;
             int offset = i * 18;
-            float cx = anchors[i].X + regressors[offset] / size;
-            float cy = anchors[i].Y + regressors[offset + 1] / size;
-            float width = MathF.Abs(regressors[offset + 2] / size);
-            float height = MathF.Abs(regressors[offset + 3] / size);
-            Candidate candidate = new() { Confidence = confidence, Bounds = NormalizeRect(cx - width / 2, cy - height / 2, width, height, source.Size) };
+            float cx = (anchors[i].X * size + regressors[offset] - padX) / ratio;
+            float cy = (anchors[i].Y * size + regressors[offset + 1] - padY) / ratio;
+            float width = MathF.Abs(regressors[offset + 2]) / ratio;
+            float height = MathF.Abs(regressors[offset + 3]) / ratio;
+            Candidate candidate = new()
+            {
+                Confidence = confidence,
+                Bounds = Rectangle.FromLTRB(
+                    Math.Clamp((int)(cx - width / 2), 0, source.Width - 1),
+                    Math.Clamp((int)(cy - height / 2), 0, source.Height - 1),
+                    Math.Clamp((int)(cx + width / 2), 1, source.Width),
+                    Math.Clamp((int)(cy + height / 2), 1, source.Height))
+            };
             candidate.Keypoints = Enumerable.Range(0, 7).Select(k => new PointF(
-                Math.Clamp((anchors[i].X + regressors[offset + 4 + k * 2] / size) * source.Width, 0, source.Width - 1),
-                Math.Clamp((anchors[i].Y + regressors[offset + 5 + k * 2] / size) * source.Height, 0, source.Height - 1))).ToArray();
+                Math.Clamp((anchors[i].X * size + regressors[offset + 4 + k * 2] - padX) / ratio, 0, source.Width - 1),
+                Math.Clamp((anchors[i].Y * size + regressors[offset + 5 + k * 2] - padY) / ratio, 0, source.Height - 1))).ToArray();
             candidates.Add(candidate);
         }
         return Nms(candidates);
@@ -203,18 +216,69 @@ public sealed class PalmPipeline : IProcessingPipeline
     {
         var kept = new List<Candidate>(); foreach (Candidate candidate in candidates.OrderByDescending(x => x.Confidence)) if (kept.All(x => IoU(x.Bounds, candidate.Bounds) < _options.NmsIoU)) kept.Add(candidate); return kept.Take(Math.Max(1, _options.MaxHands)).ToList();
     }
-    private static float[] PrepareBlazeInput(Mat source, int size) => CopyImageToNchw(source, [0, 0, 0], [255, 255, 255], size, rgb: true);
+    private static Mat PrepareBlazeImage(Mat source, int size, out float ratio, out int padX, out int padY)
+    {
+        ratio = Math.Min(size / (float)source.Width, size / (float)source.Height);
+        int width = Math.Max(1, (int)MathF.Round(source.Width * ratio));
+        int height = Math.Max(1, (int)MathF.Round(source.Height * ratio));
+        padX = (size - width) / 2;
+        padY = (size - height) / 2;
+        using var resized = new Mat();
+        CvInvoke.Resize(source, resized, new Size(width, height));
+        var prepared = new Mat(size, size, DepthType.Cv8U, 3);
+        prepared.SetTo(new MCvScalar(0, 0, 0));
+        using Mat region = new(prepared, new Rectangle(padX, padY, width, height));
+        resized.CopyTo(region);
+        return prepared;
+    }
+
     private static float[] CopyImageToNchw(Mat source, float[] mean, float[] std, int? targetSize = null, bool rgb = true)
     {
         using var image = new Mat(); if (targetSize is int size) CvInvoke.Resize(source, image, new Size(size, size)); else source.CopyTo(image);
         using var floatImage = new Mat(); image.ConvertTo(floatImage, DepthType.Cv32F); int width = image.Width, height = image.Height, plane = width * height; float[] result = new float[plane * 3]; var row = new float[width * 3];
         for (int y = 0; y < height; y++) { Marshal.Copy(IntPtr.Add(floatImage.DataPointer, checked((int)(y * floatImage.Step))), row, 0, row.Length); for (int x = 0; x < width; x++) { int p = y * width + x, s = x * 3; float c0 = rgb ? row[s + 2] : row[s]; float c2 = rgb ? row[s] : row[s + 2]; result[p] = (c0 - mean[0]) / std[0]; result[plane + p] = (row[s + 1] - mean[1]) / std[1]; result[plane * 2 + p] = (c2 - mean[2]) / std[2]; } } return result;
     }
+    private static float[] CopyImageToNhwc(Mat source, float[] mean, float[] std, bool rgb = true)
+    {
+        using var floatImage = new Mat(); source.ConvertTo(floatImage, DepthType.Cv32F);
+        int width = source.Width, height = source.Height;
+        float[] result = new float[width * height * 3];
+        var row = new float[width * 3];
+        for (int y = 0; y < height; y++)
+        {
+            Marshal.Copy(IntPtr.Add(floatImage.DataPointer, checked((int)(y * floatImage.Step))), row, 0, row.Length);
+            for (int x = 0; x < width; x++)
+            {
+                int p = (y * width + x) * 3, s = x * 3;
+                float c0 = rgb ? row[s + 2] : row[s];
+                float c2 = rgb ? row[s] : row[s + 2];
+                result[p] = (c0 - mean[0]) / std[0];
+                result[p + 1] = (row[s + 1] - mean[1]) / std[1];
+                result[p + 2] = (c2 - mean[2]) / std[2];
+            }
+        }
+        return result;
+    }
     private static List<(float X, float Y)> BlazeAnchors() { var result = new List<(float, float)>(2016); Add(24, 2); Add(12, 6); return result; void Add(int grid, int repeats) { for (int y = 0; y < grid; y++) for (int x = 0; x < grid; x++) for (int r = 0; r < repeats; r++) result.Add(((x + .5f) / grid, (y + .5f) / grid)); } }
     private static float Sigmoid(float value) => value >= 0 ? 1f / (1f + MathF.Exp(-value)) : MathF.Exp(value) / (1f + MathF.Exp(value));
     private static Rectangle NormalizeRect(float x, float y, float w, float h, Size size) => Rectangle.FromLTRB(Math.Clamp((int)(x * size.Width), 0, size.Width - 1), Math.Clamp((int)(y * size.Height), 0, size.Height - 1), Math.Clamp((int)((x + w) * size.Width), 1, size.Width), Math.Clamp((int)((y + h) * size.Height), 1, size.Height));
     private static float IoU(Rectangle a, Rectangle b) { Rectangle i = Rectangle.Intersect(a, b); if (i.IsEmpty) return 0; float area = i.Width * i.Height; return area / (a.Width * a.Height + b.Width * b.Height - area); }
     private static byte[] EncodeJpeg(Mat image) { using Image<Bgr, byte> bgr = image.ToImage<Bgr, byte>(); using Bitmap bitmap = bgr.ToBitmap(); using var stream = new MemoryStream(); bitmap.Save(stream, ImageFormat.Jpeg); return stream.ToArray(); }
-    private static InferenceSession CreateSession(string path, PalmPipelineOptions options, out string inputName) { if (!File.Exists(path)) throw new FileNotFoundException("Palm model not found.", path); using var settings = new SessionOptions { GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL, ExecutionMode = ExecutionMode.ORT_SEQUENTIAL, IntraOpNumThreads = 1, InterOpNumThreads = 1 }; var session = new InferenceSession(path, settings); inputName = session.InputNames.First(); return session; }
+    private static InferenceSession CreateSession(string path, PalmPipelineOptions options, out string inputName, out bool usesNhwc)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException("Palm model not found.", path);
+        using var settings = new SessionOptions
+        {
+            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            IntraOpNumThreads = 1,
+            InterOpNumThreads = 1
+        };
+        var session = new InferenceSession(path, settings);
+        inputName = session.InputNames.First();
+        int[] dimensions = session.InputMetadata[inputName].Dimensions.ToArray();
+        usesNhwc = dimensions.Length == 4 && dimensions[3] == 3 && dimensions[1] != 3;
+        return session;
+    }
     public void Dispose() { _detector.Dispose(); _recognizer?.Dispose(); GC.SuppressFinalize(this); }
 }

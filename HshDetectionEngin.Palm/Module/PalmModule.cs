@@ -47,7 +47,9 @@ public sealed class PalmModule
                     ["PalmEventCooldownSeconds"] = options.EventCooldownSeconds
                 };
             },
-            availabilityMessage: _license.Allows(LicensedFeature.Palm) ? null : _license.Message);
+            availabilityMessage: _license.Allows(LicensedFeature.Palm)
+                ? null
+                : $"Palm processing is unavailable: {(_license.Message.Contains("Palm", StringComparison.OrdinalIgnoreCase) ? _license.Message : "the license does not include the Palm feature.")}");
     }
 
     public PalmPipeline? CreatePipeline(
@@ -71,8 +73,10 @@ public sealed class PalmModule
             detectorPath,
             new PalmPipelineOptions
             {
-                DetectorKind = options.DetectorKind,
-                DetectorInputSize = options.DetectorInputSize,
+                DetectorKind = InferDetectorKind(options.DetectorModelFile, options.DetectorKind),
+                DetectorInputSize = InferDetectorKind(options.DetectorModelFile, options.DetectorKind).Equals("RTMDet", StringComparison.OrdinalIgnoreCase)
+                    ? 320
+                    : options.DetectorInputSize,
                 DetectionConfidence = options.DetectionConfidence,
                 NmsIoU = options.NmsIoU,
                 MaxHands = options.MaxHands,
@@ -85,5 +89,14 @@ public sealed class PalmModule
             recognitionPath,
             _database,
             _license);
+    }
+
+    private static string InferDetectorKind(string modelFile, string configuredKind)
+    {
+        if (modelFile.Contains("rtmdet", StringComparison.OrdinalIgnoreCase) ||
+            modelFile.Contains("hand", StringComparison.OrdinalIgnoreCase)) return "RTMDet";
+        if (modelFile.Contains("blaze", StringComparison.OrdinalIgnoreCase) ||
+            modelFile.Contains("palm", StringComparison.OrdinalIgnoreCase)) return "BlazePalm";
+        return configuredKind;
     }
 }

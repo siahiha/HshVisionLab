@@ -34,6 +34,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\Models\Palm\palm_blazepalm_full.onnx"
+          Link="Models\Palm\palm_blazepalm_full.onnx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\Models\Palm\palm_ccnet.onnx"
+          Link="Models\Palm\palm_ccnet.onnx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="..\HshDetectionEngin.Plate\Models\plate_yolo.onnx"
           Link="Models\Plate\plate_yolo.onnx"
           CopyToOutputDirectory="PreserveNewest"

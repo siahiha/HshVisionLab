@@ -36,6 +36,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Models\Palm\palm_blazepalm_full.onnx"
+          Link="Models\Palm\palm_blazepalm_full.onnx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="Models\Palm\palm_ccnet.onnx"
+          Link="Models\Palm\palm_ccnet.onnx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="HshDetectionEngin.Plate\Models\plate_yolo.onnx"
           Link="Models\Plate\plate_yolo.onnx"
           CopyToOutputDirectory="PreserveNewest"
@@ -103,6 +114,7 @@
     <Compile Remove="HshDetectionEngin.LicenseRequest\**\*.cs" />
     <Compile Remove="HshDetectionEngin.LicenseIssuer\**\*.cs" />
     <Compile Remove="HshDetectionEngin.Tools\**\*.cs" />
+    <Compile Remove="artifacts\**\*.cs" />
     <!-- The Windows service is a separate SDK project and must not be included
          by the root project's recursive Compile glob. -->
     <Compile Remove="HshDetectionService\**\*.cs" />
