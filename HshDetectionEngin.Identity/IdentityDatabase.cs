@@ -354,6 +354,14 @@ public sealed class IdentityDatabase : IDisposable
         }
     }
 
+    public IdentityMatch? IdentifyKnownPalm(IReadOnlyList<float> embedding, float minimumSimilarity)
+    {
+        lock (_gate)
+        {
+            return FindBestPalmMatchUnsafe(embedding, minimumSimilarity, includeUnknown: false);
+        }
+    }
+
     public IdentityMatch IdentifyOrCreateUnknownPalm(IReadOnlyList<float> embedding, float minimumSimilarity,
         float unknownSimilarity, byte[]? image, string fileName, float detectionConfidence)
     {

@@ -19,7 +19,7 @@ public sealed class PalmPipelineOptions
     public int RecognitionInputSize { get; init; } = 128;
     public bool RecognitionEnabled { get; init; } = true;
     public float RecognitionThreshold { get; init; } = 0.55f;
-    public float UnknownMatchThreshold { get; init; } = 0.45f;
+    public float UnknownMatchThreshold { get; init; } = 0.35f;
     public float MatchIou { get; init; } = 0.25f;
     public int TrackMaxMisses { get; init; } = 10;
 }
@@ -41,6 +41,7 @@ public sealed class PalmPipeline : IProcessingPipeline
     private readonly string? _recognizerInput;
     private readonly List<Track> _tracks = [];
     private readonly Dictionary<int, PalmMatch> _detectionOnlyUnknowns = [];
+    private readonly Dictionary<int, PalmMatch> _recognitionTrackMatches = [];
     private int _nextTrackId = 1;
 
     public string Name => $"{_detectorKind} Palm Detection + {(_recognizer is null ? "Detection" : "Palmprint Recognition")}";
@@ -72,8 +73,7 @@ public sealed class PalmPipeline : IProcessingPipeline
             using Mat palm = ExtractPalm(context.Image, candidate);
             float[]? embedding = _recognizer is null ? null : RunEmbedding(palm);
             PalmMatch? match = embedding is not null && _database is not null
-                ? _database.IdentifyOrCreateUnknown(embedding, _options.RecognitionThreshold,
-                    _options.UnknownMatchThreshold, EncodeJpeg(palm), "runtime-palm.jpg", candidate.Confidence)
+                ? _database.IdentifyKnown(embedding, _options.RecognitionThreshold)
                 : null;
             string label = match?.Name ?? (_recognizer is null ? "Palm" : "Unknown palm");
             byte[] crop = EncodeJpeg(palm);
@@ -88,9 +88,67 @@ public sealed class PalmPipeline : IProcessingPipeline
             accepted.Add((candidate.Bounds, candidate.Confidence, label, metadata));
         }
         List<AnalysisDetection> detections = UpdateTracks(accepted);
+        if (_recognizer is not null && _database is not null)
+            detections = ResolveRecognition(detections);
         if (_recognizer is null && _database is not null)
             detections = RegisterDetectionOnlyUnknowns(detections);
         return new PipelineResult { Detections = detections };
+    }
+
+    private List<AnalysisDetection> ResolveRecognition(List<AnalysisDetection> detections)
+    {
+        PalmDatabase database = _database!;
+        for (int index = 0; index < detections.Count; index++)
+        {
+            AnalysisDetection detection = detections[index];
+            if (detection.Metadata?.TryGetValue("Recognized", out object? recognizedValue) == true &&
+                recognizedValue is bool recognized && recognized)
+            {
+                if (detection.TrackId is int knownTrackId &&
+                    detection.Metadata.TryGetValue("IdentityId", out object? knownId) &&
+                    knownId is string knownIdentityId && !string.IsNullOrWhiteSpace(knownIdentityId))
+                {
+                    _recognitionTrackMatches[knownTrackId] = new PalmMatch(
+                        knownIdentityId,
+                        detection.Label,
+                        detection.Metadata.TryGetValue("Similarity", out object? knownSimilarity) && knownSimilarity is not null
+                            ? Convert.ToSingle(knownSimilarity, System.Globalization.CultureInfo.InvariantCulture)
+                            : 0f,
+                        detection.Metadata.TryGetValue("PersonNumber", out object? knownNumber) && knownNumber is not null
+                            ? Convert.ToInt32(knownNumber, System.Globalization.CultureInfo.InvariantCulture)
+                            : 0,
+                        detection.Metadata.TryGetValue("MatchedSampleId", out object? knownSample) ? knownSample as string : null,
+                        detection.Metadata.TryGetValue("IsUnknown", out object? knownUnknown) && knownUnknown is bool isUnknown && isUnknown);
+                }
+                continue;
+            }
+
+            if (detection.TrackId is not int trackId ||
+                detection.Metadata?.TryGetValue("PalmEmbedding", out object? embeddingValue) != true ||
+                embeddingValue is not float[] embedding || embedding.Length == 0 ||
+                detection.Metadata.TryGetValue("PalmImageJpeg", out object? imageValue) != true ||
+                imageValue is not byte[] image || image.Length == 0)
+                continue;
+
+            if (!_recognitionTrackMatches.TryGetValue(trackId, out PalmMatch? match))
+            {
+                match = database.IdentifyOrCreateUnknown(embedding, _options.RecognitionThreshold,
+                    _options.UnknownMatchThreshold, image, "runtime-palm.jpg", detection.Confidence);
+                _recognitionTrackMatches[trackId] = match;
+            }
+
+            var metadata = new Dictionary<string, object?>(detection.Metadata)
+            {
+                ["Recognized"] = true,
+                ["IdentityId"] = match.Id,
+                ["Similarity"] = match.Similarity,
+                ["PersonNumber"] = match.PersonNumber,
+                ["IsUnknown"] = match.IsUnknown,
+                ["MatchedSampleId"] = match.MatchedSampleId
+            };
+            detections[index] = detection with { Label = match.Name, Metadata = metadata };
+        }
+        return detections;
     }
 
     private List<AnalysisDetection> RegisterDetectionOnlyUnknowns(List<AnalysisDetection> detections)
@@ -251,6 +309,8 @@ public sealed class PalmPipeline : IProcessingPipeline
         _tracks.RemoveAll(x => x.Misses > _options.TrackMaxMisses);
         foreach (int key in _detectionOnlyUnknowns.Keys.Where(key => _tracks.All(track => track.Id != key)).ToList())
             _detectionOnlyUnknowns.Remove(key);
+        foreach (int key in _recognitionTrackMatches.Keys.Where(key => _tracks.All(track => track.Id != key)).ToList())
+            _recognitionTrackMatches.Remove(key);
         return results;
     }
 
