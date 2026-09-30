@@ -19,6 +19,7 @@ public sealed class PalmPipelineOptions
     public int RecognitionInputSize { get; init; } = 128;
     public bool RecognitionEnabled { get; init; } = true;
     public float RecognitionThreshold { get; init; } = 0.55f;
+    public float UnknownMatchThreshold { get; init; } = 0.45f;
     public float MatchIou { get; init; } = 0.25f;
     public int TrackMaxMisses { get; init; } = 10;
 }
@@ -70,7 +71,8 @@ public sealed class PalmPipeline : IProcessingPipeline
             using Mat palm = ExtractPalm(context.Image, candidate);
             float[]? embedding = _recognizer is null ? null : RunEmbedding(palm);
             PalmMatch? match = embedding is not null && _database is not null
-                ? _database.Identify(embedding, _options.RecognitionThreshold)
+                ? _database.IdentifyOrCreateUnknown(embedding, _options.RecognitionThreshold,
+                    _options.UnknownMatchThreshold, EncodeJpeg(palm), "runtime-palm.jpg", candidate.Confidence)
                 : null;
             string label = match?.Name ?? (_recognizer is null ? "Palm" : "Unknown palm");
             byte[] crop = EncodeJpeg(palm);
@@ -78,6 +80,7 @@ public sealed class PalmPipeline : IProcessingPipeline
             {
                 ["Accepted"] = true, ["Recognized"] = match is not null, ["IdentityId"] = match?.Id,
                 ["Similarity"] = match?.Similarity ?? 0f, ["PersonNumber"] = match?.PersonNumber ?? 0,
+                ["IsUnknown"] = match?.IsUnknown ?? false, ["MatchedSampleId"] = match?.MatchedSampleId,
                 ["PalmImageJpeg"] = crop, ["PalmEmbedding"] = embedding,
                 ["PalmRecordConfidence"] = candidate.Confidence, ["PalmRecognitionThreshold"] = _options.RecognitionThreshold
             };

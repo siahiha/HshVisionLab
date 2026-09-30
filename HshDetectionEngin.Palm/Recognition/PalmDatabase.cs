@@ -26,7 +26,8 @@ public sealed class PalmIdentity
     public List<PalmSample> Samples { get; set; } = [];
 }
 
-public sealed record PalmMatch(string Id, string Name, float Similarity, int PersonNumber, string? MatchedSampleId);
+public sealed record PalmMatch(string Id, string Name, float Similarity, int PersonNumber,
+    string? MatchedSampleId, bool IsUnknown = false);
 
 /// <summary>Compatibility adapter over the shared identity database.</summary>
 public sealed class PalmDatabase : IDisposable
@@ -45,6 +46,9 @@ public sealed class PalmDatabase : IDisposable
         string? personId = null, float detectionConfidence = 0) =>
         MapSample(_store.RegisterPalmSample(name, embedding, palmImage, originalFileName, personId, detectionConfidence));
     public PalmMatch? Identify(IReadOnlyList<float> embedding, float minimumSimilarity) => MapMatch(_store.IdentifyPalm(embedding, minimumSimilarity));
+    public PalmMatch IdentifyOrCreateUnknown(IReadOnlyList<float> embedding, float minimumSimilarity, float unknownSimilarity,
+        byte[]? palmImage = null, string originalFileName = "runtime-palm.jpg", float detectionConfidence = 0) =>
+        MapMatch(_store.IdentifyOrCreateUnknownPalm(embedding, minimumSimilarity, unknownSimilarity, palmImage, originalFileName, detectionConfidence))!;
     public bool RemoveSample(string sampleId) => _store.RemovePalmSample(sampleId);
 
     private PalmIdentity MapPerson(IdentityPersonRecord person) => new()
@@ -58,6 +62,6 @@ public sealed class PalmDatabase : IDisposable
         SampleNumber = sample.SampleNumber, OriginalFileName = sample.OriginalFileName, CreatedAtUtc = sample.CreatedAtUtc,
         DetectionConfidence = sample.DetectionConfidence, PalmImage = sample.PalmImage.ToArray(), Embedding = sample.Embedding.ToArray()
     };
-    private static PalmMatch? MapMatch(IdentityMatch? match) => match is null ? null : new PalmMatch(match.PersonId, match.Name, match.Similarity, match.PersonNumber, match.MatchedSampleId);
+    private static PalmMatch? MapMatch(IdentityMatch? match) => match is null ? null : new PalmMatch(match.PersonId, match.Name, match.Similarity, match.PersonNumber, match.MatchedSampleId, match.IsUnknown);
     public void Dispose() { if (_ownsStore) _store.Dispose(); GC.SuppressFinalize(this); }
 }

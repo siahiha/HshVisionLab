@@ -350,15 +350,35 @@ public sealed class IdentityDatabase : IDisposable
     {
         lock (_gate)
         {
-            IdentityMatch? best = null;
-            foreach (IdentityPalmSampleRecord sample in GetPalmSamples())
+            return FindBestPalmMatchUnsafe(embedding, minimumSimilarity, includeUnknown: true);
+        }
+    }
+
+    public IdentityMatch IdentifyOrCreateUnknownPalm(IReadOnlyList<float> embedding, float minimumSimilarity,
+        float unknownSimilarity, byte[]? image, string fileName, float detectionConfidence)
+    {
+        lock (_gate)
+        {
+            IdentityMatch? known = FindBestPalmMatchUnsafe(embedding, minimumSimilarity, includeUnknown: false);
+            if (known is not null) return known;
+
+            IdentityMatch? bestUnknown = FindBestPalmMatchUnsafe(embedding, unknownSimilarity, includeUnknown: true, onlyUnknown: true);
+            if (bestUnknown is not null)
             {
-                IdentityPersonRecord? person = FindPersonUnsafe(sample.PersonId);
-                if (person is null) continue;
-                float score = Cosine(embedding, sample.Embedding);
-                if (best is null || score > best.Similarity) best = new IdentityMatch(person.Id, person.Name, score, person.PersonNumber, person.IsUnknown, sample.Id);
+                IdentityPersonRecord person = FindPersonUnsafe(bestUnknown.PersonId)!;
+                IdentityPalmSampleRecord[] samples = GetPalmSamples(person.Id).ToArray();
+                if (image is { Length: > 0 } && samples.Length < MaxSamplesPerPerson &&
+                    (samples.Length == 0 || DateTime.UtcNow - samples.Max(item => item.CreatedAtUtc) >= TimeSpan.FromSeconds(10)))
+                    RegisterPalmSample(person.Name, embedding, image, fileName, person.Id, detectionConfidence, DateTime.UtcNow);
+                return bestUnknown;
             }
-            return best is not null && best.Similarity >= minimumSimilarity ? best : null;
+
+            int number = NextPersonNumberUnsafe();
+            IdentityPersonRecord created = CreatePerson($"Unknown Palm #{number:0000}", true);
+            IdentityPalmSampleRecord added = RegisterPalmSample(
+                created.Name, embedding, image is { Length: > 0 } ? image : new byte[] { 1 },
+                fileName, created.Id, detectionConfidence, DateTime.UtcNow);
+            return new IdentityMatch(created.Id, created.Name, 1f, created.PersonNumber, true, added.Id);
         }
     }
 
@@ -462,6 +482,22 @@ public sealed class IdentityDatabase : IDisposable
     }
 
     private IdentityPersonRecord? FindPersonUnsafe(string id) => GetPeopleUnsafe().FirstOrDefault(item => item.Id == id);
+    private IdentityMatch? FindBestPalmMatchUnsafe(IReadOnlyList<float> embedding, float minimumSimilarity,
+        bool includeUnknown, bool onlyUnknown = false)
+    {
+        IdentityMatch? best = null;
+        foreach (IdentityPalmSampleRecord sample in GetPalmSamples())
+        {
+            IdentityPersonRecord? person = FindPersonUnsafe(sample.PersonId);
+            if (person is null) continue;
+            bool unknown = person.IsUnknown || person.Name.StartsWith("Unknown Palm #", StringComparison.OrdinalIgnoreCase);
+            if ((!includeUnknown && unknown) || (onlyUnknown && !unknown)) continue;
+            float score = Cosine(embedding, sample.Embedding);
+            if (best is null || score > best.Similarity)
+                best = new IdentityMatch(person.Id, person.Name, score, person.PersonNumber, unknown, sample.Id);
+        }
+        return best is not null && best.Similarity >= minimumSimilarity ? best : null;
+    }
     private int NextPersonNumberUnsafe() => GetPeopleUnsafe().Select(item => item.PersonNumber).DefaultIfEmpty(0).Max() + 1;
     private bool IsEmpty() { using SqliteCommand command = CreateCommand("SELECT (SELECT COUNT(*) FROM People)+(SELECT COUNT(*) FROM FaceSamples)+(SELECT COUNT(*) FROM PalmSamples);"); return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 0; }
 

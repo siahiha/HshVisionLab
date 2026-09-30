@@ -14,6 +14,13 @@ The defaults select BlazePalm plus CCNet. The model can be changed from the
 Palm processing options without changing code. PPNet is supported as a generic
 embedding model when its exported ONNX graph follows the same input contract.
 
+At runtime, every accepted palm is embedded and searched in the shared
+`identity-database.db`. A known match is emitted with the person's name and
+identity metadata. If no known match passes `RecognitionThreshold`, the
+embedding is compared with persisted unknown palms using
+`UnknownMatchThreshold`; an unknown person such as `Unknown Palm #0001` is
+created and sampled with the same cooldown/capacity rules as Face.
+
 Recommended upstream sources:
 
 - BlazePalm ONNX conversion: <https://github.com/yakhyo/mediapipe-hand-landmark-onnx>

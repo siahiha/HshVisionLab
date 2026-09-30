@@ -83,6 +83,7 @@ public sealed class PalmModule
                 RecognitionInputSize = options.RecognitionInputSize,
                 RecognitionEnabled = options.RecognitionEnabled,
                 RecognitionThreshold = options.RecognitionThreshold,
+                UnknownMatchThreshold = options.UnknownMatchThreshold,
                 MatchIou = options.MatchIou,
                 TrackMaxMisses = options.TrackMaxMisses
             },

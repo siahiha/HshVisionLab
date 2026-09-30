@@ -42,6 +42,7 @@ public sealed class CameraSettingsForm : Form
     private readonly NumericUpDown _numPalmNms = new();
     private readonly NumericUpDown _numPalmMaxHands = new();
     private readonly NumericUpDown _numPalmRecognitionThreshold = new();
+    private readonly NumericUpDown _numPalmUnknownMatch = new();
     private readonly NumericUpDown _numPalmRecordConfidence = new();
     private readonly NumericUpDown _numPalmIou = new();
     private readonly NumericUpDown _numPalmTrackMisses = new();
@@ -332,6 +333,7 @@ public sealed class CameraSettingsForm : Form
         AddRow(properties, "Recognition model", ConfigureCombo(_cmbPalmRecognitionModel));
         AddRow(properties, "Recognition input size", ConfigureCombo(_cmbPalmRecognitionInputSize, "64", "96", "128", "160", "224", "256"));
         AddRow(properties, "Known-palm threshold", ConfigureNumber(_numPalmRecognitionThreshold, 0.05m, 0.99m, 0.01m, 2));
+        AddRow(properties, "Unknown-palm match threshold", ConfigureNumber(_numPalmUnknownMatch, 0.05m, 0.99m, 0.01m, 2));
 
         AddSection(properties, "PALM TRACKING AND RECORDING");
         AddRow(properties, "Max processing FPS", ConfigureNumber(_numPalmMaxFps, 1, 30, 1, 0));
@@ -811,6 +813,7 @@ public sealed class CameraSettingsForm : Form
             ? palm.RecognitionInputSize.ToString()
             : _cmbPalmRecognitionInputSize.Items.Cast<string>().FirstOrDefault();
         _numPalmRecognitionThreshold.Value = (decimal)Math.Clamp(palm.RecognitionThreshold, 0.05f, 0.99f);
+        _numPalmUnknownMatch.Value = (decimal)Math.Clamp(palm.UnknownMatchThreshold, 0.05f, 0.99f);
         _numPalmMaxFps.Value = Math.Clamp(item.MaxFps, 1, 30);
         _numPalmThreads.Value = Math.Clamp(item.Threads, 1, (int)_numPalmThreads.Maximum);
         _numPalmRecordConfidence.Value = (decimal)Math.Clamp(palm.RecordConfidence, 0.05f, 0.99f);
@@ -894,6 +897,7 @@ public sealed class CameraSettingsForm : Form
                     ? palmRecognitionInputSize
                     : palmOptions.RecognitionInputSize;
                 palmOptions.RecognitionThreshold = (float)_numPalmRecognitionThreshold.Value;
+                palmOptions.UnknownMatchThreshold = (float)_numPalmUnknownMatch.Value;
                 palmOptions.RecordConfidence = (float)_numPalmRecordConfidence.Value;
                 palmOptions.EventCooldownSeconds = (int)_numPalmEventCooldown.Value;
                 palmOptions.MatchIou = (float)_numPalmIou.Value;

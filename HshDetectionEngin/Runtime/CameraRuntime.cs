@@ -83,7 +83,7 @@ public class CameraRuntime : IDisposable
     public IReadOnlyList<HistoryItem> History { get { lock (_historyGate) return _history.ToArray(); } }
     public IReadOnlyList<AnalysisHistoryItem> AnalysisHistory { get { lock (_analysisHistoryGate) return _analysisHistory.ToArray(); } }
     public IReadOnlyList<HistoryItem> ArchivedHistory => CameraHistoryArchive.LoadPlate(Settings.Id);
-    public IReadOnlyList<AnalysisHistoryItem> ArchivedAnalysisHistory => CameraHistoryArchive.LoadFace(Settings.Id);
+    public IReadOnlyList<AnalysisHistoryItem> ArchivedAnalysisHistory => CameraHistoryArchive.LoadAnalysis(Settings.Id);
 
     /// <summary>
     /// Returns the raw source frame captured for the latest detection pass.
@@ -1026,7 +1026,7 @@ public class CameraRuntime : IDisposable
                 while (_analysisHistory.Count > 15)
                 {
                     AnalysisHistoryItem evicted = _analysisHistory[^1];
-                    if (!CameraHistoryArchive.TryAppendFace(Settings.Id, evicted)) break;
+                    if (!CameraHistoryArchive.TryAppendAnalysis(Settings.Id, evicted)) break;
                     _analysisHistory.RemoveAt(_analysisHistory.Count - 1);
                     evicted.Crop.Dispose();
                 }
@@ -1297,6 +1297,11 @@ internal static class CameraHistoryArchive
         public int Y { get; set; }
         public int Width { get; set; }
         public int Height { get; set; }
+        public string? IdentityId { get; set; }
+        public float Similarity { get; set; }
+        public int PersonNumber { get; set; }
+        public bool IsUnknown { get; set; }
+        public bool Recognized { get; set; }
         public string CropBase64 { get; set; } = string.Empty;
     }
 
@@ -1315,9 +1320,12 @@ internal static class CameraHistoryArchive
         });
     }
 
-    public static bool TryAppendFace(string cameraId, CameraRuntime.AnalysisHistoryItem item)
+    public static bool TryAppendAnalysis(string cameraId, CameraRuntime.AnalysisHistoryItem item)
     {
         AnalysisDetection detection = item.Detection;
+        string? identityId = detection.Metadata?.TryGetValue("IdentityId", out object? identityValue) == true
+            ? identityValue as string
+            : null;
         return TryAppend(new Entry
         {
             CameraId = cameraId,
@@ -1331,9 +1339,16 @@ internal static class CameraHistoryArchive
             Y = detection.Bounds.Y,
             Width = detection.Bounds.Width,
             Height = detection.Bounds.Height,
+            IdentityId = identityId,
+            Similarity = GetFloat(detection, "Similarity"),
+            PersonNumber = GetInt(detection, "PersonNumber"),
+            IsUnknown = GetBool(detection, "IsUnknown"),
+            Recognized = GetBool(detection, "Recognized"),
             CropBase64 = EncodeCrop(item.Crop)
         });
     }
+
+    public static bool TryAppendFace(string cameraId, CameraRuntime.AnalysisHistoryItem item) => TryAppendAnalysis(cameraId, item);
 
     public static IReadOnlyList<CameraRuntime.HistoryItem> LoadPlate(string cameraId)
     {
@@ -1351,23 +1366,36 @@ internal static class CameraHistoryArchive
         }
     }
 
-    public static IReadOnlyList<CameraRuntime.AnalysisHistoryItem> LoadFace(string cameraId)
+    public static IReadOnlyList<CameraRuntime.AnalysisHistoryItem> LoadAnalysis(string cameraId, AnalysisKind? kind = null)
     {
         lock (Gate)
         {
             return ReadEntries()
-                .Where(entry => entry.CameraId == cameraId && entry.Kind == "Face")
+                .Where(entry => entry.CameraId == cameraId && (kind is null || entry.Kind == kind.Value.ToString()))
                 .OrderByDescending(entry => entry.Timestamp)
                 .Select(entry =>
                 {
                     Bitmap? crop = DecodeCrop(entry.CropBase64);
                     if (crop is null) return null;
+                    AnalysisKind detectionKind = Enum.TryParse<AnalysisKind>(entry.Kind, true, out AnalysisKind parsed)
+                        ? parsed
+                        : AnalysisKind.Face;
+                    var metadata = new Dictionary<string, object?>
+                    {
+                        ["IdentityId"] = entry.IdentityId,
+                        ["Similarity"] = entry.Similarity,
+                        ["PersonNumber"] = entry.PersonNumber,
+                        ["IsUnknown"] = entry.IsUnknown,
+                        ["Recognized"] = entry.Recognized,
+                        ["Accepted"] = true
+                    };
                     var detection = new AnalysisDetection(
-                        AnalysisKind.Face,
+                        detectionKind,
                         entry.Label,
                         entry.Confidence,
                         new Rectangle(entry.X, entry.Y, entry.Width, entry.Height),
-                        entry.TrackId);
+                        entry.TrackId,
+                        metadata);
                     return new CameraRuntime.AnalysisHistoryItem(crop, detection, entry.Timestamp);
                 })
                 .Where(item => item is not null)
@@ -1375,6 +1403,9 @@ internal static class CameraHistoryArchive
                 .ToArray();
         }
     }
+
+    public static IReadOnlyList<CameraRuntime.AnalysisHistoryItem> LoadFace(string cameraId) => LoadAnalysis(cameraId, AnalysisKind.Face);
+    public static IReadOnlyList<CameraRuntime.AnalysisHistoryItem> LoadPalm(string cameraId) => LoadAnalysis(cameraId, AnalysisKind.Palm);
 
     private static bool TryAppend(Entry entry)
     {
@@ -1459,6 +1490,19 @@ internal static class CameraHistoryArchive
             : "camera-default";
         return $"{roi}:{processing}";
     }
+
+    private static float GetFloat(AnalysisDetection detection, string key) =>
+        detection.Metadata?.TryGetValue(key, out object? value) == true && value is not null
+            ? Convert.ToSingle(value, System.Globalization.CultureInfo.InvariantCulture)
+            : 0f;
+
+    private static int GetInt(AnalysisDetection detection, string key) =>
+        detection.Metadata?.TryGetValue(key, out object? value) == true && value is not null
+            ? Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture)
+            : 0;
+
+    private static bool GetBool(AnalysisDetection detection, string key) =>
+        detection.Metadata?.TryGetValue(key, out object? value) == true && value is bool flag && flag;
 }
 
 

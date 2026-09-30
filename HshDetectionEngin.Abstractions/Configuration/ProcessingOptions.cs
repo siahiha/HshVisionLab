@@ -53,6 +53,7 @@ public sealed class PalmProcessingOptions
     public int RecognitionInputSize { get; set; } = 128;
     public bool RecognitionEnabled { get; set; } = true;
     public float RecognitionThreshold { get; set; } = 0.55f;
+    public float UnknownMatchThreshold { get; set; } = 0.45f;
     public float RecordConfidence { get; set; } = 0.55f;
     public float MatchIou { get; set; } = 0.25f;
     public int TrackMaxMisses { get; set; } = 10;
@@ -161,6 +162,7 @@ public sealed partial class CameraProcessingSettings
                 RecognitionInputSize = Legacy("PalmRecognitionInputSize", 128),
                 RecognitionEnabled = Legacy("PalmRecognitionEnabled", true),
                 RecognitionThreshold = Legacy("PalmRecognitionThreshold", 0.55f),
+                UnknownMatchThreshold = Legacy("PalmUnknownMatchThreshold", 0.45f),
                 RecordConfidence = Legacy("PalmRecordConfidence", 0.55f),
                 MatchIou = Legacy("PalmMatchIou", 0.25f),
                 TrackMaxMisses = Legacy("PalmTrackMaxMisses", 10),
