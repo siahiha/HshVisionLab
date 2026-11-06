@@ -23,7 +23,10 @@ internal sealed class CameraPipelineCoordinator : IDisposable
     private sealed record PipelineBinding(
         IProcessingPipeline Pipeline,
         CameraProcessingSettings Settings,
-        IReadOnlyDictionary<string, object?> DetectionMetadata);
+        IReadOnlyDictionary<string, object?> DetectionMetadata)
+    {
+        public TrackMotionAnalyzer Motion { get; } = new();
+    }
 
     private sealed record RoiPipelineGroup(
         string ProcessingMode,
@@ -170,6 +173,8 @@ internal sealed class CameraPipelineCoordinator : IDisposable
 
                 try
                 {
+                    item.MotionDirection ??= new();
+                    item.MotionDirection.Validate();
                     if (!string.IsNullOrWhiteSpace(module.AvailabilityMessage))
                     {
                         _reportStatus(module.AvailabilityMessage, true);
@@ -213,6 +218,12 @@ internal sealed class CameraPipelineCoordinator : IDisposable
     public bool HasConfiguredPipelines()
     {
         lock (_gate) return _graph.HasConfiguredPipelines;
+    }
+
+    public void ResetMotion()
+    {
+        lock (_gate)
+            foreach (var binding in _graph.Pipelines.Values.SelectMany(g => g.Pipelines)) binding.Motion.Reset();
     }
 
     public PipelineExecutionResult Run(Mat frame, IReadOnlyList<CameraRuntime.RuntimeRoi> rois)
@@ -319,6 +330,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             {
                 try
                 {
+                    long motionGeneration = binding.Motion.Generation;
                     using var result = binding.Pipeline.Process(new ProcessingContext
                     {
                         Image = current,
@@ -330,10 +342,11 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                         PreviousDetections = previous.ToArray()
                     });
 
-                    previous = result.Detections
+                    previous = binding.Motion.Apply(result.Detections, binding.Settings.MotionDirection, current.Size, DateTime.UtcNow, motionGeneration)
                         .Select(detection => AttachProcessingSettings(detection, binding, roi.Id, roi.Name))
                         .ToList();
-                    AddPipelineOutput(execution, previous, result.Overlays, result.OverlaysUpdated, roi);
+                    AddPipelineOutput(execution, previous, MotionOverlays(result.Overlays, previous, binding.Settings.MotionDirection, current.Size),
+                        result.OverlaysUpdated || binding.Settings.MotionDirection.Enabled, roi);
 
                     Mat? next = result.TakeNextImage();
                     if (next is not null)
@@ -375,6 +388,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             try
             {
                 using Mat pipelineInput = input.Clone();
+                long motionGeneration = binding.Motion.Generation;
                 using var result = binding.Pipeline.Process(new ProcessingContext
                 {
                     Image = pipelineInput,
@@ -386,12 +400,12 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                     PreviousDetections = []
                 });
 
-                outputs[index] = new PipelineRunOutput(
-                    result.Detections
+                var detections = binding.Motion.Apply(result.Detections, binding.Settings.MotionDirection, pipelineInput.Size, DateTime.UtcNow, motionGeneration)
                         .Select(detection => AttachProcessingSettings(detection, binding, roi.Id, roi.Name))
-                        .ToArray(),
-                    result.Overlays.ToArray(),
-                    result.OverlaysUpdated);
+                        .ToArray();
+                outputs[index] = new PipelineRunOutput(detections,
+                    MotionOverlays(result.Overlays, detections, binding.Settings.MotionDirection, pipelineInput.Size),
+                    result.OverlaysUpdated || binding.Settings.MotionDirection.Enabled);
             }
             catch (Exception ex)
             {
@@ -411,6 +425,33 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         return execution;
     }
 
+    private static IReadOnlyList<ProcessingOverlay> MotionOverlays(IReadOnlyList<ProcessingOverlay> existing,
+        IReadOnlyList<AnalysisDetection> detections, MotionDirectionSettings settings, Size size)
+    {
+        if (!settings.Enabled) return existing;
+        var overlays = existing.ToList();
+        if (settings.LineEnabled)
+            overlays.Add(new ProcessingOverlay { Kind = ProcessingOverlayKind.Polyline, Color = Color.Cyan,
+                Points = [new Point((int)(settings.LineStartX * size.Width), (int)(settings.LineStartY * size.Height)),
+                    new Point((int)(settings.LineEndX * size.Width), (int)(settings.LineEndY * size.Height))] });
+        foreach (var detection in detections)
+        {
+            if (detection.Metadata?.GetValueOrDefault("MotionState") is not "Moving" ||
+                detection.Metadata.GetValueOrDefault("MotionDx") is not float dx ||
+                detection.Metadata.GetValueOrDefault("MotionDy") is not float dy) continue;
+            float length = MathF.Sqrt(dx * dx + dy * dy);
+            if (length < .001f) continue;
+            float ux = dx / length, uy = dy / length;
+            var start = new Point(detection.Bounds.X + detection.Bounds.Width / 2, detection.Bounds.Y + detection.Bounds.Height / 2);
+            var end = new Point(start.X + (int)(ux * 30), start.Y + (int)(uy * 30));
+            var wing1 = new Point(end.X - (int)(ux * 8 - uy * 5), end.Y - (int)(uy * 8 + ux * 5));
+            var wing2 = new Point(end.X - (int)(ux * 8 + uy * 5), end.Y - (int)(uy * 8 - ux * 5));
+            overlays.Add(new ProcessingOverlay { Kind = ProcessingOverlayKind.Polyline, Color = Color.Yellow,
+                Points = [start, end, wing1, end, wing2] });
+        }
+        return overlays;
+    }
+
     private static void AddPipelineOutput(
         RoiExecutionResult target,
         IReadOnlyList<AnalysisDetection> detections,
@@ -418,13 +459,16 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         bool overlaysUpdated,
         CameraRuntime.RuntimeRoi roi)
     {
-        target.Detections.AddRange(detections.Select(detection => detection with
+        target.Detections.AddRange(detections.Select(detection =>
         {
-            Bounds = new Rectangle(
-                detection.Bounds.X + roi.Bounds.X,
-                detection.Bounds.Y + roi.Bounds.Y,
-                detection.Bounds.Width,
-                detection.Bounds.Height)
+            var metadata = detection.Metadata is null ? new Dictionary<string, object?>() : new Dictionary<string, object?>(detection.Metadata);
+            if (metadata.TryGetValue("TrackingLandmarks", out object? value) && value is PointF[] points)
+                metadata["TrackingLandmarks"] = points.Select(p => new PointF(p.X + roi.Bounds.X, p.Y + roi.Bounds.Y)).ToArray();
+            return detection with
+            {
+                Bounds = new Rectangle(detection.Bounds.X + roi.Bounds.X, detection.Bounds.Y + roi.Bounds.Y, detection.Bounds.Width, detection.Bounds.Height),
+                Metadata = metadata
+            };
         }));
         target.Overlays.AddRange(overlays.Select(overlay => MapOverlayToFrame(overlay, roi.Bounds)));
         target.OverlaysUpdated |= overlaysUpdated || overlays.Count > 0;
@@ -448,6 +492,8 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         metadata["ProcessingItemType"] = binding.Settings.Type;
         metadata["RoiId"] = roiId;
         metadata["RoiName"] = roiName;
+        metadata["RecognitionDefinitionId"] = binding.Settings.RecognitionDefinitionId;
+        if (binding.Settings.ExecutionMode == "TrackAndQueue") metadata["TrackPending"] = true;
         int historyCooldownSeconds = binding.Settings.Kind == ProcessingType.Face
             ? binding.Settings.GetOptions<FaceProcessingOptions>().EventCooldownSeconds
             : binding.Settings.Kind == ProcessingType.Plate

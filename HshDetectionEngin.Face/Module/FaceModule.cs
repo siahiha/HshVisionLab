@@ -45,7 +45,12 @@ public sealed class FaceModule
                     ["FaceEventCooldownSeconds"] = options.EventCooldownSeconds
                 };
             },
-            availabilityMessage: _license.Allows(LicensedFeature.Face) ? null : _license.Message);
+            availabilityMessage: _license.Allows(LicensedFeature.Face) ? null : _license.Message,
+            recognizerFactory: definition =>
+            {
+                LicenseValidator.Require(_license, LicensedFeature.Face);
+                return new FaceCompletionRecognizer(definition, _database);
+            });
     }
 
     public FacePipeline? CreatePipeline(
@@ -63,7 +68,7 @@ public sealed class FaceModule
         string? recognitionPath = FaceModelPaths.Find(options.RecognitionModelFile);
         if (requireRecognition && (!options.RecognitionEnabled || recognitionPath is null))
             return null;
-        if (!options.RecognitionEnabled || recognitionPath is null) recognitionPath = string.Empty;
+        if (!options.RecognitionEnabled || recognitionPath is null || item.ExecutionMode == "TrackAndQueue") recognitionPath = string.Empty;
 
         // YuNet packages currently shipped with this module declare a fixed
         // 640x640 tensor. Older settings used 320 as an intermediate resize,
@@ -86,7 +91,8 @@ public sealed class FaceModule
                 Threads = item.Threads,
                 NmsThreshold = options.NmsThreshold,
                 TopK = options.TopK,
-                UnknownMatchThreshold = options.UnknownMatchThreshold
+                UnknownMatchThreshold = options.UnknownMatchThreshold,
+                TrackOnly = item.ExecutionMode == "TrackAndQueue"
             },
             recognitionPath,
             _database,

@@ -26,7 +26,9 @@ public sealed class DesktopEventRecord
     public float Confidence { get; set; }
     public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
     public string? CropPath { get; set; }
+    public string? SecondaryCropPath { get; set; }
     public string? FullFramePath { get; set; }
+    public string DisplayAxis { get; set; } = "Auto";
     public string PayloadJson { get; set; } = "{}";
     public bool IsStaging { get; set; }
     public bool TriggerMatched { get; set; }
@@ -58,26 +60,31 @@ public sealed class DesktopHistorySubscriptionProfile
     public int CooldownSeconds { get; set; }
 }
 
-public sealed record DesktopHistoryDecision(bool Record, int CooldownSeconds, bool IncludeArtifacts);
+public sealed record DesktopHistoryDecision(
+    bool Record,
+    int CooldownSeconds,
+    bool IncludeArtifacts,
+    string DisplayAxis = "Auto");
 
 public static class DesktopHistorySubscriptionMatcher
 {
     public static DesktopHistoryDecision Evaluate(DesktopHistorySubscription? subscription, DesktopEventRecord record)
     {
         DesktopHistorySubscriptionProfile[] profiles = subscription?.Profiles?.Where(profile => profile is not null).ToArray() ?? [];
-        if (profiles.Length == 0) return new DesktopHistoryDecision(true, 0, true);
+        if (profiles.Length == 0) return new DesktopHistoryDecision(true, 0, true, InferDisplayAxis(record));
 
         DesktopHistorySubscriptionProfile[] scoped = profiles
             .Where(profile => profile.CameraIds is null || profile.CameraIds.Count == 0 || profile.CameraIds.Contains(record.CameraId, StringComparer.OrdinalIgnoreCase))
             .ToArray();
-        if (scoped.Length == 0) return new DesktopHistoryDecision(true, 0, true);
+        if (scoped.Length == 0) return new DesktopHistoryDecision(true, 0, true, InferDisplayAxis(record));
 
         DesktopHistorySubscriptionProfile[] matched = scoped.Where(profile => Matches(profile, record)).ToArray();
-        if (matched.Length == 0) return new DesktopHistoryDecision(false, 0, true);
+        if (matched.Length == 0) return new DesktopHistoryDecision(false, 0, true, InferDisplayAxis(record));
         return new DesktopHistoryDecision(
             matched.Any(profile => AllowsAnyComponent(profile, record)),
             matched.Max(profile => Math.Clamp(profile.CooldownSeconds, 0, 3600)),
-            matched.Any(profile => profile.IncludeArtifacts));
+            matched.Any(profile => profile.IncludeArtifacts),
+            SelectDisplayAxis(matched, record));
     }
 
     public static bool NeedsAssociationStaging(DesktopHistorySubscription? subscription, DesktopEventRecord record)
@@ -157,6 +164,31 @@ public static class DesktopHistorySubscriptionMatcher
         "KnownPalm" => "KnownPalm",
         _ => "All"
     };
+
+    private static string SelectDisplayAxis(
+        IReadOnlyList<DesktopHistorySubscriptionProfile> profiles,
+        DesktopEventRecord record)
+    {
+        string? explicitAxis = profiles
+            .Select(profile => NormalizeMode(profile.Mode))
+            .Select(mode => mode switch
+            {
+                "Plate" => "Plate",
+                "KnownFace" => "Face",
+                "KnownPalm" => "Palm",
+                _ => null
+            })
+            .FirstOrDefault(axis => axis is not null);
+        return explicitAxis ?? InferDisplayAxis(record);
+    }
+
+    private static string InferDisplayAxis(DesktopEventRecord record)
+    {
+        if (HasPlate(record)) return "Plate";
+        if (HasFace(record)) return "Face";
+        if (HasPalm(record)) return "Palm";
+        return "Auto";
+    }
 }
 
 public sealed class DesktopTriggerDefinition
@@ -292,7 +324,9 @@ public sealed class DesktopEventStore
         string? roiId = null,
         bool includeArtifacts = true,
         int associationAgeMs = 0,
-        bool isStaging = false)
+        bool isStaging = false,
+        Bitmap? secondaryCrop = null,
+        string displayAxis = "Auto")
     {
         lock (_gate)
         {
@@ -312,6 +346,7 @@ public sealed class DesktopEventStore
                 Confidence = confidence,
                 OccurredAtUtc = occurredAt.ToUniversalTime(),
                 PayloadJson = JsonSerializer.Serialize(payload, JsonOptions),
+                DisplayAxis = displayAxis,
                 IsStaging = isStaging
             };
 
@@ -319,6 +354,7 @@ public sealed class DesktopEventStore
             {
                 string stem = $"{item.Sequence:000000}_{item.Id}";
                 item.CropPath = SaveImage(crop, $"{stem}_crop.png");
+                item.SecondaryCropPath = SaveImage(secondaryCrop, $"{stem}_secondary.png");
                 item.FullFramePath = SaveImage(fullFrame, $"{stem}_frame.png");
             }
             _records.Insert(0, item);
@@ -331,13 +367,26 @@ public sealed class DesktopEventStore
     {
         if (cooldownSeconds <= 0) return false;
         DateTime since = candidate.OccurredAtUtc.AddSeconds(-cooldownSeconds);
+        string? candidatePlate = GetPlateCooldownKey(candidate);
         lock (_gate)
         {
             return _records.Any(item => item.CameraId.Equals(candidate.CameraId, StringComparison.OrdinalIgnoreCase) &&
-                item.Scenario.Equals(candidate.Scenario, StringComparison.OrdinalIgnoreCase) &&
-                item.Label.Equals(candidate.Label, StringComparison.OrdinalIgnoreCase) &&
-                item.OccurredAtUtc >= since);
+                !item.IsStaging &&
+                item.OccurredAtUtc >= since &&
+                item.OccurredAtUtc <= candidate.OccurredAtUtc &&
+                (candidatePlate is not null
+                    ? string.Equals(GetPlateCooldownKey(item), candidatePlate, StringComparison.OrdinalIgnoreCase)
+                    : item.Scenario.Equals(candidate.Scenario, StringComparison.OrdinalIgnoreCase) &&
+                      item.Label.Equals(candidate.Label, StringComparison.OrdinalIgnoreCase)));
         }
+    }
+
+    private static string? GetPlateCooldownKey(DesktopEventRecord record)
+    {
+        if (!string.IsNullOrWhiteSpace(record.PlateText)) return record.PlateText.Trim();
+        if (record.Scenario.Contains("Plate", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(record.Label))
+            return record.Label.Trim();
+        return null;
     }
 
     public DesktopEventRecord? TryCreatePlateFaceAssociation(
@@ -395,9 +444,14 @@ public sealed class DesktopEventStore
                 return null;
             }
 
-            using Bitmap? crop = LoadImage(identity.CropPath) ?? LoadImage(plate.CropPath);
+            using Bitmap? plateCrop = LoadImage(plate.CropPath);
+            using Bitmap? identityCrop = LoadImage(identity.CropPath);
+            bool facePrimary = string.Equals(decision.DisplayAxis, "Face", StringComparison.OrdinalIgnoreCase);
+            using Bitmap? crop = facePrimary ? identityCrop ?? plateCrop : plateCrop ?? identityCrop;
+            bool showFaceThumbnail = !facePrimary && plateCrop is not null && identityCrop is not null && pairScenario.Equals("PlateFace", StringComparison.OrdinalIgnoreCase);
+            using Bitmap? secondaryCrop = showFaceThumbnail ? identityCrop : null;
             using Bitmap? frame = LoadImage(current.FullFramePath) ?? LoadImage(other.FullFramePath);
-            DesktopEventRecord association = Append(current.CameraId, current.CameraName, current.RoiName, pairEvent, pairScenario, label, plateText, identityValue, associationCandidate.Confidence, occurredAtUtc, crop, frame, new { plate = plate.PayloadJson, identity = identity.PayloadJson, associationWindowMs = maxWindowMs }, current.RoiId, decision.IncludeArtifacts, associationAgeMs);
+            DesktopEventRecord association = Append(current.CameraId, current.CameraName, current.RoiName, pairEvent, pairScenario, label, plateText, identityValue, associationCandidate.Confidence, occurredAtUtc, crop, frame, new { plate = plate.PayloadJson, identity = identity.PayloadJson, associationWindowMs = maxWindowMs }, current.RoiId, decision.IncludeArtifacts, associationAgeMs, displayAxis: decision.DisplayAxis, secondaryCrop: secondaryCrop);
             RemoveStaging(current, other);
             return association;
         }
@@ -457,8 +511,10 @@ public sealed class DesktopEventStore
                 foreach (DesktopEventRecord item in _records.Where(item => item.OccurredAtUtc < artifactCutoff.Value))
                 {
                     DeleteFile(item.CropPath);
+                    DeleteFile(item.SecondaryCropPath);
                     DeleteFile(item.FullFramePath);
                     item.CropPath = null;
+                    item.SecondaryCropPath = null;
                     item.FullFramePath = null;
                 }
             }
@@ -486,6 +542,7 @@ public sealed class DesktopEventStore
     private void DeleteArtifacts(DesktopEventRecord item)
     {
         DeleteFile(item.CropPath);
+        DeleteFile(item.SecondaryCropPath);
         DeleteFile(item.FullFramePath);
     }
 

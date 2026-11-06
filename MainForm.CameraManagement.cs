@@ -276,6 +276,8 @@ public sealed partial class MainForm
         target.ModelFile = clone.ModelFile;
         target.PlateEnabled = clone.PlateEnabled;
         target.Processing = clone.Processing;
+        target.RecognitionDefinitions = clone.RecognitionDefinitions;
+        target.TrackingCompletion = clone.TrackingCompletion;
         target.FaceModelFile = clone.FaceModelFile;
         target.FaceEnabled = clone.FaceEnabled;
         target.FaceInputSize = clone.FaceInputSize;

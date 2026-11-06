@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleGauge,
+  Copy,
   Database,
   Download,
   Eye,
@@ -107,6 +108,7 @@ import type {
   SettingsResponse,
   TriggerAction,
   TriggerDefinition,
+  TriggerTestEvaluationResult,
   InvocationDefinition,
   InvocationMapping,
 } from "./types";
@@ -5384,8 +5386,46 @@ function TriggerEditor({
 }) {
   const [draft, setDraft] = useState(trigger);
   useEffect(() => setDraft(trigger), [trigger]);
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState<TriggerTestEvaluationResult>();
+  const [copyNotice, setCopyNotice] = useState(false);
+  useEffect(() => {
+    setTestResult(undefined);
+    setCopyNotice(false);
+  }, [trigger.id]);
   const update = (key: keyof TriggerDefinition, value: unknown) =>
     setDraft({ ...draft, [key]: value });
+  const copyTriggerId = async () => {
+    try {
+      await navigator.clipboard.writeText(draft.id);
+      setCopyNotice(true);
+      window.setTimeout(() => setCopyNotice(false), 1800);
+    } catch {
+      setCopyNotice(false);
+    }
+  };
+  const testTrigger = async () => {
+    if (testBusy) return;
+    setTestBusy(true);
+    setTestResult(undefined);
+    try {
+      const response = await api.testTrigger(draft.id, draft);
+      setTestResult(response.result);
+    } catch (error) {
+      setTestResult({
+        matched: false,
+        reason: error instanceof Error ? error.message : "خطا در اجرای تست Trigger",
+        eventId: "",
+        sequence: 0,
+        eventType: "—",
+        scenario: "—",
+        cameraId: "—",
+        failedChecks: [],
+      });
+    } finally {
+      setTestBusy(false);
+    }
+  };
   const toggleCamera = (id: string) =>
     update(
       "cameraIds",
@@ -5413,12 +5453,28 @@ function TriggerEditor({
           onChange={(value) => update("enabled", value)}
         />
       </div>
+      {testResult && (
+        <div className={`invocation-test-result ${testResult.matched ? "success" : "failure"}`}>
+          <Badge tone={testResult.matched ? "green" : "red"}>{testResult.matched ? "منطبق" : "منطبق نیست"}</Badge>
+          <span>آخرین رخداد #{testResult.sequence}</span>
+          <span>{testResult.eventType} · {testResult.scenario}</span>
+          <code>{testResult.reason}</code>
+        </div>
+      )}
       <div className="form-grid">
         <Field label="نام تریگر" wide>
           <input
             value={draft.name}
             onChange={(e) => update("name", e.target.value)}
           />
+        </Field>
+        <Field label="شناسه Trigger" hint="برای اتصال کلاینت و Invocation">
+          <div className="trigger-id-control">
+            <input dir="ltr" readOnly value={draft.id} />
+            <Button variant="ghost" icon={Copy} onClick={() => void copyTriggerId()} title="کپی شناسه">
+              {copyNotice ? "کپی شد" : "کپی"}
+            </Button>
+          </div>
         </Field>
         <Field label="سناریو">
           <select
@@ -5574,6 +5630,9 @@ function TriggerEditor({
       <div className="form-actions">
         <Button variant="danger" icon={Trash2} onClick={onDelete}>
           حذف تریگر
+        </Button>
+        <Button variant="soft" icon={Play} onClick={() => void testTrigger()} disabled={testBusy || !exists}>
+          {!exists ? "ابتدا ذخیره کنید" : testBusy ? "در حال تست..." : "تست آخرین رخداد"}
         </Button>
         <Button icon={Save} onClick={() => onSave(draft)}>
           ذخیره تریگر

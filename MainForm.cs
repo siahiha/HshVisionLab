@@ -158,7 +158,8 @@ public sealed partial class MainForm : Form
         var runtime = new Camera(
             settings,
             processingRegistry: _processingCatalog,
-            license: _license);
+            license: _license,
+            enableTrackingCompletion: true);
         runtime.FrameReady += Runtime_FrameReady;
         runtime.PlateDetected += Runtime_PlateDetected;
         runtime.AnalysisDetected += Runtime_AnalysisDetected;
@@ -246,6 +247,7 @@ public sealed partial class MainForm : Form
             CameraId = camera.Settings.Id,
             CameraName = camera.Settings.Name,
             EventType = "PlateDetected",
+            RoiId = item.Detection?.Metadata?.GetValueOrDefault("RoiId")?.ToString() ?? string.Empty,
             Scenario = "Plate",
             Label = item.Text,
             PlateText = item.Text,
@@ -262,10 +264,10 @@ public sealed partial class MainForm : Form
         if (shouldPersist && showPanel)
         {
             Bitmap panelCrop = new(item.Crop);
-            SafeInvoke(() => AddPlateCard(panelCrop, camera.Settings.Name, item.Text, item.Confidence, item.Timestamp));
+            SafeInvoke(() => AddDetectionCard(panelCrop, null, camera.Settings.Name, item.Text, item.Confidence, item.Timestamp, historyDecision.DisplayAxis));
         }
 
-        using Bitmap? rawFrame = camera.TryGetLatestRawFrame(out _);
+        using Bitmap? rawFrame = item.SourceFrame is not null ? new Bitmap(item.SourceFrame) : camera.TryGetLatestRawFrame(out _);
         DesktopEventRecord record = _eventStore.Append(
             camera.Settings.Id,
             camera.Settings.Name,
@@ -279,19 +281,17 @@ public sealed partial class MainForm : Form
             item.Timestamp,
             item.Crop,
             rawFrame,
-            new { camera = camera.Settings.Name, plate = item.Text, ownerKey = item.OwnerKey, confidence = item.Confidence },
+            new { camera = camera.Settings.Name, plate = item.Text, ownerKey = item.OwnerKey, confidence = item.Confidence, metadata = item.Detection?.Metadata },
+            roiId: item.Detection?.Metadata?.GetValueOrDefault("RoiId")?.ToString() ?? string.Empty,
             includeArtifacts: stageForAssociation || triggerMatched || historyDecision.IncludeArtifacts,
-            isStaging: stageForAssociation);
+            isStaging: stageForAssociation,
+            displayAxis: historyDecision.DisplayAxis);
         if (!record.IsStaging) _automation.Process(record);
         DesktopEventRecord? association = _eventStore.TryCreatePlateFaceAssociation(record, GetAssociationWindowMs(record.CameraId), EvaluateDesktopEvent);
         if (association is not null)
         {
             _automation.Process(association);
-            if (record.IsStaging)
-            {
-                Bitmap associationCrop = new(item.Crop);
-                SafeInvoke(() => AddPlateCard(associationCrop, camera.Settings.Name, association.Label, association.Confidence, association.OccurredAtUtc.ToLocalTime()));
-            }
+            SafeInvoke(() => AddEventCard(association));
         }
     }
 
@@ -325,18 +325,13 @@ public sealed partial class MainForm : Form
             return;
         }
 
-        Bitmap? crop = null;
         if (shouldPersist)
         {
             Bitmap panelCrop = new(item.Crop);
-            SafeInvoke(() => AddPlateCard(panelCrop, camera.Settings.Name, label, item.Detection.Confidence, item.Timestamp));
-        }
-        else if (stageForAssociation)
-        {
-            crop = new Bitmap(item.Crop);
+            SafeInvoke(() => AddDetectionCard(panelCrop, null, camera.Settings.Name, label, item.Detection.Confidence, item.Timestamp, historyDecision.DisplayAxis));
         }
 
-        using Bitmap? rawFrame = camera.TryGetLatestRawFrame(out _);
+        using Bitmap? rawFrame = item.SourceFrame is not null ? new Bitmap(item.SourceFrame) : camera.TryGetLatestRawFrame(out _);
         DesktopEventRecord record = _eventStore.Append(
             camera.Settings.Id,
             camera.Settings.Name,
@@ -353,20 +348,15 @@ public sealed partial class MainForm : Form
             new { camera = camera.Settings.Name, kind = scenario, label, confidence = item.Detection.Confidence, bounds = item.Detection.Bounds, trackId = item.Detection.TrackId, metadata = item.Detection.Metadata },
             roiId: roiId,
             includeArtifacts: stageForAssociation || triggerMatched || historyDecision.IncludeArtifacts,
-            isStaging: stageForAssociation);
+            isStaging: stageForAssociation,
+            displayAxis: historyDecision.DisplayAxis);
         if (!record.IsStaging) _automation.Process(record);
         DesktopEventRecord? association = _eventStore.TryCreatePlateFaceAssociation(record, GetAssociationWindowMs(record.CameraId), EvaluateDesktopEvent);
         if (association is not null)
         {
             _automation.Process(association);
-            if (record.IsStaging)
-            {
-                Bitmap associationCrop = crop ?? new Bitmap(item.Crop);
-                SafeInvoke(() => AddPlateCard(associationCrop, camera.Settings.Name, association.Label, association.Confidence, association.OccurredAtUtc.ToLocalTime()));
-                crop = null!;
-            }
+            SafeInvoke(() => AddEventCard(association));
         }
-        crop?.Dispose();
     }
 
     private bool ShouldPersistDesktopEvent(
@@ -389,9 +379,9 @@ public sealed partial class MainForm : Form
             _automation.Store.Settings.HistorySubscription,
             candidate);
         triggerMatched = _automation.HasEnabledTriggerMatch(candidate);
-        if (!historyDecision.Record && !triggerMatched) return new DesktopHistoryDecision(false, historyDecision.CooldownSeconds, false);
-        if (!triggerMatched && _eventStore.HasRecent(candidate, historyDecision.CooldownSeconds)) return new DesktopHistoryDecision(false, historyDecision.CooldownSeconds, false);
-        return new DesktopHistoryDecision(true, historyDecision.CooldownSeconds, triggerMatched || historyDecision.IncludeArtifacts);
+        if (!historyDecision.Record && !triggerMatched) return new DesktopHistoryDecision(false, historyDecision.CooldownSeconds, false, historyDecision.DisplayAxis);
+        if (!triggerMatched && _eventStore.HasRecent(candidate, historyDecision.CooldownSeconds)) return new DesktopHistoryDecision(false, historyDecision.CooldownSeconds, false, historyDecision.DisplayAxis);
+        return new DesktopHistoryDecision(true, historyDecision.CooldownSeconds, triggerMatched || historyDecision.IncludeArtifacts, historyDecision.DisplayAxis);
     }
 
     private int GetAssociationWindowMs(string cameraId)
@@ -525,6 +515,20 @@ public sealed partial class MainForm : Form
             {
                 camera = candidate;
                 processing = item;
+                if (item.ExecutionMode == "TrackAndQueue")
+                {
+                    var definition = candidate.Settings.RecognitionDefinitions.FirstOrDefault(d => d.Enabled && d.Kind == AnalysisKind.Face && d.Id == item.RecognitionDefinitionId);
+                    if (definition is null) continue;
+                    processing = item.Clone();
+                    processing.ExecutionMode = "Inline";
+                    var options = processing.GetOptions<FaceProcessingOptions>();
+                    options.RecognitionEnabled = true;
+                    options.RecognitionModelFile = definition.ModelFile;
+                    options.RecognitionThreshold = definition.Confidence;
+                    options.UnknownMatchThreshold = definition.UnknownMatchThreshold;
+                    processing.Threads = definition.Threads;
+                    processing.SetOptions(options);
+                }
                 return true;
             }
         }

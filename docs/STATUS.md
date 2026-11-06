@@ -6,6 +6,8 @@
 
 ## پیاده‌سازی‌شده
 
+- جهت حرکت مشترک برای همهٔ taskهای دارای TrackId پایدار، شامل Plate/Face/Palm: جهت هشت‌گانه، جهت و بردار صفر برای جسم ثابت، تفکیک Unknown، تنظیم بازه/آستانهٔ لرزش برای هر task در Windows، خط ورود/خروج اختیاری با حاشیهٔ تحمل، preview پیکان/خط و حفظ metadata زمان نمونه در تکمیل ناهمزمان. مسیرهای Sequential/Parallel، ماژول سفارشی، ذخیره/بازخوانی، رابط فارسی/انگلیسی و عبور از خط با ورودی مصنوعی آزموده شده‌اند؛ کیفیت دوربین واقعی و اندازه‌گیری CPU هنوز ارزیابی نشده است.
+- حالت Tracking/بافر تکمیل تشخیص در برنامهٔ Windows برای Face/Plate: تعریف تشخیص در تنظیمات عمومی دوربین، انتخاب مقصد هم‌نوع در task ROI، ظرفیت و حافظهٔ مستقل هر نوع، یک worker ناهمزمان SFace/OCR برای هر دوربین، حفظ فریم/زمان نمونه، retry/TTL/cache و پنجرهٔ وضعیت بافر. تنظیمات قدیمی Inline می‌مانند. آزمون‌های صف، تنظیمات Windows، runtime با منبع مصنوعی و recognizerهای package‌شده در `tests/TrackingCompletion.Tests` قرار دارند؛ benchmark و ارزیابی کیفیت روی دوربین واقعی همچنان لازم است.
 - solution شامل UI، Engine، Abstractions، Identity، Plate، Face، Palm، Licensing، Service، LicenseRequest و LicenseIssuer است.
 - چنددوربینه، RTSP/Webcam/file، reconnect، newest-frame capture، ROI چندضلعی و Motion Gate.
 - Plate با YOLO، OCR ایرانی، tracker، overlay و history.
@@ -47,6 +49,7 @@
 
 ## محدودیت‌ها و backlog آگاهانه
 
+- حالت TrackAndQueue فعلاً فقط در میزبان Windows فعال است. پشتیبانی API/UI وب و مصرف completion با قرارداد source/artifact سرویس هنوز انجام نشده است؛ Service بدون opt-in این حالت را start نمی‌کند. قرارداد مشترک و معیار ادامهٔ توسعه در [ARCHITECTURE.md](ARCHITECTURE.md) است.
 - `CameraPipelineCoordinator` برای هر ROI فعال فهرست pipeline مستقل می‌سازد و آن‌ها را طبق `NamedRoi.Processing` اجرا می‌کند؛ `CameraRuntime` capture، Motion، lifecycle و policy خروجی را نگه می‌دارد.
 - history تازهٔ Runtime محدود به ۱۵ رخداد در حافظه است؛ اما پنل Windows برای بازسازی
   از رکوردهای نهایی Event Store استفاده می‌کند و staging را کنار می‌گذارد. حذف تاریخچه

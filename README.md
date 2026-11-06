@@ -44,6 +44,14 @@
 - همان فرم، triggerهای محلی و Invocationهای HTTP/SQLite را مدیریت می‌کند. trigger مسیر مستقل ارسال به کلاینت است؛ هنگام match شدن، subscription داخلی bypass می‌شود و payload کامل موجود شامل Plate، Face و Palm، چه شناخته‌شده و چه ناشناس، با رعایت `includeFace`، `includePlate` و `includePalm` ارسال می‌شود. این بخش هیچ اتصال یا وابستگی به `HshDetectionService` ندارد.
 - فرم `Identity database` جست‌وجوی اشخاص، حذف گروهی آبشاری، افزودن چندتصویر، Import folder برای Face/Palm و انتقال نمونهٔ Face/Palm بین اشخاص را فراهم می‌کند.
 
+### Tracking و تکمیل تشخیص با بافر دوربین در Windows
+
+در تنظیمات دوربین، زبانهٔ `General`، بخش `Camera recognitions` با دکمهٔ `Add recognition` تعریف Face یا Plate بسازید و مدل SFace/OCR و آستانهٔ پذیرش آن را انتخاب کنید. در بخش `Sample buffers by type` ظرفیت و حافظهٔ چهره و پلاک جدا تنظیم می‌شوند؛ پیش‌فرض ظرفیت‌ها به‌ترتیب ۳۲ و ۶۴ نمونهٔ منتظر و سقف حافظهٔ هر نوع ۱۲۸ MiB است.
+
+سپس در زبانهٔ `Processing`، پردازش Face/Plate زیر ROI را انتخاب کنید، `Recognition execution` را روی `Tracking and camera buffer` بگذارید و `Recognition destination` هم‌نوع را تعیین کنید. پس از Save و Start، ROI فقط کادر و track را تولید می‌کند؛ یک worker مستقل همان دوربین نمونه‌ها را با مدل مقصد تکمیل می‌کند و فقط نتیجهٔ پذیرفته‌شده وارد تاریخچه و تریگر می‌شود. یک track تکمیل‌شده تا موعد refresh دوباره شناسایی نمی‌شود. پیش‌فرض فایل‌های قدیمی `Direct recognition` است.
+
+دکمهٔ `Sample buffers` روی tile دوربین، تعداد منتظر/در حال پردازش، مصرف حافظه، حذف/انقضا و جزئیات نمونه‌ها را جدا برای Face/Plate نشان می‌دهد. شماره، زمان و تصویر رخداد نهایی مربوط به همان نمونهٔ بافر است. این حالت فعلاً در Windows فعال است و Service/Web هنوز اتصال آن را ندارند. جزئیات و پیش‌فرض‌ها در [پیکربندی](docs/CONFIGURATION.md) آمده‌اند.
+
 ## پنل وب و مسیر تصویر
 
 `DetectionManagerUi` رابط وب مستقل سرویس است و همان سطح قابلیت‌های عملیاتی برنامهٔ Windows را در
@@ -93,3 +101,7 @@ dotnet run --project HshVisionLab.csproj --no-build
 - [SDK Engine](HshDetectionEngin/README.md)، [Face module](HshDetectionEngin.Face/README.md)، [Plate module](HshDetectionEngin.Plate/README.md) و [امنیت](HshDetectionEngin/SECURITY.md).
 
 مدل خام، ابزار Python و private key صادرکننده بخشی از محصول مشتری نیستند.
+
+## جهت حرکت
+
+در تنظیمات دوربین، پردازش یک ROI را انتخاب کنید و «تنظیمات جهت حرکت» را بزنید. جهت برای پلاک، چهره، کف دست و ماژول‌های دارای شناسهٔ پایدار Track محاسبه می‌شود؛ جسم ثابت `Dir: 0` و جهت نامشخص `Dir: ?` دارد. خط ورود/خروج نیز به‌صورت اختیاری برای هر پردازش قابل تنظیم است. جزئیات کد جهت‌ها، آستانهٔ لرزش و خروجی metadata در [تنظیمات](docs/CONFIGURATION.md) آمده است.

@@ -11,6 +11,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
 
     private readonly PlateProcessingOptions _options;
     private readonly int _maxFps;
+    private readonly bool _trackOnly;
     private readonly YoloDetector _plateDetector;
     private readonly IPlateTextRecognizer? _ocr;
     private readonly PlateTracker _tracker = new();
@@ -20,10 +21,11 @@ internal sealed class PlatePipeline : IProcessingPipeline
     public string Name => "Iranian Plate Detection";
     public double LastInferenceMs => _plateDetector.LastInferenceMs + (_ocr?.LastInferenceMs ?? 0);
 
-    public PlatePipeline(PlateProcessingOptions options, int maxFps, int threads)
+    public PlatePipeline(PlateProcessingOptions options, int maxFps, int threads, bool trackOnly = false)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _maxFps = maxFps;
+        _trackOnly = trackOnly;
         string platePath = PlateModelPaths.Find(options.ModelFile)
             ?? throw new FileNotFoundException($"Plate model was not found: {options.ModelFile}");
         string? temporaryModel = null;
@@ -48,7 +50,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
             if (temporaryModel is not null) TryDelete(temporaryModel);
         }
 
-        if (!options.CharacterRecognitionEnabled) return;
+        if (trackOnly || !options.CharacterRecognitionEnabled) return;
         string ocrPath = PlateModelPaths.Find(options.CharacterModelFile)
             ?? throw new FileNotFoundException($"Plate recognition model was not found: {options.CharacterModelFile}");
         if (!ocrPath.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase))
@@ -97,6 +99,12 @@ internal sealed class PlatePipeline : IProcessingPipeline
         var results = new List<AnalysisDetection>(plateCrops.Count);
         foreach (var item in plateCrops)
         {
+            if (_trackOnly)
+            {
+                results.Add(new AnalysisDetection(AnalysisKind.Plate, "Tracking", item.Detection.Score, item.Bounds, item.TrackId,
+                    new Dictionary<string, object?> { ["Accepted"] = true, ["TrackPending"] = true, ["OverlayThreshold"] = _options.Confidence }));
+                continue;
+            }
             List<PlateDetection> inside = [];
             IReadOnlyList<PlateOcrCharacter> recognizedCharacters = Array.Empty<PlateOcrCharacter>();
             string text;

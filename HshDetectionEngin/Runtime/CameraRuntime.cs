@@ -25,6 +25,13 @@ public class CameraRuntime : IDisposable
     private readonly bool _hasInjectedFrameSource;
     private string _frameSourceBackend;
     private readonly CameraPipelineCoordinator _pipelineCoordinator;
+    private TrackingCompletionWorker? _completionWorker;
+    private readonly bool _enableTrackingCompletion;
+    private sealed record FrameStamp(long Sequence, DateTime ReceivedAtUtc, long CompletionGeneration);
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Mat, FrameStamp> _frameStamps = new();
+    private long _receivedFrameSequence;
+    public IReadOnlyList<SampleBufferStatus> CompletionBufferStatus => _completionWorker?.Status ?? [];
+    public IReadOnlyList<SampleBufferEntry> CompletionBufferEntries => _completionWorker?.Entries ?? [];
     private readonly Dictionary<string, MotionDetector> _motionDetectors = new();
     private CancellationTokenSource? _cts;
     private Thread? _thread;
@@ -87,6 +94,8 @@ public class CameraRuntime : IDisposable
 
     public void ClearDetectionHistory(DateTime? fromUtc = null, DateTime? toUtc = null)
     {
+        // Do not recreate deleted history from observations still waiting for completion.
+        _completionWorker?.Invalidate();
         DateTime? from = fromUtc?.ToUniversalTime();
         DateTime? to = toUtc?.ToUniversalTime();
         bool clearAll = !from.HasValue && !to.HasValue;
@@ -148,8 +157,16 @@ public class CameraRuntime : IDisposable
         string ProcessingMode);
     private sealed record PlateOverlayInfo(string Key, AnalysisDetection Detection, string Text, float Confidence, DateTime UpdatedUtc, Bitmap? Crop, bool Accepted);
     private sealed record AnalysisOverlayInfo(string Key, AnalysisDetection Detection, DateTime UpdatedUtc);
-    public sealed record HistoryItem(Bitmap Crop, string Text, float Confidence, DateTime Timestamp, string OwnerKey);
-    public sealed record AnalysisHistoryItem(Bitmap Crop, AnalysisDetection Detection, DateTime Timestamp);
+    public sealed record HistoryItem(Bitmap Crop, string Text, float Confidence, DateTime Timestamp, string OwnerKey)
+    {
+        /// <summary>Borrowed only during the event callback. Never retained in history.</summary>
+        public Bitmap? SourceFrame { get; init; }
+        public AnalysisDetection? Detection { get; init; }
+    }
+    public sealed record AnalysisHistoryItem(Bitmap Crop, AnalysisDetection Detection, DateTime Timestamp)
+    {
+        public Bitmap? SourceFrame { get; init; }
+    }
     public sealed record LiveOverlayPoint(double X, double Y);
     public sealed record LiveOverlayRect(int X, int Y, int Width, int Height);
     public sealed record LiveOverlayRoi(string Id, string Name, bool Enabled, IReadOnlyList<LiveOverlayPoint> Points);
@@ -184,9 +201,11 @@ public class CameraRuntime : IDisposable
         CameraSettings settings,
         IFrameSource? frameSource = null,
         ProcessingRegistry? processingRegistry = null,
-        LicenseValidationResult? license = null)
+        LicenseValidationResult? license = null,
+        bool enableTrackingCompletion = false)
     {
         Settings = settings;
+        _enableTrackingCompletion = enableTrackingCompletion;
         License = license ?? LicenseValidator.Load(Path.Combine(AppContext.BaseDirectory, "license.hshlic"));
         _hasInjectedFrameSource = frameSource is not null;
         _frameSourceBackend = GetCaptureBackend(Settings);
@@ -229,7 +248,12 @@ public class CameraRuntime : IDisposable
         source.FrameAvailable -= FrameSource_FrameAvailable;
     }
 
-    private void FrameSource_StateChanged(string state) => StatusChanged?.Invoke(this, state, false);
+    private void FrameSource_StateChanged(string state)
+    {
+        _pipelineCoordinator.ResetMotion();
+        _completionWorker?.Invalidate();
+        StatusChanged?.Invoke(this, state, false);
+    }
     private void FrameSource_ErrorOccurred(Exception error) => StatusChanged?.Invoke(this, error.Message, true);
 
     private void EnsureFrameSourceForSettings()
@@ -249,6 +273,8 @@ public class CameraRuntime : IDisposable
 
     private void FrameSource_FrameAvailable(Mat frame)
     {
+        _frameStamps.Remove(frame);
+        _frameStamps.Add(frame, new FrameStamp(Interlocked.Increment(ref _receivedFrameSequence), DateTime.UtcNow, _completionWorker?.Generation ?? 0));
         if (!_running || frame.IsEmpty)
         {
             return;
@@ -429,9 +455,12 @@ public class CameraRuntime : IDisposable
 
     public void UpdateFromSettings()
     {
+        bool restart = IsRunning;
+        if (restart) Stop();
         Settings.EnsureProcessingDefaults();
         if (!Settings.Enabled) Stop();
         if (Settings.Enabled) RebuildRoiPipelines();
+        if (restart && Settings.Enabled) Start();
     }
 
     public void Start()
@@ -444,6 +473,21 @@ public class CameraRuntime : IDisposable
         }
         if (string.IsNullOrWhiteSpace(Settings.SourceUrl)) { StatusChanged?.Invoke(this, "Camera source is empty.", true); return; }
         EnsureFrameSourceForSettings();
+        bool tracked = Settings.Rois.Where(r => r.Enabled).SelectMany(r => r.Processing).Any(t => t.Enabled && t.ExecutionMode == "TrackAndQueue");
+        if (tracked && !_enableTrackingCompletion)
+        {
+            StatusChanged?.Invoke(this, "Tracked completion is currently supported by the Windows host only.", true);
+            return;
+        }
+        if (tracked)
+        {
+            try
+            {
+                _completionWorker = new TrackingCompletionWorker(Settings, ProcessingModules, PublishCompletedDetection,
+                    message => StatusChanged?.Invoke(this, message, true));
+            }
+            catch (Exception ex) { StatusChanged?.Invoke(this, ex.Message, true); return; }
+        }
         RebuildRoiPipelines();
         FrameSource.Configure(Settings.SourceUrl, Settings.Transport, Settings.BufferCount, Settings.ReconnectDelaySec * 1000);
         _motionActive = false; _motionActiveUntilTicks = 0;
@@ -468,15 +512,20 @@ public class CameraRuntime : IDisposable
     {
         if (!_running) return;
         _running = false;
+        _completionWorker?.Invalidate();
         try { _cts?.Cancel(); } catch { }
         try { _previewFrameReady.Set(); } catch { }
-        try { _thread?.Join(4000); } catch { }
-        try { _previewThread?.Join(4000); } catch { }
+        // Native inference must drain before sessions/settings can be replaced.
+        if (_thread != Thread.CurrentThread) _thread?.Join();
+        if (_previewThread != Thread.CurrentThread) _previewThread?.Join();
+        _pipelineCoordinator.ResetMotion();
         _thread = null;
         _previewThread = null;
         DrainPreviewFrame();
         _cts?.Dispose(); _cts = null;
         FrameSource.Stop();
+        _completionWorker?.Dispose();
+        _completionWorker = null;
         foreach (var m in _motionDetectors.Values) m.Dispose(); _motionDetectors.Clear();
         StatusChanged?.Invoke(this, "Stopped", false);
     }
@@ -492,6 +541,8 @@ public class CameraRuntime : IDisposable
             {
                 // Resolution belongs to the captured frame, not only to an inference pass.
                 _lastFrameSize = frame.Size;
+                FrameStamp stamp = _frameStamps.TryGetValue(frame, out var capturedStamp)
+                    ? capturedStamp : new FrameStamp(FrameSource.CapturedFrames, DateTime.UtcNow, _completionWorker?.Generation ?? 0);
                 long now = Stopwatch.GetTimestamp();
                 var rois = GetNamedRois(frame.Size);
                 var motionRois = GetMotionRois(frame.Size, rois);
@@ -532,18 +583,24 @@ public class CameraRuntime : IDisposable
                         // clean copy before running them for event artifacts.
                         using Mat rawFrame = frame.Clone();
                         CameraPipelineCoordinator.PipelineExecutionResult execution = RunPipelines(frame, rois);
+                        var trackedDetections = execution.Detections.Where(IsTrackPending).ToArray();
+                        if (trackedDetections.Length > 0) _completionWorker?.Offer(rawFrame, trackedDetections, stamp.ReceivedAtUtc, stamp.Sequence, stamp.CompletionGeneration);
+                        var completedInline = execution.Detections.Where(d => !IsTrackPending(d)).ToArray();
+                        if (_completionWorker is not null)
+                            for (int i = 0; i < execution.Detections.Count; i++)
+                                if (IsTrackPending(execution.Detections[i])) execution.Detections[i] = _completionWorker.Display(execution.Detections[i]);
                         if (execution.Detections.Count > 0)
                             StoreLatestRawFrame(rawFrame, FrameSource.CapturedFrames);
                         UpdatePlateOverlays(frame, execution.Detections);
                         UpdateAnalysisOverlays(execution.Detections);
                         UpdateProcessingOverlays(execution);
-                        PublishPlateHistory(frame, execution.Detections);
-                        PublishAnalysisHistory(frame, execution.Detections);
+                        PublishPlateHistory(frame, completedInline);
+                        PublishAnalysisHistory(frame, completedInline);
                         lock (_renderGate)
                         {
                             _lastAnalysisDetections = execution.Detections.ToArray();
                         }
-                        if (execution.Detections.Count > 0) PipelineResultsReady?.Invoke(this, execution.Detections);
+                        if (completedInline.Length > 0) PipelineResultsReady?.Invoke(this, completedInline);
                         Interlocked.Increment(ref _processed);
                         _fps = _processed / Math.Max(0.001, _stats.Elapsed.TotalSeconds);
                         StatsChanged?.Invoke(this);
@@ -651,8 +708,23 @@ public class CameraRuntime : IDisposable
         return detection.Kind == AnalysisKind.Face ? 0.80f : detection.Confidence;
     }
 
+    private static bool IsTrackPending(AnalysisDetection detection) =>
+        detection.Metadata?.TryGetValue("TrackPending", out object? value) == true && value is true;
+
+    private static bool IsTrackingAwaitingCompletion(AnalysisDetection detection) => IsTrackPending(detection) && IsDetectionAcceptedForOverlay(detection) &&
+        !(detection.Metadata?.TryGetValue("TrackingCompleted", out object? value) == true && value is true);
+
+    private void PublishCompletedDetection(Mat frame, AnalysisDetection detection, DateTime observedAt, long sequence)
+    {
+        if (!IsRunning) return;
+        using Bitmap raw = frame.ToBitmap();
+        PublishPlateHistory(frame, [detection], observedAt, raw);
+        PublishAnalysisHistory(frame, [detection], observedAt, raw);
+        StatsChanged?.Invoke(this);
+    }
+
     private static MCvScalar GetDetectionOverlayColor(AnalysisDetection detection) =>
-        IsDetectionAcceptedForOverlay(detection)
+        IsTrackingAwaitingCompletion(detection) ? new MCvScalar(0, 210, 255) : IsDetectionAcceptedForOverlay(detection)
             ? new MCvScalar(0, 220, 0)
             : new MCvScalar(0, 0, 255);
 
@@ -745,7 +817,7 @@ public class CameraRuntime : IDisposable
         CleanupPlateOverlays();
     }
 
-    private void PublishPlateHistory(Mat frame, IReadOnlyList<AnalysisDetection> detections)
+    private void PublishPlateHistory(Mat frame, IReadOnlyList<AnalysisDetection> detections, DateTime? observedAt = null, Bitmap? sourceFrame = null)
     {
         foreach (AnalysisDetection detection in detections.Where(d => d.Kind == AnalysisKind.Plate && IsAcceptedPlate(d)))
         {
@@ -758,7 +830,7 @@ public class CameraRuntime : IDisposable
             using var crop = cropView.Clone();
             using Bitmap bitmap = crop.ToBitmap();
             string ownerKey = GetDetectionOwnerKey(detection);
-            var item = new HistoryItem(new Bitmap(bitmap), text, detection.Confidence, DateTime.Now, ownerKey);
+            var item = new HistoryItem(new Bitmap(bitmap), text, detection.Confidence, observedAt?.ToLocalTime() ?? DateTime.Now, ownerKey);
 
             lock (_historyGate)
             {
@@ -780,7 +852,7 @@ public class CameraRuntime : IDisposable
                 }
             }
 
-            PlateDetected?.Invoke(this, item);
+            PlateDetected?.Invoke(this, item with { SourceFrame = sourceFrame, Detection = detection });
         }
     }
 
@@ -862,6 +934,7 @@ public class CameraRuntime : IDisposable
             string label = detection.TrackId is int trackId
                 ? $"{detection.Label} #{trackId} {detection.Confidence:P0}"
                 : $"{detection.Label} {detection.Confidence:P0}";
+            label += MotionCaption(detection);
             int labelY = bounds.Bottom + (int)Math.Ceiling(font.GetHeight(graphics));
             if (labelY + font.Height > bitmap.Height) labelY = Math.Max(0, bounds.Y - font.Height - 2);
 
@@ -871,7 +944,7 @@ public class CameraRuntime : IDisposable
             RectangleF textArea = new(bounds.X + 1f, labelY, labelWidth, labelSize.Height + 2f);
             bool accepted = IsDetectionAcceptedForOverlay(detection);
             using Brush backgroundBrush = new SolidBrush(Color.FromArgb(205, 4, 12, 22));
-            using Pen border = new(accepted ? Color.FromArgb(235, 55, 205, 105) : Color.FromArgb(235, 235, 75, 75), 1.5f);
+            using Pen border = new(IsTrackingAwaitingCompletion(detection) ? Color.Gold : accepted ? Color.FromArgb(235, 55, 205, 105) : Color.FromArgb(235, 235, 75, 75), 1.5f);
             using Brush foreground = new SolidBrush(accepted ? Color.FromArgb(255, 180, 255, 195) : Color.FromArgb(255, 255, 170, 170));
             graphics.FillRectangle(backgroundBrush, labelBackground);
             graphics.DrawRectangle(border, labelBackground.X, labelBackground.Y, labelBackground.Width, labelBackground.Height);
@@ -1012,7 +1085,7 @@ public class CameraRuntime : IDisposable
         }
     }
 
-    private void PublishAnalysisHistory(Mat frame, IReadOnlyList<AnalysisDetection> detections)
+    private void PublishAnalysisHistory(Mat frame, IReadOnlyList<AnalysisDetection> detections, DateTime? observedAt = null, Bitmap? sourceFrame = null)
     {
         foreach (AnalysisDetection detection in detections.Where(d =>
             (d.Kind == AnalysisKind.Face || d.Kind == AnalysisKind.Palm) &&
@@ -1053,7 +1126,7 @@ public class CameraRuntime : IDisposable
             using var cropView = new Mat(frame, bounds);
             using var crop = cropView.Clone();
             using Bitmap bitmap = crop.ToBitmap();
-            var stored = new AnalysisHistoryItem(new Bitmap(bitmap), detection, DateTime.Now);
+            var stored = new AnalysisHistoryItem(new Bitmap(bitmap), detection, observedAt?.ToLocalTime() ?? DateTime.Now);
             lock (_analysisHistoryGate)
             {
                 _analysisHistory.Insert(0, stored);
@@ -1065,7 +1138,7 @@ public class CameraRuntime : IDisposable
                     evicted.Crop.Dispose();
                 }
             }
-            var item = new AnalysisHistoryItem(new Bitmap(bitmap), detection, DateTime.Now);
+            var item = new AnalysisHistoryItem(new Bitmap(bitmap), detection, observedAt?.ToLocalTime() ?? DateTime.Now) { SourceFrame = sourceFrame };
             try { AnalysisDetected?.Invoke(this, item); }
             finally { item.Crop.Dispose(); }
         }
@@ -1133,14 +1206,14 @@ public class CameraRuntime : IDisposable
             }
 
             using Pen statusPen = new(
-                overlay.Accepted ? Color.LimeGreen : Color.Red,
+                IsTrackingAwaitingCompletion(detection) ? Color.Gold : IsTrackPending(detection) ? Color.LimeGreen : overlay.Accepted ? Color.LimeGreen : Color.Red,
                 Math.Max(2f, bitmap.Width / 700f));
             using Brush textBrush = new SolidBrush(Color.White);
             using Brush specBrush = new SolidBrush(overlay.Accepted ? Color.FromArgb(255, 160, 255, 180) : Color.FromArgb(255, 255, 160, 160));
             graphics.DrawRectangle(statusPen, plateRectangle.X, plateRectangle.Y, plateRectangle.Width, plateRectangle.Height);
 
-            string plateText = overlay.Text;
-            string specifications = $"Th: {Settings.Confidence:0.00}  Co: {overlay.Confidence:0.00}";
+            string plateText = IsTrackPending(detection) ? detection.Label : overlay.Text;
+            string specifications = $"Th: {GetDetectionOverlayThreshold(detection):0.00}  Co: {overlay.Confidence:0.00}" + MotionCaption(detection);
 
             SizeF plateSize = graphics.MeasureString(plateText, plateFont);
             SizeF specificationSize = graphics.MeasureString(specifications, specFont);
@@ -1179,6 +1252,15 @@ public class CameraRuntime : IDisposable
                 labelY + plateSize.Height - 1f);
             }
         }
+    }
+
+    private static string MotionCaption(AnalysisDetection detection)
+    {
+        if (detection.Metadata?.ContainsKey("MotionState") != true) return string.Empty;
+        string caption = $"  Dir: {detection.Metadata.GetValueOrDefault("MotionDirection")?.ToString() ?? "?"}";
+        if (detection.Metadata.GetValueOrDefault("LineCrossing") is string crossing && crossing != "None")
+            caption += $" {crossing}";
+        return caption;
     }
 
     private static void DrawTextWithShadow(

@@ -137,6 +137,7 @@
     <Compile Remove="HshDetectionEngin.LicenseIssuer\**\*.cs" />
     <Compile Remove="HshDetectionEngin.Tools\**\*.cs" />
     <Compile Remove="artifacts\**\*.cs" />
+    <Compile Remove="tests\**\*.cs" />
     <!-- The Windows service is a separate SDK project and must not be included
          by the root project's recursive Compile glob. -->
     <Compile Remove="HshDetectionService\**\*.cs" />

@@ -87,17 +87,20 @@ ROIهای فعال یک دوربین به‌صورت موازی اجرا می‌
 
 ```text
 FrameSource (به‌صورت پیش‌فرض فقط جدیدترین Mat؛ با BufferCount مثبت صف محدود)
-  → latest-preview slot و preview worker با سقف 15 FPS
-  → CameraRuntime capture/Motion/ROI loop
-  → CameraPipelineCoordinator برای ساخت graph و اجرای هر ROI
-  → MotionDetector و mask کردن بخش خارج polygon ROI
-  → اجرای موازی ROIها؛ taskهای هر ROI طبق `ProcessingMode` سریالی یا موازی
-  → overlay، history و UI events
+  ├─ latest-preview slot → preview worker مستقل با سقف 15 FPS
+  └─ CameraRuntime processing worker
+       → MotionDetector روی Motion ROIها و تعیین وضعیت Active/Idle مشترک دوربین
+       → کنترل زمان اجرای inference با ActiveDetectionFps / IdleDetectionFps
+       → CameraPipelineCoordinator: استخراج ROI و mask کردن بیرون polygon هر ROI
+       → اجرای موازی ROIها؛ taskهای هر ROI طبق `ProcessingMode` سریالی یا موازی
+       → overlay، history و UI events
 ```
 
 `FrameSource` با `BufferCount = 0` فقط یک `Mat` جدیدترین را نگه می‌دارد و قبلی را dispose می‌کند. با مقدار مثبت، صفی محدود به همان ظرفیت ایجاد می‌شود و برای حفظ latency، هنگام پرشدن قدیمی‌ترین فریم حذف می‌شود؛ این صف بین pipelineهای Plate و Face همان دوربین مشترک است. Webcam با source عددی و backend `DShow` باز می‌شود. RTSP در حالت پیش‌فرض با FFmpeg باز می‌شود؛ تنظیم process-wide `OPENCV_FFMPEG_CAPTURE_OPTIONS` در یک gate سراسری، فقط تا پایان ساخت همان capture اعمال و سپس restore می‌شود تا دوربین‌های TCP و UDP هم‌زمان با هم تداخل نکنند. transport انتخاب‌شده در تنظیمات ثابت می‌ماند و در reconnect خودکار به transport مقابل تغییر نمی‌کند. اگر `CaptureBackend` روی `LibVLC` باشد، `VlcFrameSource` با libVLC/Live555 فریم‌ها را دریافت می‌کند؛ این حالت برای RTSPهایی است که در VLC پایدارند ولی در OpenCV FFmpeg stall می‌کنند و به VLC 3.x x64 نصب‌شده (یا متغیر `VLC_HOME`) نیاز دارد. اگر `CaptureBackend` روی `MediaMTX` باشد، runtime path دوربین را در MediaMTX مدیریت می‌کند و engine از `rtsp://127.0.0.1:8554/camera-{id}` با TCP، `nobuffer`، `low_delay` و `max_delay=0` می‌خواند؛ مرورگر همان path را از WHEP خام می‌گیرد و Overlay را جداگانه از سرویس دریافت می‌کند. در قطع کوتاه stream، reader تا زمان تعیین‌شدهٔ backend فرصت بازیابی می‌دهد؛ سپس reconnect با `ReconnectDelaySec` انجام می‌شود. منبع non-RTSP ابتدا با FFmpeg و سپس با backend پیش‌فرض OpenCV امتحان می‌شود.
 
 ROI معتبر حداقل سه نقطه و bounding box حداقل `32×32` دارد. Motion روی تصویر خاکستری `320×180` اجرا می‌شود و بیرون polygon را mask می‌کند. پس از تشخیص حرکت، وضعیت active تا `MotionHoldMs` می‌ماند؛ در حالت idle، `IdleDetectionFps = 0` یعنی inference متوقف است. نرخ فراخوانی runtime با نرخ Active/Idle کنترل می‌شود و هر Plate/Face نیز سقف `MaxFps` مستقل خودش را روی همان آیتم اعمال می‌کند؛ `CameraSettings.MaxFps` فقط default سازگاری برای ساخت آیتم جدید است و سقف پنهان آیتم‌های موجود نیست. با خاموش‌بودن Motion Gate، وضعیت همیشه active است.
+
+Motion Gate پیش از فراخوانی `CameraPipelineCoordinator` در `CameraRuntime` ارزیابی می‌شود. هر Motion ROI آشکارساز حرکت مستقل دارد، اما نتیجهٔ آن‌ها با OR ترکیب می‌شود: حرکت در هر Motion ROI، وضعیت Active کل دوربین را فعال می‌کند. بنابراین در نوبت اجرای inference، همهٔ ROIهای معتبر دارای پردازش فعال اجرا می‌شوند، حتی اگر در بعضی از آن‌ها حرکتی تشخیص داده نشده باشد؛ Motion Gate برای هر ROI مجوز اجرای جداگانه صادر نمی‌کند. مسیر preview مستقل از این gate ادامه دارد. ماسک Motion برای سنجش حرکت استفاده می‌شود و ماسک تصویر ورودی پایپ‌لاین‌ها بعداً در Coordinator اعمال می‌شود.
 
 `History event cooldown (sec)` چهار کاربرد مستقل دارد. در هر task Plate/Face زیر ROI
 با `EventCooldownSeconds` ثبت canonical history برای همان دوربین، ROI و مقدار
@@ -134,6 +137,12 @@ Store را برای همان trigger و هویت‌های لازم بررسی م
 نتیجهٔ ارزیابی suppression باشد، رخداد تکراری جدید نیز ساخته نمی‌شود.
 
 `MotionRoiScalePercent` polygon Motion را حول مرکز ROI در بازهٔ `25..300` درصد scale می‌کند. در پیاده‌سازی فعلی با پایان حرکت، Plate tracker به‌صورت صریح پاک نمی‌شود؛ اگر `IdleDetectionFps = 0` باشد inference متوقف می‌شود و tracker تا reset/dispose شدن pipeline باقی می‌ماند.
+
+### Tracking و بافر تکمیل تشخیص در Windows
+
+**این حالت در کد و UI Windows پیاده‌سازی شده است؛ Service/Web هنوز پشتیبانی آن را ندارند.** طبق [قرارداد معماری حالت سوم](ARCHITECTURE.md)، پردازش Face/Plate هر ROI می‌تواند فقط localization/tracking را انجام دهد و نمونهٔ مناسب هر track را وارد بافر همان دوربین کند. ظرفیت و سقف حافظهٔ Face و Plate مستقل‌اند و یک نوع فضای نوع دیگر را مصرف نمی‌کند. در تنظیمات عمومی دوربین، تعریف‌های تشخیص مانند taskهای ROI قابل افزودن/ویرایش/حذف هستند؛ هر task به یک تعریف هم‌نوع متصل می‌شود. یک Completion Worker مستقل، SFace یا OCR و آستانه‌های تعریف مقصد را روی نمونه‌ها اعمال می‌کند و فقط نتیجهٔ تکمیل‌شده از مسیر history/trigger/event اعلام می‌شود.
+
+این مسیر از انتخاب `Sequential/Parallel` داخل ROI مستقل است. بافر برای هر track یک نمونهٔ منتظر نگه می‌دارد، نمونه‌ها را با سیاست کیفیت/تازگی جایگزین می‌کند و پس از موفقیت، recognition همان track را تا پایان track یا موعد refresh تکرار نمی‌کند. worker crop و شماره/زمان فریم همان نمونه را حمل می‌کند؛ استفاده از latest-frame هنگام اعلام نتیجه مجاز نیست. بافر، نسل runtime، مالکیت تصویر، retry/TTL، confidence و معیار پذیرش در سند معماری تعریف شده‌اند. پارامترهای اجرایی و پیش‌فرض‌ها در [پیکربندی](CONFIGURATION.md) آمده‌اند. آزمون‌ها در `tests/TrackingCompletion.Tests` با `dotnet run --project tests/TrackingCompletion.Tests -- --models` اجرا می‌شوند؛ گزینهٔ `--models` به لایسنس محلی معتبر و packageهای مدل نیاز دارد.
 
 ## 5. قابلیت Plate
 

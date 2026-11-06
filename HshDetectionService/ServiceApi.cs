@@ -709,6 +709,28 @@ public static class ServiceApi
             store.SaveService(settings, settings.Revision);
             return Results.NoContent();
         });
+        app.MapPost("/api/v1/triggers/{triggerId}/test", (string triggerId, TriggerDefinition candidate, EventStore events, ServiceSettingsStore store) =>
+        {
+            TriggerDefinition? persisted = store.Service.Triggers.FirstOrDefault(item => item.Id.Equals(triggerId, StringComparison.OrdinalIgnoreCase));
+            if (persisted is null) return Results.NotFound(new { code = "trigger_not_found" });
+
+            // The UI sends the current draft so the operator can test unsaved edits.
+            // The endpoint is deliberately dry-run: it does not write history,
+            // publish an event, or execute any trigger/invocation action.
+            candidate.Id = triggerId;
+            DetectionEventEnvelope? latest = events.ReadLatest();
+            if (latest is null)
+                return Results.NotFound(new { code = "no_detection_events", message = "No detection event is available for testing." });
+
+            TriggerTestEvaluationResult result = TriggerTestEvaluator.Evaluate(candidate, latest);
+            return Results.Ok(new
+            {
+                triggerId,
+                triggerName = candidate.Name,
+                dryRun = true,
+                result
+            });
+        });
 
         app.MapHub<DetectionHub>("/hubs/detections");
     }

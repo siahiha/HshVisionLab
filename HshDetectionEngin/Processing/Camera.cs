@@ -11,8 +11,9 @@ public sealed class Camera : CameraRuntime
         CameraSettings settings,
         IFrameSource? source = null,
         ProcessingRegistry? processingRegistry = null,
-        HshDetectionEngin.Licensing.LicenseValidationResult? license = null)
-        : base(settings, source, processingRegistry, license)
+        HshDetectionEngin.Licensing.LicenseValidationResult? license = null,
+        bool enableTrackingCompletion = false)
+        : base(settings, source, processingRegistry, license, enableTrackingCompletion)
     {
         Source = new CameraSourceSettings(Settings);
         Motion = new CameraMotionSettings(Settings);

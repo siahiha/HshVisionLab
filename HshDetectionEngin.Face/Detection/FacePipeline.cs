@@ -24,6 +24,7 @@ public sealed class FacePipelineOptions
     public float NmsThreshold { get; set; } = 0.3f;
     public int TopK { get; set; } = 5000;
     public float UnknownMatchThreshold { get; set; } = 0.35f;
+    public bool TrackOnly { get; set; }
 }
 
 public sealed record FaceEnrollment(byte[] FaceImage, float[] Embedding, float DetectionConfidence);
@@ -172,7 +173,7 @@ public sealed class FacePipeline : IProcessingPipeline
                 continue;
             }
 
-            string label = "Unknown";
+            string label = _options.TrackOnly ? "Tracking" : "Unknown";
             string? identityId = null;
             float similarity = 0;
             int personNumber = 0;
@@ -206,7 +207,9 @@ public sealed class FacePipeline : IProcessingPipeline
                     ["PersonNumber"] = personNumber,
                     ["IsUnknown"] = isUnknown,
                     ["MatchedSampleId"] = matchedSampleId,
-                    ["AlignedFaceJpeg"] = alignedFaceJpeg
+                    ["AlignedFaceJpeg"] = alignedFaceJpeg,
+                    ["TrackPending"] = _options.TrackOnly,
+                    ["TrackingLandmarks"] = _options.TrackOnly ? face.Landmarks.Select(p => new PointF(p.X * scaleX, p.Y * scaleY)).ToArray() : null
                 }));
         }
 
@@ -384,7 +387,7 @@ public sealed class FacePipeline : IProcessingPipeline
         throw new InvalidOperationException("SFace returned no output.");
     }
 
-    private static byte[] EncodeJpeg(Mat aligned)
+    internal static byte[] EncodeJpeg(Mat aligned)
     {
         using Image<Bgr, byte> alignedImage = aligned.ToImage<Bgr, byte>();
         using Bitmap bitmap = alignedImage.ToBitmap();
@@ -393,7 +396,7 @@ public sealed class FacePipeline : IProcessingPipeline
         return imageStream.ToArray();
     }
 
-    private static Mat AlignCrop(Mat source, IReadOnlyList<PointF> sourcePoints)
+    internal static Mat AlignCrop(Mat source, IReadOnlyList<PointF> sourcePoints)
     {
         if (sourcePoints.Count != 5) throw new ArgumentException("Exactly five face landmarks are required.", nameof(sourcePoints));
 
@@ -437,7 +440,7 @@ public sealed class FacePipeline : IProcessingPipeline
         return aligned;
     }
 
-    private static void CopyImageToNchw(Mat source, float[] destination, bool swapRedBlue)
+    internal static void CopyImageToNchw(Mat source, float[] destination, bool swapRedBlue)
     {
         using var floatImage = new Mat();
         source.ConvertTo(floatImage, DepthType.Cv32F);
@@ -463,7 +466,7 @@ public sealed class FacePipeline : IProcessingPipeline
         }
     }
 
-    private static InferenceSession CreateSession(string modelPath, int threads)
+    internal static InferenceSession CreateSession(string modelPath, int threads)
     {
         string runtimePath = modelPath.EndsWith(".hshmodel", StringComparison.OrdinalIgnoreCase)
             ? ProtectedModelPackage.Materialize(modelPath, "hsh-face")

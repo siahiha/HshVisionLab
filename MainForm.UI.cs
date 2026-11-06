@@ -734,6 +734,13 @@ public sealed partial class MainForm
             tileActions.Controls.Add(startStop);
             tileActions.Controls.Add(edit);
             tileActions.Controls.Add(delete);
+            if (camera.Settings.Rois.SelectMany(r => r.Processing).Any(t => t.ExecutionMode == "TrackAndQueue"))
+            {
+                var buffers = MakeTileActionButton("Buffers", BgButton, "Sample buffers");
+                _cameraActionToolTip.SetToolTip(buffers, UiLocalization.T("Sample buffers"));
+                buffers.Click += (_, _) => new CompletionBufferStatusForm(camera).Show(this);
+                tileActions.Controls.Add(buffers);
+            }
 
             var tileHeader = new Panel
             {
@@ -780,6 +787,7 @@ public sealed partial class MainForm
             "Stop camera" => "stop",
             "Edit camera" => "edit",
             "Delete camera" => "delete",
+            "Sample buffers" => "view_module",
             _ => "settings"
         };
         return new Button
@@ -826,6 +834,9 @@ public sealed partial class MainForm
         {
             string state = camera.IsRunning ? "RUNNING" : "STOPPED";
             label.Text = $"{camera.Settings.Name}   •   {state}   •   {camera.ProcessingFps:0.0} FPS";
+            if (camera.CompletionBufferStatus.Count > 0)
+                label.Text += "   •   " + string.Join(" | ", camera.CompletionBufferStatus.Select(s =>
+                    $"{UiLocalization.T(s.Kind == AnalysisKind.Face ? "Face buffer" : "Plate buffer")}: {s.Pending}/{s.Capacity} (+{s.InFlight})"));
             label.ForeColor = camera.IsRunning ? Color.LightGreen : Color.LightGray;
         }
     }

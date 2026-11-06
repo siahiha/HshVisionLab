@@ -6,15 +6,40 @@ public sealed partial class MainForm
     {
         foreach (Control control in _flowPlates.Controls.OfType<Control>().ToArray())
         {
-            DisposePlateCard(control);
+            DisposeDetectionCard(control);
         }
 
-        foreach (DesktopEventRecord entry in _eventStore.Query(limit: 100).Reverse())
+        foreach (DesktopEventRecord entry in _eventStore.Query(limit: 25).Reverse())
         {
-            Bitmap? crop = LoadEventCrop(entry.CropPath);
-            if (crop is null) continue;
-            AddPlateCard(crop, entry.CameraName, entry.Label, entry.Confidence, entry.OccurredAtUtc.ToLocalTime());
+            AddEventCard(entry);
         }
+    }
+
+    private void AddEventCard(DesktopEventRecord entry)
+    {
+        Bitmap? mainCrop = LoadEventCrop(entry.CropPath);
+        Bitmap? secondaryCrop = LoadEventCrop(entry.SecondaryCropPath);
+
+        if (mainCrop is null)
+        {
+            mainCrop = secondaryCrop;
+            secondaryCrop = null;
+        }
+
+        if (mainCrop is null)
+        {
+            secondaryCrop?.Dispose();
+            return;
+        }
+
+        AddDetectionCard(
+            mainCrop,
+            secondaryCrop,
+            entry.CameraName,
+            entry.Label,
+            entry.Confidence,
+            entry.OccurredAtUtc.ToLocalTime(),
+            entry.DisplayAxis);
     }
 
     private static Bitmap? LoadEventCrop(string? path)
@@ -43,14 +68,16 @@ public sealed partial class MainForm
         return detection.TrackId is int trackId ? $"{kind} #{trackId}" : kind;
     }
 
-    private void AddPlateCard(
-        Bitmap crop,
+    private void AddDetectionCard(
+        Bitmap mainCrop,
+        Bitmap? secondaryCrop,
         string cameraName,
-        string plate,
+        string label,
         float confidence,
-        DateTime timestamp)
+        DateTime timestamp,
+        string displayAxis)
     {
-        const int maxCards = 100;
+        const int maxCards = 25;
         int width = Math.Max(250, _flowPlates.ClientSize.Width - 28);
 
         var card = new Panel
@@ -62,14 +89,56 @@ public sealed partial class MainForm
             Padding = new Padding(6)
         };
 
-        var picture = new PictureBox
+        var imagePanel = new Panel
         {
-            Image = crop,
-            SizeMode = PictureBoxSizeMode.Zoom,
             Dock = DockStyle.Left,
             Width = 105,
             BackColor = Color.Black
         };
+
+        var picture = new PictureBox
+        {
+            Image = mainCrop,
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Dock = DockStyle.Fill,
+            BackColor = Color.Black
+        };
+        imagePanel.Controls.Add(picture);
+
+        if (secondaryCrop is not null)
+        {
+            var secondaryPicture = new PictureBox
+            {
+                Image = secondaryCrop,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Width = 44,
+                Height = 44,
+                Left = 55,
+                Top = 54,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                BackColor = Color.Black,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            imagePanel.Controls.Add(secondaryPicture);
+            secondaryPicture.BringToFront();
+
+            var faceBadge = new Label
+            {
+                Text = "FACE",
+                AutoSize = false,
+                Width = 44,
+                Height = 14,
+                Left = 55,
+                Top = 40,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                BackColor = Color.FromArgb(190, 0, 0, 0),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 6.5F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            imagePanel.Controls.Add(faceBadge);
+            faceBadge.BringToFront();
+        }
 
         var cameraLabel = new Label
         {
@@ -83,7 +152,7 @@ public sealed partial class MainForm
 
         var plateLabel = new Label
         {
-            Text = plate,
+            Text = label,
             Dock = DockStyle.Top,
             Height = 32,
             ForeColor = Color.White,
@@ -110,29 +179,42 @@ public sealed partial class MainForm
         textPanel.Controls.Add(cameraLabel);
 
         card.Controls.Add(textPanel);
-        card.Controls.Add(picture);
+        card.Controls.Add(imagePanel);
         _flowPlates.Controls.Add(card);
         card.BringToFront();
 
         while (_flowPlates.Controls.Count > maxCards)
         {
-            DisposePlateCard(_flowPlates.Controls[^1]);
+            DisposeDetectionCard(_flowPlates.Controls[^1]);
         }
     }
 
-    private static void DisposePlateCard(Control control)
+    private static void DisposeDetectionCard(Control control)
     {
-        if (control is Panel panel)
+        foreach (PictureBox picture in GetPictureBoxes(control))
         {
-            foreach (PictureBox picture in panel.Controls.OfType<PictureBox>())
-            {
-                picture.Image?.Dispose();
-                picture.Image = null;
-            }
+            picture.Image?.Dispose();
+            picture.Image = null;
         }
 
         control.Parent?.Controls.Remove(control);
         control.Dispose();
+    }
+
+    private static IEnumerable<PictureBox> GetPictureBoxes(Control control)
+    {
+        foreach (Control child in control.Controls)
+        {
+            if (child is PictureBox picture)
+            {
+                yield return picture;
+            }
+
+            foreach (PictureBox nested in GetPictureBoxes(child))
+            {
+                yield return nested;
+            }
+        }
     }
 
     private void SaveSnapshot()

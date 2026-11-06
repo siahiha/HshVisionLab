@@ -31,6 +31,8 @@ public interface IProcessingModule
     Type? OptionsType => null;
     string EditorKey => "options";
     string? AvailabilityMessage => null;
+    IRecognitionProcessor CreateRecognizer(RecognitionDefinition definition) =>
+        throw new NotSupportedException($"{DisplayName} does not support tracked recognition.");
 
     /// <summary>
     /// Metadata copied to each detection produced by this module. The runtime
@@ -49,6 +51,7 @@ public sealed class ProcessingModuleRegistration : IProcessingModule
 {
     private readonly Func<ProcessingCreationContext, CameraProcessingSettings, IEnumerable<IProcessingPipeline>> _factory;
     private readonly Func<CameraProcessingSettings, IReadOnlyDictionary<string, object?>>? _metadataFactory;
+    private readonly Func<RecognitionDefinition, IRecognitionProcessor>? _recognizerFactory;
 
     public ProcessingType Type { get; }
     public string DisplayName { get; }
@@ -65,7 +68,8 @@ public sealed class ProcessingModuleRegistration : IProcessingModule
         Type? optionsType = null,
         string editorKey = "options",
         Func<CameraProcessingSettings, IReadOnlyDictionary<string, object?>>? metadataFactory = null,
-        string? availabilityMessage = null)
+        string? availabilityMessage = null,
+        Func<RecognitionDefinition, IRecognitionProcessor>? recognizerFactory = null)
     {
         if (string.IsNullOrWhiteSpace(type.Value)) throw new ArgumentException("A processing module type is required.", nameof(type));
         if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("A processing module display name is required.", nameof(displayName));
@@ -78,6 +82,7 @@ public sealed class ProcessingModuleRegistration : IProcessingModule
         AvailabilityMessage = availabilityMessage;
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         _metadataFactory = metadataFactory;
+        _recognizerFactory = recognizerFactory;
     }
 
     public IEnumerable<IProcessingPipeline> CreatePipelines(
@@ -87,6 +92,9 @@ public sealed class ProcessingModuleRegistration : IProcessingModule
 
     public IReadOnlyDictionary<string, object?> GetDetectionMetadata(CameraProcessingSettings settings) =>
         _metadataFactory?.Invoke(settings) ?? new Dictionary<string, object?>(StringComparer.Ordinal);
+
+    public IRecognitionProcessor CreateRecognizer(RecognitionDefinition definition) =>
+        _recognizerFactory?.Invoke(definition) ?? throw new NotSupportedException($"{DisplayName} does not support tracked recognition.");
 }
 
 /// <summary>

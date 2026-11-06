@@ -1,4 +1,5 @@
 # Build outputs and generated folders
+.codex-build/
 [Bb]in/
 [Oo]bj/
 **/[Bb]in/

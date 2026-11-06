@@ -26,10 +26,15 @@ public sealed class PlateModule
                     return Array.Empty<IProcessingPipeline>();
 
                 PlateProcessingOptions options = item.GetOptions<PlateProcessingOptions>();
-                return [new PlatePipeline(options, item.MaxFps, item.Threads)];
+                return [new PlatePipeline(options, item.MaxFps, item.Threads, item.ExecutionMode == "TrackAndQueue")];
             },
             typeof(PlateProcessingOptions),
             "plate",
-            availabilityMessage: license.Allows(LicensedFeature.Plate) ? null : license.Message);
+            availabilityMessage: license.Allows(LicensedFeature.Plate) ? null : license.Message,
+            recognizerFactory: definition =>
+            {
+                LicenseValidator.Require(license, LicensedFeature.Plate);
+                return new PlateCompletionRecognizer(definition);
+            });
     }
 }

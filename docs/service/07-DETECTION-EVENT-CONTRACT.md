@@ -2,6 +2,10 @@
 
 ## 1. هدف قرارداد
 
+> **تکمیل ناهمزمان trackها: Windows پیاده‌سازی شده؛ Service/Web هنوز فعال نشده است.** در حالت TrackAndQueue تعریف‌شده در [معماری](../ARCHITECTURE.md)، TrackUpdate صرفاً دادهٔ موقت نمایش است و event تشخیص نیست. تنها CompletedDetection پذیرفته‌شده وارد policyهای association/history/trigger می‌شود. source frame، زمان مشاهده، bounds و artifact باید از snapshot همان نمونهٔ بافر گرفته شوند، نه latest-frame زمان تکمیل. زمان completion از زمان مشاهده جداست و association بر مبنای زمان مشاهده انجام می‌شود. صف completion حافظه‌ای است؛ replay فقط رخداد نهایی ثبت‌شده را پوشش می‌دهد. در payload محلی Windows، metadata شامل `SampleId`، `SourceFrameSequence`، `SourceFrameCapturedAtUtc`، `CompletedAtUtc`، `RuntimeInstanceId`، `RuntimeGeneration` و شناسه/نام/نسخهٔ تعریف تشخیص است. نگاشت نسخه‌بندی‌شدهٔ آن‌ها به envelope سرویس ادامهٔ توسعه است؛ payload سرویس با این پیاده‌سازی تغییر نکرده است.
+
+ظرفیت بافر هر نوع نمونه مستقل است و worker، تعریف تشخیص انتخاب‌شده از تنظیمات عمومی دوربین را اجرا می‌کند. در metadata محلی Windows، `RecognitionDefinitionId`، `RecognitionDefinitionName` و `RecognitionDefinitionRevision` مقصد را جدا از `ProcessingItemId` و `RoiId` مبدا مشخص می‌کنند. اشتراک یک تعریف بین چند ROI نباید منبع نمونه یا کلید track را از بین ببرد؛ تغییر تعریف نیز نباید نتیجهٔ نسخهٔ قدیمی را با نام تنظیمات جدید منتشر کند.
+
 > **وضعیت implementation فعلی:** این سند هم قرارداد موجود و هم بخش‌هایی از طراحی تکمیلی را نگه می‌دارد. در کد فعلی association تاریخی خودرو/شخص و endpointهای `/api/v1/associations` وجود ندارد. ارتباط فعلی با componentهای `plate`، `face` و `palm`، و فیلدهای `source.associationType` و `source.associationAgeMs` ثبت می‌شود.
 
 رخدادهای فعلی از این نوع‌ها استفاده می‌کنند: `PlateDetected`، `FaceRecognized`، `FaceUnknown`، `PalmRecognized`، `PalmUnknown`، `PlateFaceMatched` و `PlatePalmMatched`. سناریوها شامل `PlateOnly`، `FaceRecognition`، `PalmRecognition`، `PlateFaceAssociation` و `PlatePalmAssociation` هستند. association می‌تواند `SameFrame`، `TemporalAssociation` یا `Standalone` باشد.

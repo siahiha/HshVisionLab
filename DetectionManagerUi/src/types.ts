@@ -149,6 +149,17 @@ export interface TriggerDefinition {
   cooldownSeconds: number;
   actions: TriggerAction[];
 }
+export interface TriggerTestEvaluationResult {
+  matched: boolean;
+  reason: string;
+  eventId: string;
+  sequence: number;
+  eventType: string;
+  scenario: string;
+  cameraId: string;
+  plateText?: string;
+  failedChecks: string[];
+}
 export interface InvocationMapping {
   target: string;
   source: string;

@@ -5,7 +5,7 @@ using HshDetectionEngin.Plate;
 namespace HshVisionLab;
 
 /// <summary>Edits one camera without changing the live runtime until the user presses OK.</summary>
-public sealed class CameraSettingsForm : Form
+public sealed partial class CameraSettingsForm : Form
 {
     private readonly CameraSettings _settings;
     private readonly IReadOnlyList<ProcessingModuleDescriptor> _processingModules;
@@ -102,6 +102,7 @@ public sealed class CameraSettingsForm : Form
     private readonly NumericUpDown _numIdleDetectionFps = new();
     private readonly NumericUpDown _numTrackMisses = new();
     private SplitContainer? _processingSplit;
+    private Panel? _processingPropertyScroll;
 
     private sealed record PerformancePreset(
         string Name,
@@ -135,6 +136,7 @@ public sealed class CameraSettingsForm : Form
         IEnumerable<ProcessingModuleDescriptor>? processingModules = null)
     {
         _settings = source.Clone();
+        _settings.EnsureProcessingDefaults();
         _processingModules = (processingModules ?? [])
             .Where(module => !string.IsNullOrWhiteSpace(module.Type.Value))
             .GroupBy(module => module.Type)
@@ -179,7 +181,11 @@ public sealed class CameraSettingsForm : Form
         BuildUi();
         UiLocalization.Apply(this);
         LoadValues();
-        Shown += (_, _) => ConfigureProcessingLayout();
+        Shown += (_, _) =>
+        {
+            ConfigureProcessingLayout();
+            RefreshRecognitionList();
+        };
     }
 
     public CameraSettings Result => _settings;
@@ -202,6 +208,10 @@ public sealed class CameraSettingsForm : Form
         var processingTab = new TabPage("Processing") { BackColor = BackColor, ForeColor = ForeColor, Padding = new Padding(8) };
         tabs.TabPages.Add(generalTab);
         tabs.TabPages.Add(processingTab);
+        tabs.SelectedIndexChanged += (_, _) =>
+        {
+            if (tabs.SelectedTab == generalTab) RefreshRecognitionList();
+        };
 
         var generalScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         var general = CreateSettingsTable();
@@ -225,6 +235,7 @@ public sealed class CameraSettingsForm : Form
         AddSection(general, "Scheduling");
         AddRow(general, "Active detection FPS", ConfigureNumber(_numActiveDetectionFps, 1, 60, 1, 0));
         AddRow(general, "Idle detection FPS", ConfigureNumber(_numIdleDetectionFps, 0, 30, 1, 0));
+        BuildCompletionGeneral(general);
         generalScroll.Controls.Add(general);
         generalTab.Controls.Add(generalScroll);
 
@@ -266,6 +277,10 @@ public sealed class CameraSettingsForm : Form
         processingSplit.Panel1.Controls.SetChildIndex(processingListPanel, 0);
 
         var propertyScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        _processingPropertyScroll = propertyScroll;
+        var routingTable = CreateSettingsTable();
+        BuildCompletionRouting(routingTable);
+        BuildMotionSettings(routingTable);
         var properties = CreateSettingsTable();
         AddSection(properties, "ROI properties");
         _txtSelectedRoiName.Width = 220;
@@ -390,6 +405,7 @@ public sealed class CameraSettingsForm : Form
         };
         propertyScroll.Controls.Add(properties);
         processingSplit.Panel2.Controls.Add(propertyScroll);
+        processingSplit.Panel2.Controls.Add(routingTable);
         processingSplit.Panel2.Controls.SetChildIndex(propertyScroll, 0);
         processingTab.Controls.Add(processingSplit);
         root.Controls.Add(tabs, 0, 0);
@@ -677,6 +693,8 @@ public sealed class CameraSettingsForm : Form
         bool palm = editorKey.Equals("palm", StringComparison.OrdinalIgnoreCase);
         bool genericProcessing = _selectedProcessing is not null && !plate && !face && !palm;
         bool roi = _selectedProcessing is null && _selectedTarget?.Roi is not null;
+        _motionSettingsTable.Visible = _selectedProcessing is not null;
+        foreach (Control control in _completionRoutingControls) control.Visible = plate || face;
         foreach ((Control label, Control value) in _plateProperties) { label.Visible = plate; value.Visible = plate; }
         foreach ((Control label, Control value) in _faceProperties) { label.Visible = face; value.Visible = face; }
         foreach ((Control label, Control value) in _palmProperties) { label.Visible = palm; value.Visible = palm; }
@@ -701,6 +719,7 @@ public sealed class CameraSettingsForm : Form
 
         _btnAddProcessing.Enabled = _selectedTarget is not null;
         _btnRemoveProcessing.Enabled = _selectedProcessing is not null;
+        if (_processingPropertyScroll is not null) _processingPropertyScroll.AutoScrollPosition = Point.Empty;
     }
 
     private string GetEditorKey(ProcessingType type) =>
@@ -760,6 +779,7 @@ public sealed class CameraSettingsForm : Form
 
     private void LoadProcessingProperties(CameraProcessingSettings item)
     {
+        LoadCompletionRouting(item);
         PlateProcessingOptions plate = item.GetOptions<PlateProcessingOptions>();
         FaceProcessingOptions face = item.GetOptions<FaceProcessingOptions>();
         PalmProcessingOptions palm = item.GetOptions<PalmProcessingOptions>();
@@ -835,12 +855,14 @@ public sealed class CameraSettingsForm : Form
         _genericOptions.SelectedObject = module?.OptionsType is Type optionsType
             ? item.GetOptions(optionsType)
             : null;
+        UpdateCompletionRoutingAvailability();
     }
 
     private bool CommitSelectedProperties()
     {
         if (_selectedProcessing is CameraProcessingSettings item)
         {
+            CommitCompletionRouting(item);
             string editorKey = GetEditorKey(item.Kind);
             bool isPlateEditor = editorKey.Equals("plate", StringComparison.OrdinalIgnoreCase);
             bool isFaceEditor = editorKey.Equals("face", StringComparison.OrdinalIgnoreCase);
@@ -1003,6 +1025,7 @@ public sealed class CameraSettingsForm : Form
         _numActiveDetectionFps.Value = Math.Clamp(_settings.ActiveDetectionFps, 1, 60);
         _numIdleDetectionFps.Value = Math.Clamp(_settings.IdleDetectionFps, 0, 30);
         _numTrackMisses.Value = Math.Clamp(_settings.TrackMaxMisses, 1, 30);
+        RefreshRecognitionList();
     }
 
     private void SaveAndClose()
@@ -1027,6 +1050,18 @@ public sealed class CameraSettingsForm : Form
         _settings.Transport = _cmbTransport.SelectedItem?.ToString() ?? "TCP";
         _settings.CaptureBackend = _cmbCaptureBackend.SelectedItem?.ToString() ?? "FFmpeg";
         if (!CommitSelectedProperties() || !ValidateRoiNames()) return;
+        try
+        {
+            TrackingCompletionSettings.Validate(_settings);
+            foreach (var task in _settings.Rois.SelectMany(r => r.Processing))
+                (task.MotionDirection ??= new()).Validate();
+            ValidateCompletionModels();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, UiLocalization.T("Camera settings"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         UpdateProcessingFlags();
         _settings.BufferCount = (int)_numPlateBuffer.Value;
         _settings.ReconnectDelaySec = (int)_numReconnect.Value;

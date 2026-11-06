@@ -45,6 +45,9 @@ public sealed partial class CameraProcessingSettings
     /// <summary>Settings common to every processing module.</summary>
     public int MaxFps { get; set; } = 8;
     public int Threads { get; set; } = 1;
+    public string ExecutionMode { get; set; } = "Inline";
+    public string RecognitionDefinitionId { get; set; } = string.Empty;
+    public MotionDirectionSettings MotionDirection { get; set; } = new();
     public override string ToString() => $"{Name} {(Enabled ? "[Enabled]" : "[Disabled]")}";
 
     public CameraProcessingSettings Clone() => new()
@@ -55,6 +58,9 @@ public sealed partial class CameraProcessingSettings
         Enabled = Enabled,
         MaxFps = MaxFps,
         Threads = Threads,
+        ExecutionMode = ExecutionMode,
+        RecognitionDefinitionId = RecognitionDefinitionId,
+        MotionDirection = MotionDirection?.Clone() ?? new(),
         Options = Options?.DeepClone()?.AsObject() ?? []
     };
 }
@@ -74,6 +80,8 @@ public class CameraSettings
     public string ModelFile { get; set; } = "best.onnx";
     public bool PlateEnabled { get; set; } = true;
     public List<CameraProcessingSettings> Processing { get; set; } = [];
+    public List<RecognitionDefinition> RecognitionDefinitions { get; set; } = [];
+    public TrackingCompletionSettings TrackingCompletion { get; set; } = new();
     public string FaceModelFile { get; set; } = "face_yunet_2023mar.onnx";
     public bool FaceEnabled { get; set; }
     public int FaceInputSize { get; set; } = 640;
@@ -132,6 +140,12 @@ public class CameraSettings
 
     public void EnsureProcessingDefaults()
     {
+        RecognitionDefinitions ??= [];
+        TrackingCompletion ??= new();
+        TrackingCompletion.SampleTypes ??= [];
+        foreach (AnalysisKind kind in new[] { AnalysisKind.Face, AnalysisKind.Plate })
+            if (!TrackingCompletion.SampleTypes.Any(type => type.Kind == kind))
+                TrackingCompletion.SampleTypes.Add(new SampleBufferSettings { Kind = kind, Capacity = kind == AnalysisKind.Face ? 32 : 64 });
         CameraCode = CameraCode?.Trim() ?? string.Empty;
         Processing ??= [];
         Rois ??= [];
