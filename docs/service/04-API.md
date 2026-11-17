@@ -280,6 +280,8 @@ DELETE /api/v1/events?fromUtc=...&toUtc=...
 GET  /api/v1/streams/{cameraId}/snapshot
 GET  /api/v1/streams/{cameraId}/overlay
 POST /api/v1/streams/{cameraId}/webrtc/offer
+PATCH/DELETE /api/v1/streams/webrtc/{sessionId}
+GET /api/v1/streams/diagnostics
 POST/PATCH/DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 ```
 
@@ -318,6 +320,19 @@ POST/PATCH/DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 offer/answer اختصاصی و `WebRtcGateway` خروجی کامپوزیت‌شده را ارائه می‌کنند و
 مسیر فعال tile، focus و ROI زندهٔ UI فعلی‌اند. مصرف‌کنندهٔ WHEP خام از
 endpointهای `/webrtc/whep/{viewerId}` و Overlay جداگانه استفاده می‌کند.
+
+در offer اختصاصی، فیلدهای اختیاری `maxWidth/maxHeight` سقف اندازهٔ محل نمایش
+را اعلام می‌کنند. پاسخ سرویس جدید `supportsViewportUpdates: true` دارد؛
+کلاینت با `PATCH /api/v1/streams/webrtc/{sessionId}` همان فیلدها را هنگام
+resize و هر ۱۰ ثانیه برای heartbeat می‌فرستد. پاسخ `204` موفقیت و `404`
+منقضی‌شدن یا نبودن session است. session جدید دارای اندازه پس از ۴۵ ثانیه
+بی‌خبری و مذاکرهٔ ناتمام پس از ۳۰ ثانیه پاک می‌شود. offer قدیمی بدون اندازه،
+برای اتصال برقرارشده heartbeat اجباری ندارد. `DELETE` همچنان اتصال را می‌بندد.
+
+`GET /api/v1/streams/diagnostics` آمار bounded هر دوربین دارای viewer را
+می‌دهد: تعداد viewer، اندازه، `encodedFps`، `lastEncodeMs`، فریم‌های جایگزین و
+تکراری، `inFlightFrames/pendingFrames` و خطای خلاصه‌شده بدون URL منبع.
+فریم منتظر حداکثر یکی است. encode هر دوربین مستقل و بین viewerهایش مشترک است.
 
 ## 11. ارتباط پلاک و چهره و subscription کلاینت
 

@@ -357,6 +357,15 @@ export interface WebRtcAnswer {
   sessionId: string;
   type: string;
   sdp: string;
+  supportsViewportUpdates?: boolean;
+}
+export interface WebRtcPreviewDemand {
+  maxWidth?: number;
+  maxHeight?: number;
+}
+export interface WebRtcOffer extends WebRtcPreviewDemand {
+  type: string;
+  sdp: string;
 }
 export interface LiveOverlayPoint { x: number; y: number; }
 export interface LiveOverlayRect { x: number; y: number; width: number; height: number; }

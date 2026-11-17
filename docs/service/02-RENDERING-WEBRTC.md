@@ -1,204 +1,149 @@
 # Rendering و WebRTC با Drawing پایدار
 
-## 1. مشکل اصلی
+## مسیر فعال نمایش
 
-اگر پس از هر inference یک تصویر کامل render و همان تصویر برای WebRTC ارسال شود، زمان inference مستقیماً وارد نرخ فریم می‌شود. در این حالت، وقتی inference کند یا متناوب باشد، حرکت تصویر برای کاربر نرم نیست.
-
-راه‌حل این است که سه نرخ کاملاً مستقل باشند:
-
-1. نرخ capture دوربین
-2. نرخ inference
-3. نرخ render/stream
-
-WebRTC باید همیشه از آخرین تصویر قابل‌دسترس تغذیه شود، نه از آخرین inference.
-
-## 2. معماری دو مخزن
-
-### `LatestFrameStore`
-
-برای هر دوربین فقط آخرین فریم معتبر را نگه می‌دارد:
+Tile، focus، fullscreen و ROI زندهٔ UI وب از `CompositeWebRtcStream` و خروجی
+کامپوزیت‌شدهٔ سرویس استفاده می‌کنند. دریافت، inference، preview و encode
+مستقل‌اند؛ پایان تشخیص محرک ارسال فریم نیست.
 
 ```text
-FrameSnapshot
- ├── CameraId
- ├── Sequence
- ├── CapturedAtUtc
- ├── Width / Height
- └── PixelBuffer یا Mat مالکیت‌دار
+Camera RTSP → FFmpeg، یک decoder thread → جدیدترین فریم
+                                          ├── inference با ابعاد اصلی
+                                          └── preview worker هر دوربین
+                                                ↓ آخرین overlay معتبر
+                                           Bitmap در اندازهٔ نمایش
+                                                ↓ یک pending slot
+                                           encoder مستقل همان دوربین
+                                                ↓ یک نمونهٔ VP8 مشترک
+                                           WebRTC peerهای همان دوربین
 ```
 
-Capture thread فریم جدید را در این store جایگزین می‌کند. اگر renderer یا encoder عقب باشد، فریم‌های قدیمی حذف می‌شوند؛ صف بی‌نهایت ساخته نمی‌شود.
+دریافت در Windows و سرویس فقط از مسیر مستقیم FFmpeg است. `Threads` آیتم
+پردازشی مربوط به ONNX است و تعداد threadهای decoder را تغییر نمی‌دهد.
+تغییر اندازهٔ نمایش، ورودی مدل و ROI پردازش را کوچک نمی‌کند.
 
-قواعد:
+## نرخ، ابعاد و تقاضای نمایش
 
-- writer هرگز منتظر reader نمی‌ماند.
-- reader یک snapshot مستقل می‌گیرد.
-- dispose هر buffer باید مشخص و قابل‌ردیابی باشد.
-- برای هر دوربین فقط یک latest slot وجود دارد، مگر برای تست و recording.
+`CameraRuntime.ConfigurePreview(maxSize, enabled, maxFps)` تقاضای نمایش را
+کنترل می‌کند. سقف ۱۵ FPS حفظ شده است و `Service.Runtime.PreviewFps` در بازهٔ
+`1..15` اعمال می‌شود.
 
-### `OverlayStateStore`
+مرورگر عرض و ارتفاع فضای نمایش را از CSS می‌فرستد؛ `devicePixelRatio` به آن
+ضرب نمی‌شود. Resize درخواست همان session را به‌روز می‌کند. برای هر دوربین،
+بزرگ‌ترین عرض و ارتفاع در میان viewerهای متصل، ابعاد source مشترک را تعیین
+می‌کند. Viewer کوچک ممکن است خروجی بزرگ‌تر مورد نیاز viewer دیگر را بگیرد؛
+تعداد viewer یک دوربین تعداد encoder را افزایش نمی‌دهد.
 
-آخرین نتیجهٔ موفق inference را نگه می‌دارد:
+ابعاد encode از `1280×720` و ابعاد منبع بزرگ‌تر نمی‌شوند و در هر دو محور
+مضرب ۱۶ هستند. نسبت ابعاد در حد گردکردن حفظ می‌شود؛ کل تصویر resize می‌شود و
+letterbox یا crop اضافه ندارد. برای نمونه، viewport با اندازهٔ `640×360`
+می‌تواند فریم `640×352` بگیرد. مختصات نرمال ROI روی همان تصویر کامل معتبر
+می‌ماند.
+
+Preview فقط برای WebRTC viewer متصل یا درخواست snapshot تولید می‌شود.
+Session در مرحلهٔ signaling هنوز preview یا encoder را فعال نمی‌کند. مرورگر
+هنگام مخفی‌شدن صفحه یا خارج‌شدن viewer از دید، session را می‌بندد و هنگام
+بازگشت دوباره متصل می‌شود. حذف آخرین تقاضا منابع نمایش را آزاد می‌کند؛ capture
+و inference ادامه دارند.
+
+Snapshot یک تقاضای سه‌ثانیه‌ای ایجاد می‌کند. اگر فقط snapshot مصرف‌کننده باشد،
+نرخ preview حداکثر ۵ FPS است. اولین درخواست پس از حالت بدون نمایش تا ۷۵۰
+میلی‌ثانیه برای فریم منتظر می‌ماند و دوربین متوقف را خودکار start نمی‌کند.
+پس از پایان تقاضا، snapshot ذخیره‌شده نیز آزاد می‌شود.
+
+## مالکیت فریم و حافظه
+
+`FrameSource` فقط جدیدترین Mat منتظر inference را نگه می‌دارد. worker نمایش
+با Matهای قابل استفادهٔ مجدد، کپی جداگانهٔ خودش را می‌سازد؛ inference و renderer
+روی یک Mat مشترک کار نمی‌کنند.
+
+`Camera_FrameReady` در سرویس Bitmap را به gateway قرض می‌دهد؛ gateway یک
+clone برای slot منتظر می‌گیرد. هنگام تقاضای snapshot، مخزن snapshot مالکیت
+خود Bitmap را می‌گیرد؛ در غیر این صورت میزبان آن را آزاد می‌کند.
+
+`CameraVideoPump` برای هر دوربین:
+
+- یک worker و یک encoder دارد؛ task به‌ازای هر فریم ساخته نمی‌شود؛
+- حداکثر یک Bitmap در حال encode و یک Bitmap منتظر نگه می‌دارد؛
+- فریم منتظر قبلی را هنگام جایگزینی با فریم جدید آزاد می‌کند؛
+- sequence تکراری یا قدیمی را دوباره encode نمی‌کند؛
+- Bitmap تبدیل رنگ، Mat و آرایهٔ I420 را تا تغییر ابعاد دوباره استفاده می‌کند؛
+- نمونهٔ فشردهٔ VP8 و fragmentهای payload آن را بین peerهای همان دوربین
+  مشترک می‌کند. هر viewer state ارتباط و زمان RTP خودش را دارد.
+
+با تغییر ابعاد واقعی encode، codec قبلی روی worker آزاد و codec تازه ساخته
+می‌شود و نخستین خروجی keyframe است. در نسخهٔ فعلی `Vpx.Net`، planeهای داخلی
+codec پس از کوچک‌شدن تصویر ممکن است اندازهٔ قبلی را نگه دارند؛ درخواست
+keyframe به‌تنهایی کافی نیست. در ابعاد ثابت codec و bufferهای I420 دوباره
+استفاده می‌شوند. آزمون native، کاهش و افزایش اندازه و ادامهٔ خروجی را از
+header واقعی VP8 بررسی می‌کند.
+
+Encoder یک دوربین worker دوربین دیگر را مسدود نمی‌کند. هنگام close، pending
+frame حذف می‌شود و همان worker پس از پایان encode جاری codec و bufferهایش را
+آزاد می‌کند. codec در میانهٔ فراخوانی native از thread دیگری dispose نمی‌شود؛
+عملیات native جاری ممکن است تا بازگشت خودش ادامه داشته باشد.
+
+## Overlay و استقلال از inference
+
+Preview فریم تازه را با آخرین state معتبر ROI، کادرها، labelها و primitiveهای
+پردازشی ترکیب می‌کند. `DetectionOverlayHoldMs` مدت نگه‌داری نتیجهٔ قبلی را
+کنترل می‌کند؛ پیش‌فرض ۲۵۰۰ میلی‌ثانیه است. کندبودن inference باید تازگی کادر را
+تغییر دهد، نه حرکت تصویر را متوقف کند.
+
+`_renderGate` فقط تعویض یا snapshot فهرست نتیجه را محافظت می‌کند. خود inference
+زیر قفل preview اجرا نمی‌شود. Drawing پلاک هنوز از `_overlayGate` استفاده
+می‌کند؛ در صورت باقی‌ماندن هزینهٔ render، اندازه‌گیری این بخش مرحلهٔ بعد است.
+تعداد threadهای ONNX برای جبران فشار نمایش بدون اندازه‌گیری افزایش نمی‌یابد.
+
+## Signaling و عمر session
+
+| درخواست | رفتار |
+| --- | --- |
+| `POST /api/v1/streams/{cameraId}/webrtc/offer` | دریافت `type`، `sdp` و `maxWidth/maxHeight` اختیاری؛ پاسخ شامل `sessionId`، `type`، `sdp` و `supportsViewportUpdates` است. دوربین باید فعال و در حال اجرا باشد. |
+| `PATCH /api/v1/streams/webrtc/{sessionId}` | به‌روزکردن ابعاد اختیاری و تمدید heartbeat همان session |
+| `DELETE /api/v1/streams/webrtc/{sessionId}` | بستن viewer و کاهش تقاضای نمایش همان دوربین |
+| `GET /api/v1/streams/diagnostics` | آمار encoder و صف برای دوربین‌های دارای session |
+| `GET /api/v1/streams/{cameraId}/snapshot` | JPEG خروجی Drawing همراه با تقاضای موقت preview |
+
+UI جدید هر ۱۰ ثانیه heartbeat می‌فرستد. Session دارای viewport پس از ۴۵ ثانیه
+بدون تمدید منقضی می‌شود؛ signaling ناقص پس از ۳۰ ثانیه پاک می‌شود. نگه‌داری
+دوره‌ای هر پنج ثانیه است، بنابراین پاک‌سازی نهایی ممکن است تا tick بعدی طول
+بکشد. کلاینت قدیمی که ابعاد نفرستاده، پس از اتصال به heartbeat وابسته نیست؛
+capability پاسخ به UI اجازه می‌دهد سرویس قدیمی را نیز تحمل کند.
+
+زمان RTP از timestamp محلی فریم دریافت‌شده با clock نودکیلوهرتز محاسبه می‌شود؛
+حذف فریم، فاصلهٔ زمانی را به مقدار ثابت ۶۷ میلی‌ثانیه تبدیل نمی‌کند. هر فریم
+VP8 به payloadهای حداکثر ۱۲۰۰ بایتی قطعه می‌شود؛ fragment نخست بیت start دارد،
+همهٔ fragmentها timestamp یکسان دارند و fragment آخر marker می‌گیرد. Viewer
+جدید تا keyframe فریم وابسته دریافت نمی‌کند. اتصال جدید، تغییر اندازه و PLI
+درخواست keyframe می‌دهند؛ PLI تکراری محدود می‌شود.
+
+## درگاه مستقل خام WHEP
+
+درگاه RTSP به WHEP سرویس جدا از مسیر Drawing فعال وب وجود دارد:
 
 ```text
-OverlayState
- ├── Version
- ├── SourceFrameSequence
- ├── UpdatedAtUtc
- ├── StaticOverlays: ROIها
- ├── DynamicOverlays: detectionها
- ├── Detections metadata
- └── ExpiresAtUtc برای هر overlay
+MediaMTX WHEP خام → Browser <video>
+Overlay API       → Browser SVG overlay
 ```
 
-این state با replace اتمیک عوض می‌شود. renderer نباید در زمان inference روی آن lock طولانی بگیرد.
+`MediaMtxRuntime` فقط در سرویس است و برای source فعال RTSP هنگام درخواست WHEP،
+path مرورگر را می‌سازد. ویدئوی خام برای اضافه‌کردن Drawing دوباره encode
+نمی‌شود. `GET /api/v1/streams/{cameraId}/overlay` مختصات و متادیتای سبک را
+برمی‌گرداند. این درگاه و کامپوننت `RawMediaMtxStream` گیرندهٔ دیگری برای موتور
+نیستند؛ UI فعال همچنان `CompositeWebRtcStream` را استفاده می‌کند.
 
-## 3. Compositor
+## مشاهده و بررسی
 
-در هر tick ثابت، مثلاً 15 یا 20 FPS، compositor این کار را انجام می‌دهد:
+Diagnostics تعداد viewerهای کل و متصل، ابعاد واقعی، تعداد فریم‌های دریافتی و
+encodeشده، replacementها، duplicateها، زمان encode، سن آخرین فریم، FPS خروجی،
+byteهای encodeشده، تعداد ارسال/خطا و تعداد frameهای active/pending را می‌دهد.
+این آمار داخلی است و تأخیر کامل دوربین تا مرورگر را اندازه نمی‌گیرد. درصد
+بهبود CPU/RAM باید با بار واقعی اندازه‌گیری شود.
 
-```text
-latestFrame = LatestFrameStore.Read()
-overlayState = OverlayStateStore.Read()
-
-output = Clone(latestFrame)
-DrawStaticRois(output, overlayState)
-DrawDynamicDetections(output, overlayState)
-Publish(output)
-```
-
-بنابراین وقتی inference هنوز در حال اجراست:
-
-- تصویر جدید دوربین همچنان نمایش داده می‌شود.
-- ROIها روی هر فریم رسم می‌شوند.
-- آخرین کادر تشخیص معتبر روی آخرین تصویر رسم می‌شود.
-- پس از تکمیل inference، overlay state یک‌باره با نتیجهٔ جدید replace می‌شود.
-
-این دقیقاً همان رفتار مطلوب برنامهٔ Windows فعلی است: تصویر زنده مستقل حرکت می‌کند و Drawing از state آخرین نتیجه استفاده می‌کند.
-
-## 4.1 نمایش فعال وب و درگاه مستقل WHEP
-
-UI وب فعلی در tile، focus و ROI زنده از `CompositeWebRtcStream` و
-`POST /api/v1/streams/{cameraId}/webrtc/offer` استفاده می‌کند. تصویر Drawing
-سرویس را دارد و render/encoding مستقل از نرخ inference زمان‌بندی می‌شوند.
-
-درگاه مستقل سرویس برای sourceهای فعال RTSP، WHEP خام و Overlay جداگانه را
-نیز در اختیار مصرف‌کننده قرار می‌دهد:
-
-```text
-MediaMTX WHEP خام ───────────────► Browser <video>
-Overlay API / polling ───────────► Browser SVG overlay
-```
-
-موتور تشخیص مستقیماً از دوربین با یک thread decoder دریافت می‌کند:
-
-```text
-Camera RTSP → FrameSource/FFmpeg → newest-frame → CameraRuntime
-```
-
-در مسیر خام WHEP، ویدئو برای اضافه‌کردن Drawing دوباره encode نمی‌شود. endpoint سبک
-`/api/v1/streams/{cameraId}/overlay` ROIها، bounds تشخیص، label، confidence،
-track id و primitiveهای پردازشی را می‌دهد. کلاینت این داده را روی همان ابعاد
-فریم خام رسم می‌کند. این مسیر برای inference خاموش یا کند نیز latency ویدئو را
-تغییر نمی‌دهد؛ فقط تازگی Overlay تابع آخرین نتیجهٔ پردازش است.
-
-`MediaMtxRuntime` فقط در سرویس مدیریت می‌شود و path مرورگر را هنگام درخواست
-WHEP می‌سازد. کامپوننت خام `RawMediaMtxStream` در سورس موجود است؛ نماهای فعال
-فعلی همچنان خروجی compositor و `WebRtcGateway` را استفاده می‌کنند.
-
-## 4. سیاست overlay پویا
-
-هر detection باید این metadata را داشته باشد:
-
-- `SourceFrameSequence`
-- `UpdatedAtUtc`
-- `ExpiresAtUtc`
-- `TrackId` در صورت وجود
-- `Accepted`
-- `Confidence`
-- مختصات در فضای فریم اصلی، نه فقط ROI
-
-تا زمانی که نتیجهٔ جدید نیامده است، کادر قبلی روی فریم‌های جدید رسم می‌شود. برای جلوگیری از کادرهای قدیمی:
-
-- expiry پیش‌فرض کوتاه باشد؛ مثلاً 1 تا 3 ثانیه
-- در صورت ادامهٔ track، tracker بتواند TTL را تمدید کند
-- پس از expiry، کادر حذف شود
-- ROIهای ثابت expiry نداشته باشند
-
-مختصات detection از نتیجهٔ قدیمی مستقیماً روی latest frame رسم می‌شود، مشابه UI فعلی. در صورت نیاز به حرکت سریع، مرحلهٔ بعدی می‌تواند prediction سادهٔ tracker بین دو inference اضافه کند؛ این prediction نباید جای نتیجهٔ واقعی را بگیرد.
-
-## 5. استفاده از خروجی فعلی موتور
-
-`CameraRuntime` فعلی نیز مفهوم latest preview و overlayهای آخرین نتیجه را دارد. سرویس باید همین رفتار را به یک component مستقل تبدیل کند، نه اینکه WebRTC را به event پایان inference وصل کند.
-
-مرز پیشنهادی:
-
-```text
-Engine result  →  OverlayStateAdapter  →  OverlayStateStore
-FrameReady    →  LatestFrameStore      →  Compositor
-Compositor    →  VideoSourceAdapter    →  WebRTC encoder
-```
-
-`FrameReady` یا renderer نباید ownership مشترک Bitmap/Mat را بدون قرارداد واضح بین چند thread پخش کند. بهترین قرارداد، snapshot immutable یا buffer دارای reference counting است.
-
-## 6. WebRTC و دو قرارداد خروجی
-
-برای خروجی کامپوزیت‌شده، WebRTC فقط مصرف‌کنندهٔ compositor است:
-
-```text
-Compositor 15/20 FPS
-       ↓
-VideoSourceAdapter
-       ↓
-Encoder
-       ↓
-WebRTC Peer Connections
-```
-
-قواعد performance:
-
-- encoder هرگز capture یا inference را block نکند.
-- اگر encoder عقب افتاد، قدیمی‌ترین فریم drop شود و latest frame حفظ شود.
-- برای هر دوربین یک composited source و برای هر subscriber یک session داشته باشیم.
-- تعداد subscriber، bitrate و resolution محدود و قابل تنظیم باشد.
-- snapshot HTTP کامپوزیت‌شده از همان state خروجی گرفته می‌شود.
-- در مسیر MediaMTX، متادیتای detection جدا از ویدئوی WHEP ارسال و در کلاینت
-  به‌صورت SVG در `LiveOverlaySvg` رسم می‌شود؛ burn-in فقط برای مسیر
-  compositor لازم است.
-
-## 7. Signaling و شبکه
-
-WebRTC خودش signaling را تعریف نمی‌کند. سرویس باید endpoint یا Hub برای offer، answer و ICE candidate داشته باشد. برای LAN معمولاً host/local candidate کافی است؛ برای شبکه‌های پیچیده یا اتصال بیرونی، STUN/TURN باید در تنظیمات قابل تعریف باشد.
-
-مدل پیشنهادی:
-
-```text
-Client → POST/Hub offer
-Service → answer
-Client ↔ Service → ICE candidates
-Client ← WebRTC annotated video
-```
-
-تنظیمات stream:
-
-- `CameraId`
-- `Profile` مثل low/medium/high
-- width/height
-- max FPS
-- bitrate
-- codec ترجیحی
-- audio disabled در نسخهٔ اول
-- فهرست ICE serverها
-
-کتابخانهٔ WebRTC تا زمان PoC نباید در لایهٔ engine پخش شود؛ با interfaceای مثل `IWebRtcVideoPublisher` محصور شود تا انتخاب library قابل تعویض بماند.
-
-## 8. معیار پذیرش
-
-- inference کند نباید FPS تصویر را به صفر برساند.
-- هنگام نبود detection جدید، latest image با آخرین overlay معتبر نمایش داده شود.
-- وقتی فریم جدید می‌آید، ROI روی همان فریم جدید رسم شود.
-- در مسیر compositor، WebRTC و snapshot یک تصویر compositing‌شدهٔ یکسان داشته
-  باشند؛ در مسیر MediaMTX، WHEP خام و Overlay API باید با یک مختصات فریم منطبق
-  باشند.
-- قطع یک کلاینت نباید capture، inference یا stream کل دوربین را متوقف کند.
-- حافظه با تعداد کلاینت‌ها و مدت اجرا به‌صورت نامحدود رشد نکند.
+آزمون کنسول و browser مصنوعی در
+[`tests/WebRtcStreaming.Tests`](../../tests/WebRtcStreaming.Tests/README.md)
+صف محدود، استقلال دوربین‌ها، encoder مشترک، حذف duplicate، عمر buffer و session،
+تبدیل I420 و قطعه‌بندی/زمان RTP را بررسی می‌کنند. حالت browser فقط دو منبع
+متحرک مصنوعی روی `http://127.0.0.1:5096` می‌سازد؛ `DetectionRuntimeHost`، دوربین
+واقعی، دیتابیس و trigger راه نمی‌اندازد.

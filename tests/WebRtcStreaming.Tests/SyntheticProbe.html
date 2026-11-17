@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthetic WebRTC streaming probe</title>
+<style>
+  body{margin:24px;background:#101822;color:#e9f0f7;font:15px system-ui,sans-serif}
+  h1{font-size:22px}button,select{font:inherit;margin:4px;padding:7px 12px}
+  .viewers{display:flex;flex-wrap:wrap;gap:20px;align-items:start}.viewer{padding:12px;background:#1a2838;border-radius:8px;max-width:100%}
+  video{display:block;width:640px;max-width:100%;aspect-ratio:16/9;background:#05080c;object-fit:contain}
+  pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px ui-monospace,monospace;background:#0b1119;padding:10px;max-width:1250px}
+  .state{padding:6px;display:inline-block}.note{color:#b4c6da}
+</style>
+<h1>Synthetic WebRTC streaming probe</h1>
+<p class="note">Two generated 1280 × 720 sources at 15 FPS. This process has no camera capture, detection host, database or triggers.</p>
+<button id="start-all">Start all viewers</button><button id="stop-all">Stop all viewers</button><button id="add-shared">Add another viewer for camera A</button>
+<div class="viewers" id="viewers"></div>
+<h2>Gateway diagnostics</h2><pre id="gateway-stats">Waiting for diagnostics…</pre>
+<script>
+const viewers = [];
+function addViewer(cameraId, name) {
+  const id = `viewer-${viewers.length + 1}`;
+  const element = document.createElement('section');
+  element.className = 'viewer'; element.id = id; element.dataset.camera = cameraId;
+  element.innerHTML = `<strong>${name}</strong><span class="state">stopped</span><br><select aria-label="Viewport size"><option value="320x180">320 × 180</option><option value="640x360" selected>640 × 360</option><option value="1280x720">1280 × 720</option></select><button class="start">Start</button><button class="stop">Stop</button><video autoplay muted playsinline></video><pre class="stats">No samples</pre>`;
+  document.getElementById('viewers').append(element);
+  const viewer = {cameraId, id, element, video:element.querySelector('video'), state:element.querySelector('.state'), stats:element.querySelector('.stats'), select:element.querySelector('select'), pc:null, sessionId:null, heartbeat:null, lastSample:null};
+  viewers.push(viewer);
+  element.querySelector('.start').onclick = () => start(viewer);
+  element.querySelector('.stop').onclick = () => stop(viewer);
+  viewer.select.onchange = () => { applySize(viewer); void renew(viewer); };
+  applySize(viewer); return viewer;
+}
+function bounds(viewer) { const [maxWidth,maxHeight] = viewer.select.value.split('x').map(Number); return {maxWidth,maxHeight}; }
+function applySize(viewer) { viewer.video.style.width = bounds(viewer).maxWidth + 'px'; }
+async function renew(viewer) {
+  if (!viewer.sessionId) return;
+  const response = await fetch(`/session/${viewer.sessionId}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(bounds(viewer))});
+  if (!response.ok) viewer.state.textContent = `heartbeat ${response.status}`;
+}
+async function waitForIce(pc) {
+  if (pc.iceGatheringState === 'complete') return;
+  await new Promise(resolve => {
+    const done = () => {if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',done);clearTimeout(timeout);resolve();}};
+    const timeout = setTimeout(() => {pc.removeEventListener('icegatheringstatechange',done);resolve();},3000);
+    pc.addEventListener('icegatheringstatechange',done);
+  });
+}
+async function start(viewer) {
+  await stop(viewer);
+  const pc = new RTCPeerConnection(); viewer.pc = pc; viewer.state.textContent = 'connecting';
+  pc.addTransceiver('video',{direction:'recvonly'});
+  pc.ontrack = event => {viewer.video.srcObject = event.streams[0] || new MediaStream([event.track]); void viewer.video.play().catch(()=>{});};
+  pc.onconnectionstatechange = () => {viewer.state.textContent = pc.connectionState;};
+  try {
+    await pc.setLocalDescription(await pc.createOffer()); await waitForIce(pc);
+    if(viewer.pc !== pc) return;
+    const response = await fetch(`/offer/${viewer.cameraId}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sdp:pc.localDescription.sdp,...bounds(viewer)})});
+    if(!response.ok) throw new Error(`offer ${response.status}: ${await response.text()}`);
+    const answer = await response.json();
+    if(viewer.pc !== pc) {void fetch(`/session/${answer.sessionId}`,{method:'DELETE'});return;}
+    viewer.sessionId = answer.sessionId;
+    await pc.setRemoteDescription({type:'answer',sdp:answer.sdp});
+    viewer.heartbeat = setInterval(()=>void renew(viewer).catch(error=>{viewer.state.textContent=error.message;}),10000);
+  } catch(error) {if(viewer.pc===pc)viewer.state.textContent = error.message; pc.close();}
+}
+async function stop(viewer) {
+  if(viewer.heartbeat) clearInterval(viewer.heartbeat); viewer.heartbeat=null;
+  const sessionId=viewer.sessionId; viewer.sessionId=null;
+  const pc=viewer.pc; viewer.pc=null; if(pc){pc.ontrack=null;pc.onconnectionstatechange=null;pc.close();}
+  if(viewer.video.srcObject)viewer.video.srcObject.getTracks().forEach(track=>track.stop());
+  viewer.video.srcObject=null; viewer.state.textContent='stopped'; viewer.lastSample=null;
+  if(sessionId) await fetch(`/session/${sessionId}`,{method:'DELETE'}).catch(()=>{});
+}
+async function sample(viewer) {
+  if(!viewer.pc) return;
+  const reports = await viewer.pc.getStats(); let inbound;
+  reports.forEach(report=>{if(report.type==='inbound-rtp'&&(report.kind==='video'||report.mediaType==='video'))inbound=report;});
+  if(!inbound)return;
+  const now=performance.now(), previous=viewer.lastSample;
+  const fps=previous ? ((inbound.framesDecoded-previous.frames)*1000/(now-previous.at)) : null;
+  viewer.lastSample={frames:inbound.framesDecoded,at:now};
+  const result={sessionId:viewer.sessionId,connection:viewer.pc.connectionState,requested:bounds(viewer),videoWidth:viewer.video.videoWidth,videoHeight:viewer.video.videoHeight,framesDecoded:inbound.framesDecoded,framesPerSecond:inbound.framesPerSecond,measuredFps:fps===null?null:Number(fps.toFixed(2)),framesDropped:inbound.framesDropped,packetsLost:inbound.packetsLost,jitter:inbound.jitter,jitterBufferDelay:inbound.jitterBufferDelay};
+  viewer.element.dataset.frames=String(inbound.framesDecoded||0); viewer.element.dataset.width=String(viewer.video.videoWidth); viewer.element.dataset.height=String(viewer.video.videoHeight);
+  viewer.stats.textContent=JSON.stringify(result,null,2);
+}
+addViewer('camera-a','Camera A'); addViewer('camera-b','Camera B');
+document.getElementById('start-all').onclick=()=>Promise.all(viewers.map(start));
+document.getElementById('stop-all').onclick=()=>Promise.all(viewers.map(stop));
+document.getElementById('add-shared').onclick=event=>{addViewer('camera-a','Camera A — shared encoder viewer');event.currentTarget.disabled=true;};
+setInterval(()=>{viewers.forEach(viewer=>void sample(viewer).catch(()=>{}));void fetch('/diagnostics').then(response=>response.json()).then(value=>{document.getElementById('gateway-stats').textContent=JSON.stringify(value,null,2);}).catch(()=>{});},1000);
+addEventListener('pagehide',()=>{for(const viewer of viewers){if(viewer.sessionId)void fetch(`/session/${viewer.sessionId}`,{method:'DELETE',keepalive:true});viewer.pc?.close();}});
+</script>
+</html>

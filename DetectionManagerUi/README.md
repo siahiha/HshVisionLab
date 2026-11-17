@@ -58,6 +58,8 @@ npm run dev
 - dashboard چنددوربینه با نمای tile، وضعیت FPS/inference، start/stop و آخرین رخدادها
 - دیوار زندهٔ داشبورد صفحه‌بندی‌شده است و در هر صفحه حداکثر ۶ thumbnail mount می‌کند؛ tileهای صفحات دیگر stream یا polling فعال ندارند
 - نمای زندهٔ tileها، نمای متمرکز و نمای کامل از WebRTC کامپوزیت‌شدهٔ سرویس استفاده می‌کند؛ تب پیش‌نمایش تنظیمات برای منابع غیر RTSP از snapshot با نرخ کنترل‌شده استفاده می‌کند
+- ابعاد stream به‌صورت خودکار از فضای واقعی تصویر در صفحه گرفته می‌شود؛ tile کوچک و نمای بزرگ تنظیم دستی جدا ندارند. تغییر اندازه پس از ۲۰۰ میلی‌ثانیه به همان session فرستاده می‌شود و نسبت ابعاد، هم‌ترازی encoder و سقف اندازه را سرویس اعمال می‌کند
+- stream دوربین غیرفعال، خارج از viewport یا داخل تب مخفی بسته می‌شود؛ برگشت به تصویر، اتصال را دوباره برقرار می‌کند. پاسخ دیررس handshake و session قبلی هنگام خروج پاک می‌شوند؛ retry فقط یک timer با فاصله‌های محدود ۲، ۵، ۱۰ و ۳۰ ثانیه دارد
 - نوار اکشن بالایی و tileهای دوربین با کنترل‌های Start/Stop، Edit و نمای کامل؛ زیر layout اصلی داشبورد نیز پنل واقعی `وضعیت runtime` برای پنج دوربین اول وجود دارد
 - پنل `Detected events` در کنار تصویر با crop تشخیص، نام دوربین، label، confidence و زمان؛ کارت‌های صرفاً متنی جایگزین این پنل نیستند
 - صفحهٔ تاریخچهٔ تشخیص امکان حذف همهٔ eventها، بازه‌های آماده و بازهٔ سفارشی را با تأیید کاربر دارد؛ artifactهای تصویری حذف‌شده نیز پاک می‌شوند
@@ -80,6 +82,38 @@ npm run dev
 - تنظیم subscription چندپروفایلی برنامه با محور تشخیص، دوربین/ROI، requiredهای Face/Plate/Palm، `includeFace`، `includePlate`، `includePalm`، unknown policy، artifact و cooldown؛ این تنظیم فقط روی event canonical ثبت‌شده اثر دارد و پنل تشخیص/تاریخچهٔ عمومی را فیلتر نمی‌کند. trigger مسیر مستقل ارسال به کلاینت است و payload کامل موجود، از جمله Palm، را تحویل می‌دهد.
 - triggerهای سناریویی Plate، Face و Plate+Face با camera scope، identity، confidence و `History event cooldown (sec)`؛ cooldown هر تریگر از Event Store بررسی می‌شود و برای کلید همان سناریو اعمال می‌شود
 - مدیریت سرویس، listener، API key، retention، runtime reload، capability registry و inventory مدل‌ها
+
+### اندازهٔ خودکار و طول عمر stream
+
+`CompositeWebRtcStream` اندازهٔ viewport را با `ResizeObserver` و پیکسل CSS
+می‌گیرد و بدون بزرگ‌کردن آن با ضریب DPI در offer می‌فرستد:
+
+```text
+POST /api/v1/streams/{cameraId}/webrtc/offer
+{ "type": "offer", "sdp": "...", "maxWidth": 480, "maxHeight": 184 }
+
+PATCH /api/v1/streams/webrtc/{sessionId}
+{ "maxWidth": 960, "maxHeight": 540 }
+
+DELETE /api/v1/streams/webrtc/{sessionId}
+```
+
+PATCH اندازهٔ درخواستی را به‌روزرسانی و lease را تمدید می‌کند؛ پاسخ موفق `204`
+است و `404` باعث برقراری مجدد اتصال می‌شود. viewer فعال هر ۱۰ ثانیه lease را
+تمدید می‌کند؛ sessionهای دارای این قرارداد در سرویس lease برابر ۴۵ ثانیه دارند.
+پاسخ offer با `supportsViewportUpdates: true` این قرارداد را اعلام می‌کند؛
+برای سازگاری هنگام ارتقای سرویس، پاسخ قدیمی فاقد این فیلد باعث ارسال PATCH
+نمی‌شود و همان اتصال موجود را حفظ می‌کند.
+این اندازه فقط خروجی نمایش را کنترل می‌کند و اندازهٔ فریم اصلی، ROI و inference
+را تغییر نمی‌دهد. peer هنگام resize دوباره ساخته نمی‌شود.
+
+برای بررسی روانی تصویر، هر video فعال آخرین نمونهٔ آمار مرورگر را هر دو ثانیه
+در `data-preview-metrics` نگه می‌دارد: نرخ decode از اختلاف شمارنده‌ها، میانگین
+jitter buffer در همان فاصله، شمار فریم‌های حذف‌شده، freeze و ابعاد ویدئو.
+`data-preview-state` وضعیت اتصال و `data-preview-demand-width/height` اندازهٔ
+درخواستی را نشان می‌دهند. این داده فقط آخرین نمونه است؛ تاریخچهٔ نامحدود، log
+حاوی URL دوربین و تغییر state React برای هر فریم تولید نمی‌شود. این سنجه‌ها
+اندازه‌گیری تأخیر کامل دوربین تا نمایش نیستند.
 
 ### API هویت در UI وب
 

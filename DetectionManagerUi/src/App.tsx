@@ -57,7 +57,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { api, serviceUrl } from "./api";
+import { api, ApiError, serviceUrl } from "./api";
 import {
   keys,
   useCamera,
@@ -2510,70 +2510,321 @@ function CompositeWebRtcStream({
   onLoadedMetadata?: React.ReactEventHandler<HTMLVideoElement>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const connectionRef = useRef<RTCPeerConnection>();
-  const sessionRef = useRef<string>();
   const [error, setError] = useState("");
+  const pageVisible = usePageVisible();
 
   useEffect(() => {
+    const mountedVideo = videoRef.current;
+    if (!mountedVideo) return;
+    const video: HTMLVideoElement = mountedVideo;
+    video.dataset.previewCameraId = cameraId;
+    video.dataset.previewState = "paused";
+    delete video.dataset.previewMetrics;
+    setError("");
+    if (!enabled || !pageVisible || !cameraId) return;
+
+    type Demand = { maxWidth: number; maxHeight: number };
+    type InboundSample = {
+      timestamp: number; decoded: number; jitterDelay: number; jitterCount: number;
+    };
+    type Session = {
+      peer: RTCPeerConnection;
+      abort: AbortController;
+      id?: string;
+      stream?: MediaStream;
+      closed: boolean;
+      viewportUpdates: boolean;
+      renewalBusy: boolean;
+      renewalQueued: boolean;
+      renewalFailures: number;
+      renewalAbort?: AbortController;
+      heartbeatTimer?: number;
+      handshakeTimer?: number;
+      disconnectTimer?: number;
+      cancelIceWait?: () => void;
+      statsBusy: boolean;
+      previousInbound?: InboundSample;
+    };
     let disposed = false;
-    const start = async () => {
-      if (!enabled || !cameraId) return;
-      setError("");
-      const connection = new RTCPeerConnection();
-      connectionRef.current = connection;
-      const waitForIce = async () => {
-        if (connection.iceGatheringState === "complete") return;
-        await new Promise<void>((resolve) => {
-          const done = () => {
-            if (connection.iceGatheringState === "complete") {
-              connection.removeEventListener("icegatheringstatechange", done);
-              resolve();
-            }
-          };
-          connection.addEventListener("icegatheringstatechange", done);
-          window.setTimeout(() => {
-            connection.removeEventListener("icegatheringstatechange", done);
-            resolve();
-          }, 1500);
-        });
+    let pageSuspended = false;
+    let viewportKnown = typeof IntersectionObserver === "undefined";
+    let inViewport = true;
+    let demand: Demand | undefined;
+    let current: Session | undefined;
+    let resizeTimer: number | undefined;
+    let retryTimer: number | undefined;
+    let metricsTimer: number | undefined;
+    let retryAttempt = 0;
+    const retryDelays = [2000, 5000, 10000, 30000];
+    const canStream = () => !disposed && !pageSuspended && viewportKnown && inViewport && demand !== undefined;
+    const isCurrent = (session: Session) => canStream() && current === session && !session.closed;
+    const closeRemote = (id: string) => { void api.closeWebRtc(id).catch(() => undefined); };
+
+    const closeSession = (session: Session | undefined) => {
+      if (!session) return;
+      session.closed = true;
+      if (current === session) {
+        current = undefined;
+        window.clearInterval(metricsTimer);
+        metricsTimer = undefined;
+      }
+      session.cancelIceWait?.();
+      session.abort.abort();
+      session.renewalAbort?.abort();
+      window.clearTimeout(session.heartbeatTimer);
+      window.clearTimeout(session.handshakeTimer);
+      window.clearTimeout(session.disconnectTimer);
+      session.peer.ontrack = null;
+      session.peer.onconnectionstatechange = null;
+      session.peer.oniceconnectionstatechange = null;
+      try { session.peer.close(); } catch { /* Cleanup must still release the server lease. */ }
+      session.stream?.getTracks().forEach((track) => { try { track.stop(); } catch { /* Already stopped. */ } });
+      if (video.srcObject === session.stream) video.srcObject = null;
+      if (session.id) {
+        closeRemote(session.id);
+        session.id = undefined;
+      }
+    };
+
+    const scheduleRetry = () => {
+      if (!canStream() || current || retryTimer !== undefined) return;
+      const delay = retryDelays[Math.min(retryAttempt, retryDelays.length - 1)];
+      retryAttempt = Math.min(retryAttempt + 1, retryDelays.length - 1);
+      video.dataset.previewState = "retrying";
+      retryTimer = window.setTimeout(() => {
+        retryTimer = undefined;
+        void connect();
+      }, delay);
+    };
+
+    const fail = (session: Session, message = "پخش زنده در حال بازیابی است.") => {
+      if (!isCurrent(session)) return;
+      closeSession(session);
+      setError(message);
+      scheduleRetry();
+    };
+
+    const scheduleHeartbeat = (session: Session) => {
+      window.clearTimeout(session.heartbeatTimer);
+      if (isCurrent(session)) session.heartbeatTimer = window.setTimeout(() => void renew(session), 10000);
+    };
+
+    const scheduleResize = () => {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = undefined;
+        if (current) void renew(current);
+      }, 200);
+    };
+
+    async function renew(session: Session) {
+      if (!isCurrent(session) || !session.id || !session.viewportUpdates || !demand) return;
+      if (session.renewalBusy) { session.renewalQueued = true; return; }
+      session.renewalBusy = true;
+      session.renewalQueued = false;
+      window.clearTimeout(session.heartbeatTimer);
+      const sent = { ...demand };
+      const abort = new AbortController();
+      session.renewalAbort = abort;
+      const timeout = window.setTimeout(() => abort.abort(), 8000);
+      try {
+        await api.updateWebRtc(session.id, sent, abort.signal);
+        if (isCurrent(session)) session.renewalFailures = 0;
+      } catch (cause) {
+        if (isCurrent(session) && ((cause instanceof ApiError && cause.status === 404) || ++session.renewalFailures >= 2))
+          fail(session);
+      } finally {
+        window.clearTimeout(timeout);
+        session.renewalAbort = undefined;
+        session.renewalBusy = false;
+        if (isCurrent(session)) {
+          scheduleHeartbeat(session);
+          if (session.renewalQueued || demand?.maxWidth !== sent.maxWidth || demand?.maxHeight !== sent.maxHeight)
+            scheduleResize();
+        }
+      }
+    }
+
+    const waitForIce = (session: Session) => new Promise<void>((resolve) => {
+      if (session.peer.iceGatheringState === "complete" || !isCurrent(session)) { resolve(); return; }
+      let timer: number;
+      const finish = () => {
+        window.clearTimeout(timer);
+        session.peer.removeEventListener("icegatheringstatechange", changed);
+        session.cancelIceWait = undefined;
+        resolve();
       };
-      connection.addTransceiver("video", { direction: "recvonly" });
-      connection.ontrack = (event) => {
-        if (!disposed && videoRef.current && event.track.kind === "video")
-          videoRef.current.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+      const changed = () => { if (session.peer.iceGatheringState === "complete") finish(); };
+      session.cancelIceWait = finish;
+      session.peer.addEventListener("icegatheringstatechange", changed);
+      timer = window.setTimeout(finish, 1500);
+    });
+
+    async function connect() {
+      if (!canStream() || current || !demand) return;
+      let peer: RTCPeerConnection;
+      try { peer = new RTCPeerConnection(); }
+      catch {
+        setError("پخش زنده در این مرورگر برقرار نشد.");
+        scheduleRetry();
+        return;
+      }
+      const session: Session = {
+        peer, abort: new AbortController(), closed: false, viewportUpdates: false,
+        renewalBusy: false, renewalQueued: false, renewalFailures: 0, statsBusy: false,
+      };
+      current = session;
+      video.dataset.previewState = "connecting";
+      delete video.dataset.previewMetrics;
+      session.handshakeTimer = window.setTimeout(() => fail(session), 30000);
+      const connectionChanged = () => {
+        if (!isCurrent(session)) return;
+        if (session.peer.connectionState === "connected") {
+          window.clearTimeout(session.handshakeTimer);
+          window.clearTimeout(session.disconnectTimer);
+          session.disconnectTimer = undefined;
+          retryAttempt = 0;
+          setError("");
+          video.dataset.previewState = "connected";
+        } else if (session.peer.connectionState === "failed" || session.peer.connectionState === "closed" ||
+                   session.peer.iceConnectionState === "failed" || session.peer.iceConnectionState === "closed") {
+          fail(session);
+        } else if (session.peer.connectionState === "disconnected" && session.disconnectTimer === undefined) {
+          session.disconnectTimer = window.setTimeout(() => {
+            if (session.peer.connectionState !== "connected") fail(session);
+          }, 4000);
+        }
+      };
+      session.peer.onconnectionstatechange = connectionChanged;
+      session.peer.oniceconnectionstatechange = connectionChanged;
+      session.peer.ontrack = (event) => {
+        if (!isCurrent(session) || event.track.kind !== "video") return;
+        session.stream = event.streams[0] ?? new MediaStream([event.track]);
+        video.srcObject = session.stream;
+        void video.play().catch(() => undefined);
       };
       try {
-        const offer = await connection.createOffer();
-        await connection.setLocalDescription(offer);
-        await waitForIce();
+        session.peer.addTransceiver("video", { direction: "recvonly" });
+        const offer = await session.peer.createOffer();
+        if (!isCurrent(session)) return;
+        await session.peer.setLocalDescription(offer);
+        if (!isCurrent(session)) return;
+        await waitForIce(session);
+        if (!isCurrent(session)) return;
         const answer = await api.webRtcOffer(cameraId, {
           type: "offer",
-          sdp: offer.sdp ?? "",
-        });
-        if (disposed) return;
-        await connection.setRemoteDescription({
+          sdp: session.peer.localDescription?.sdp ?? "",
+          ...demand,
+        }, session.abort.signal);
+        if (!isCurrent(session)) { closeRemote(answer.sessionId); return; }
+        // Retain the ID before applying SDP so any negotiation failure closes it.
+        session.id = answer.sessionId;
+        session.viewportUpdates = answer.supportsViewportUpdates === true;
+        await session.peer.setRemoteDescription({
           type: answer.type as RTCSdpType,
           sdp: answer.sdp,
         });
-        sessionRef.current = answer.sessionId;
+        if (!isCurrent(session)) { closeSession(session); return; }
+        metricsTimer = window.setInterval(() => void collectMetrics(), 2000);
+        if (session.viewportUpdates) void renew(session);
       } catch (cause) {
-        if (!disposed) {
-          setError(cause instanceof Error ? cause.message : "پخش زنده برقرار نشد.");
-          connection.close();
-          connectionRef.current = undefined;
-        }
+        if (isCurrent(session)) fail(session, cause instanceof Error ? cause.message : "پخش زنده برقرار نشد.");
       }
+    }
+
+    const reconcile = () => {
+      if (canStream()) {
+        if (!current && retryTimer === undefined) void connect();
+        return;
+      }
+      window.clearTimeout(retryTimer);
+      window.clearTimeout(resizeTimer);
+      retryTimer = resizeTimer = undefined;
+      closeSession(current);
+      video.dataset.previewState = "paused";
+      delete video.dataset.previewMetrics;
+      setError("");
     };
-    void start();
+
+    const measure = () => {
+      const bounds = video.getBoundingClientRect();
+      const next = bounds.width >= 2 && bounds.height >= 2
+        ? { maxWidth: Math.ceil(bounds.width), maxHeight: Math.ceil(bounds.height) } : undefined;
+      const changed = next?.maxWidth !== demand?.maxWidth || next?.maxHeight !== demand?.maxHeight;
+      demand = next;
+      video.dataset.previewDemandWidth = String(next?.maxWidth ?? 0);
+      video.dataset.previewDemandHeight = String(next?.maxHeight ?? 0);
+      reconcile();
+      if (changed && current?.id) scheduleResize();
+    };
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : undefined;
+    resizeObserver?.observe(video);
+    const intersectionObserver = typeof IntersectionObserver !== "undefined"
+      ? new IntersectionObserver((entries) => {
+          viewportKnown = true;
+          inViewport = entries.some((entry) => entry.isIntersecting);
+          reconcile();
+        }) : undefined;
+    intersectionObserver?.observe(video);
+    const suspend = () => { pageSuspended = true; reconcile(); };
+    const resume = () => { pageSuspended = false; measure(); };
+    window.addEventListener("resize", measure);
+    window.addEventListener("pagehide", suspend);
+    window.addEventListener("pageshow", resume);
+
+    // Keep one latest diagnostic sample per visible video. No per-frame React
+    // state, server posts, source URLs or unbounded measurement history.
+    const collectMetrics = async () => {
+      const session = current;
+      if (!session || !isCurrent(session) || session.statsBusy) return;
+      session.statsBusy = true;
+      try {
+        const reports = await session.peer.getStats();
+        if (!isCurrent(session)) return;
+        reports.forEach((report) => {
+          const inbound = report as RTCInboundRtpStreamStats & {
+            mediaType?: string; freezeCount?: number;
+          };
+          if (report.type !== "inbound-rtp" || (inbound.kind !== "video" && inbound.mediaType !== "video") ||
+              typeof inbound.framesDecoded !== "number") return;
+          const sample: InboundSample = {
+            timestamp: inbound.timestamp, decoded: inbound.framesDecoded ?? 0,
+            jitterDelay: inbound.jitterBufferDelay ?? 0, jitterCount: inbound.jitterBufferEmittedCount ?? 0,
+          };
+          const previous = session.previousInbound;
+          session.previousInbound = sample;
+          const elapsed = previous ? sample.timestamp - previous.timestamp : 0;
+          const emitted = previous ? sample.jitterCount - previous.jitterCount : 0;
+          const quality = video.getVideoPlaybackQuality?.();
+          video.dataset.previewMetrics = JSON.stringify({
+            timestampMs: Math.round(performance.now()),
+            decodedFps: elapsed > 0 ? Math.max(0, (sample.decoded - previous!.decoded) * 1000 / elapsed) : 0,
+            jitterMs: emitted > 0 ? Math.max(0, (sample.jitterDelay - previous!.jitterDelay) * 1000 / emitted) : 0,
+            framesDropped: inbound.framesDropped ?? 0,
+            videoDroppedFrames: quality?.droppedVideoFrames ?? 0,
+            freezeCount: inbound.freezeCount,
+            width: video.videoWidth, height: video.videoHeight,
+          });
+        });
+      } catch { /* The lifecycle handler recovers closed connections. */ }
+      finally { session.statsBusy = false; }
+    };
+    measure();
     return () => {
       disposed = true;
-      connectionRef.current?.close();
-      connectionRef.current = undefined;
-      const sessionId = sessionRef.current;
-      sessionRef.current = undefined;
-      if (sessionId) void api.closeWebRtc(sessionId);
+      resizeObserver?.disconnect();
+      intersectionObserver?.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("pagehide", suspend);
+      window.removeEventListener("pageshow", resume);
+      window.clearTimeout(resizeTimer);
+      window.clearTimeout(retryTimer);
+      window.clearInterval(metricsTimer);
+      closeSession(current);
+      video.dataset.previewState = "paused";
+      delete video.dataset.previewMetrics;
     };
-  }, [cameraId, enabled]);
+  }, [cameraId, enabled, pageVisible]);
 
   return (
     <>

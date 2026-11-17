@@ -485,9 +485,11 @@ public static class ServiceApi
             return File.Exists(path) ? Results.File(path, artifact.ContentType) : Results.NotFound();
         });
 
-        app.MapGet("/api/v1/streams/{cameraId}/snapshot", (string cameraId, DetectionRuntimeHost host) =>
+        app.MapGet("/api/v1/streams/diagnostics", (WebRtcGateway gateway) => Results.Ok(gateway.GetDiagnostics()));
+
+        app.MapGet("/api/v1/streams/{cameraId}/snapshot", async (string cameraId, DetectionRuntimeHost host, CancellationToken cancellationToken) =>
         {
-            using Bitmap? frame = host.GetLatestFrame(cameraId);
+            using Bitmap? frame = await host.GetLatestFrameAsync(cameraId, cancellationToken);
             if (frame is null) return Results.NotFound();
             using var stream = new MemoryStream();
             frame.Save(stream, System.Drawing.Imaging.ImageFormat.Jpeg);
@@ -503,10 +505,19 @@ public static class ServiceApi
 
         app.MapPost("/api/v1/streams/{cameraId}/webrtc/offer", async (string cameraId, WebRtcOfferRequest request, DetectionRuntimeHost host, WebRtcGateway gateway, CancellationToken cancellationToken) =>
         {
-            if (!host.TryGetCamera(cameraId, out _)) return Results.NotFound(new { error = "Camera was not found." });
+            if (!host.TryGetCamera(cameraId, out Camera? camera) || camera is null) return Results.NotFound(new { error = "Camera was not found." });
+            if (!camera.Settings.Enabled || !camera.IsRunning)
+                return Results.Conflict(new { error = "Camera is not running." });
             try
             {
-                WebRtcOfferResult answer = await gateway.AcceptOfferAsync(cameraId, request.Sdp, cancellationToken);
+                WebRtcOfferResult answer = await gateway.AcceptOfferAsync(cameraId, request.Sdp, cancellationToken,
+                    request.MaxWidth ?? 1280, request.MaxHeight ?? 720,
+                    leased: request.MaxWidth.HasValue || request.MaxHeight.HasValue);
+                if (!host.TryGetCamera(cameraId, out Camera? current) || !ReferenceEquals(current, camera) || !camera.IsRunning)
+                {
+                    gateway.Close(answer.SessionId);
+                    return Results.Conflict(new { error = "Camera changed during video negotiation." });
+                }
                 return Results.Ok(answer);
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -515,6 +526,9 @@ public static class ServiceApi
 
         app.MapDelete("/api/v1/streams/webrtc/{sessionId}", (string sessionId, WebRtcGateway gateway) =>
             gateway.Close(sessionId) ? Results.NoContent() : Results.NotFound());
+
+        app.MapPatch("/api/v1/streams/webrtc/{sessionId}", (string sessionId, WebRtcSessionDemandRequest request, WebRtcGateway gateway) =>
+            gateway.UpdateSessionDemand(sessionId, request.MaxWidth, request.MaxHeight) ? Results.NoContent() : Results.NotFound());
 
         app.MapMethods("/api/v1/streams/{cameraId}/webrtc/whep/{viewerId}", ["OPTIONS", "POST", "PATCH", "DELETE"],
             (HttpContext context, string cameraId, string viewerId, ServiceSettingsStore store, MediaMtxWebRtcProxy proxy, CancellationToken cancellationToken)
@@ -780,7 +794,8 @@ public sealed record BulkDeletePeopleRequest(IReadOnlyList<string> PersonIds);
 public sealed record MoveSampleRequest(string TargetPersonId);
 public sealed record AddPlateRequest(string PlateText, bool IsPrimary = false, string? Notes = null);
 public sealed record PalmPersonSummary(string PersonId, int SampleCount);
-public sealed record WebRtcOfferRequest(string Type, string Sdp);
+public sealed record WebRtcOfferRequest(string Type, string Sdp, int? MaxWidth = null, int? MaxHeight = null);
+public sealed record WebRtcSessionDemandRequest(int? MaxWidth = null, int? MaxHeight = null);
 
 internal static class AppSettingsApiExtensions
 {

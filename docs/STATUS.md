@@ -41,6 +41,23 @@
 - `InputSize` مدل‌محور است: مدل ثابت اندازهٔ tensor خودش را اعلام می‌کند و مدل YOLO پویا گزینه‌های stride-aligned استاندارد `320/416/480/512/640` را در catalog سرویس اعلام می‌کند؛ WinForms و UI وب همین منبع مشترک را مصرف می‌کنند. YuNetهای فعلی `640×640` هستند.
 - موتور Windows و سرویس هر دو RTSP را مستقیماً با FFmpeg می‌گیرند. پخش MediaMTX/WHEP برای ورودی RTSP فقط در سرویس مدیریت می‌شود و از مسیر دریافت تشخیص مستقل است. مدل‌ها از `Models/Plate`، `Models/Face`، `Models` و مسیرهای legacy/Debug fallback فهرست می‌شوند.
 - UI وب فعلی tile، focus و ROI زنده را با `CompositeWebRtcStream` و `WebRtcGateway` کامپوزیت‌شده نمایش می‌دهد. در CameraEditor، قابلیت `canWhep` برای source فعال RTSP تعیین می‌کند preview در حال اجرا زنده باشد؛ sourceهای دیگر snapshot دارند.
+- نمایش کامپوزیت‌شدهٔ وب ابعاد CSS viewer را بدون DPR می‌گیرد و با سقف
+  `1280×720`، ابعاد مضرب ۱۶، حفظ نسبت منبع در حد گردکردن و حداکثر ۱۵ FPS
+  آماده می‌کند. ورودی inference با ابعاد اصلی باقی می‌ماند. هر دوربین یک worker
+  و encoder مستقل دارد و خروجی فشرده بین viewerهای همان دوربین مشترک است.
+  حداکثر یک Bitmap در حال encode و یک newest pending نگه داشته می‌شود؛
+  duplicate/old sequence حذف می‌شود و I420 در ابعاد ثابت دوباره استفاده می‌شود.
+  تغییر ابعاد codec را کنترل‌شده جایگزین و keyframe تولید می‌کند؛ آزمون native
+  کاهش/افزایش اندازه، ابعاد header VP8 و ادامهٔ خروجی را پوشش می‌دهد.
+- Preview وب فقط برای viewer متصل یا تقاضای snapshot تولید می‌شود؛ signaling
+  ناقص render/encode را فعال نمی‌کند. Resize همان session را به‌روز می‌کند؛ UI
+  هر ۱۰ ثانیه heartbeat می‌فرستد و در صفحهٔ مخفی یا خارج‌شدن viewer از دید
+  session را می‌بندد. Session دارای viewport پس از ۴۵ ثانیه بدون تمدید و pending
+  پس از ۳۰ ثانیه منقضی می‌شود. Snapshot تقاضای سه‌ثانیه‌ای با حداکثر ۵ FPS
+  ایجاد می‌کند. `GET /api/v1/streams/diagnostics` آمار encode، سن فریم، FPS،
+  ابعاد و صف را می‌دهد. آزمون مستقل در `tests/WebRtcStreaming.Tests` از ورودی
+  مصنوعی استفاده می‌کند؛ benchmark واقعی CPU/RAM و استقرار سرویس از این کار
+  نتیجه‌گیری نمی‌شوند. جزئیات در [Rendering و WebRTC](service/02-RENDERING-WEBRTC.md) است.
 - درگاه مستقل MediaMTX/WHEP برای source فعال RTSP و endpoint سبک `GET /api/v1/streams/{cameraId}/overlay` موجود است. مصرف‌کنندهٔ خام می‌تواند ROI، motion ROI، کادر، label، confidence و primitiveهای پردازشی را سمت کلاینت رسم کند؛ ویدئوی خام برای Drawing دوباره encode نمی‌شود. کامپوننت `RawMediaMtxStream` در سورس موجود است و مسیر فعال tile/focus فعلی نیست.
 - association پلاک/چهره در runtime فعال است و از همان فریم یا پنجرهٔ زمانی حداکثر `Association.MaxWindowMs` (پیش‌فرض 1500ms) استفاده می‌کند؛ خروجی با `SameFrame`، `TemporalAssociation` یا `Standalone` مشخص می‌شود. در حالت پیش‌فرض `RequireSameRoi=true`، هر دو component باید در یک ROI باشند؛ با خاموش‌کردن آن، pair شدن بین ROIهای متفاوت همان دوربین ممکن است. این منطق association مکانی/مالکیتی نیست و برای حالت مبهمِ چند پلاک یا چند چهره pair قطعی تولید نمی‌کند.
 - `ServiceSettingsDocument.HistorySubscription` سناریوهای چندپروفایلی ثبت داخلی را

@@ -16,9 +16,12 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace HshDetectionService;
 
-public sealed class DetectionRuntimeHost : IAsyncDisposable
+public sealed partial class DetectionRuntimeHost : IAsyncDisposable
 {
     private readonly object _gate = new();
+    // Camera controls may stop/join worker threads. Keep their lifetime lock
+    // separate from the short dictionary lock used by preview callbacks.
+    private readonly object _cameraControlGate = new();
     private readonly ServicePaths _paths;
     private readonly ServiceSettingsStore _settingsStore;
     private readonly EventStore _eventStore;
@@ -64,6 +67,8 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         _webrtc = webrtc;
         _logger = logger;
         _associationTimer = new Timer(_ => FlushExpiredAssociations(), null, Timeout.Infinite, Timeout.Infinite);
+        _previewDemandTimer = new Timer(_ => RefreshPreviewDemand(), null, Timeout.Infinite, Timeout.Infinite);
+        _webrtc.ViewerDemandChanged += UpdatePreviewDemand;
     }
 
     public ServicePaths Paths => _paths;
@@ -82,43 +87,45 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        lock (_gate)
+        lock (_cameraControlGate)
         {
-            if (_started) return;
+            if (_started || _shutdown.IsCancellationRequested) return;
             _started = true;
-        }
 
-        try
-        {
-            _paths.EnsureDirectories();
-            _settings = _settingsStore.Detection;
-            ServiceSettingsDocument service = _settingsStore.Service;
-            _eventQueue = CreateEventQueue(service.Runtime?.MaxEventQueueLength ?? 10_000);
-            _license = LicenseValidator.Load(_paths.LicensePath);
-            _identityDatabase = IdentityDatabase.Load(_paths.IdentityDatabasePath, _paths.FaceDatabasePath, _paths.PalmDatabasePath);
-            _faceDatabase = FaceDatabase.FromStore(_identityDatabase);
-            _faceModule = new FaceModule(_faceDatabase, _license);
-            _palmDatabase = PalmDatabase.FromStore(_identityDatabase);
-            _palmModule = new PalmModule(_palmDatabase, _license);
-            _registry = new ProcessingRegistry();
-            _registry.Register(PlateModule.CreateRegistration(_license));
-            _registry.Register(_faceModule.CreateRegistration());
-            _registry.Register(_palmModule.CreateRegistration());
+            try
+            {
+                _paths.EnsureDirectories();
+                _settings = _settingsStore.Detection;
+                ServiceSettingsDocument service = _settingsStore.Service;
+                _servicePreviewFps = Math.Clamp(service.Runtime?.PreviewFps ?? 15, 1, 15);
+                _eventQueue = CreateEventQueue(service.Runtime?.MaxEventQueueLength ?? 10_000);
+                _license = LicenseValidator.Load(_paths.LicensePath);
+                _identityDatabase = IdentityDatabase.Load(_paths.IdentityDatabasePath, _paths.FaceDatabasePath, _paths.PalmDatabasePath);
+                _faceDatabase = FaceDatabase.FromStore(_identityDatabase);
+                _faceModule = new FaceModule(_faceDatabase, _license);
+                _palmDatabase = PalmDatabase.FromStore(_identityDatabase);
+                _palmModule = new PalmModule(_palmDatabase, _license);
+                _registry = new ProcessingRegistry();
+                _registry.Register(PlateModule.CreateRegistration(_license));
+                _registry.Register(_faceModule.CreateRegistration());
+                _registry.Register(_palmModule.CreateRegistration());
 
-            _eventWorker = Task.Run(() => ProcessEventQueueAsync(_shutdown.Token), CancellationToken.None);
-            _associationTimer.Change(500, 500);
-            foreach (CameraSettings cameraSettings in _settings.Cameras.ToArray())
-                AddOrReplaceCamera(cameraSettings, start: service.Runtime?.AutoStartCameras ?? true);
+                _eventWorker = Task.Run(() => ProcessEventQueueAsync(_shutdown.Token), CancellationToken.None);
+                _associationTimer.Change(500, 500);
+                _previewDemandTimer.Change(500, 500);
+                foreach (CameraSettings cameraSettings in _settings.Cameras.ToArray())
+                    AddOrReplaceCamera(cameraSettings, start: service.Runtime?.AutoStartCameras ?? true);
 
-            IsReady = true;
-            ReadinessError = null;
-            _logger.LogInformation("Detection service runtime started with {CameraCount} cameras. License: {LicenseMessage}", _cameras.Count, _license.Message);
-        }
-        catch (Exception ex)
-        {
-            ReadinessError = ex.Message;
-            _logger.LogError(ex, "Detection runtime failed to start.");
-            throw;
+                IsReady = true;
+                ReadinessError = null;
+                _logger.LogInformation("Detection service runtime started with {CameraCount} cameras. License: {LicenseMessage}", _cameras.Count, _license.Message);
+            }
+            catch (Exception ex)
+            {
+                ReadinessError = ex.Message;
+                _logger.LogError(ex, "Detection runtime failed to start.");
+                throw;
+            }
         }
 
         await Task.CompletedTask;
@@ -126,25 +133,35 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (!_started || _shutdown.IsCancellationRequested) return;
-        IsReady = false;
-        _associationTimer.Change(Timeout.Infinite, Timeout.Infinite);
-        FlushExpiredAssociations(force: true);
-        _shutdown.Cancel();
-        _eventQueue.Writer.TryComplete();
-
-        Camera[] cameras;
-        lock (_gate) cameras = _cameras.Values.ToArray();
-        foreach (Camera camera in cameras)
+        lock (_cameraControlGate)
         {
-            try { camera.Stop(); } catch (Exception ex) { _logger.LogWarning(ex, "Failed to stop camera {CameraId}.", camera.Settings.Id); }
-            DetachCamera(camera);
-            camera.Dispose();
-        }
+            if (_shutdown.IsCancellationRequested) return;
+            IsReady = false;
+            _webrtc.ViewerDemandChanged -= UpdatePreviewDemand;
+            _previewDemandTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            _associationTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            FlushExpiredAssociations(force: true);
+            _shutdown.Cancel();
+            _eventQueue.Writer.TryComplete();
 
-        lock (_gate) _cameras.Clear();
-        foreach ((string _, LatestFrameSlot slot) in _latestFrames) slot.Dispose();
-        _latestFrames.Clear();
+            Camera[] cameras;
+            lock (_gate)
+            {
+                cameras = _cameras.Values.ToArray();
+                _cameras.Clear();
+            }
+            foreach (Camera camera in cameras)
+            {
+                ClearPreviewDemand(camera.Settings.Id);
+                DetachCamera(camera);
+                try { camera.Stop(); } catch (Exception ex) { _logger.LogWarning(ex, "Failed to stop camera {CameraId}.", camera.Settings.Id); }
+                camera.Dispose();
+            }
+
+            foreach ((string _, LatestFrameSlot slot) in _latestFrames) slot.Dispose();
+            _latestFrames.Clear();
+            _snapshotDemandUntil.Clear();
+        }
         if (_eventWorker is not null)
         {
             try { await _eventWorker.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); } catch { }
@@ -152,6 +169,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
         _identityDatabase?.Dispose();
         _eventStore.Dispose();
         _associationTimer.Dispose();
+        _previewDemandTimer.Dispose();
         try { await MediaMtxRuntime.Shared.StopAsync().WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); } catch { }
     }
 
@@ -202,99 +220,133 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
 
     public bool StartCamera(string cameraId)
     {
-        if (!TryGetCamera(cameraId, out Camera? camera) || camera is null) return false;
-        if (!camera.Settings.Enabled) return false;
-        camera.Start();
-        return true;
+        lock (_cameraControlGate)
+        {
+            if (_shutdown.IsCancellationRequested || !TryGetCamera(cameraId, out Camera? camera) || camera is null) return false;
+            if (!camera.Settings.Enabled) return false;
+            UpdatePreviewDemand(cameraId);
+            camera.Start();
+            return true;
+        }
     }
 
     public bool StopCamera(string cameraId)
     {
-        if (!TryGetCamera(cameraId, out Camera? camera) || camera is null) return false;
-        camera.Stop();
-        return true;
+        lock (_cameraControlGate)
+        {
+            if (_shutdown.IsCancellationRequested) return false;
+            Camera? camera;
+            lock (_gate)
+                if (!_cameras.Remove(cameraId, out camera)) return false;
+            try
+            {
+                ClearPreviewDemand(cameraId);
+                camera.Stop();
+            }
+            finally
+            {
+                // Preserve access to the stopped runtime, while preventing
+                // offers and frame handoffs during its transition to stopped.
+                lock (_gate) _cameras[cameraId] = camera;
+            }
+            return true;
+        }
     }
 
     public bool RemoveCamera(string cameraId)
     {
-        Camera? camera;
-        lock (_gate)
+        lock (_cameraControlGate)
         {
-            if (!_cameras.Remove(cameraId, out camera)) return false;
-            _settings.Cameras.RemoveAll(item => item.Id.Equals(cameraId, StringComparison.OrdinalIgnoreCase));
-        }
+            if (_shutdown.IsCancellationRequested) return false;
+            Camera? camera;
+            lock (_gate)
+            {
+                if (!_cameras.Remove(cameraId, out camera)) return false;
+                _settings.Cameras.RemoveAll(item => item.Id.Equals(cameraId, StringComparison.OrdinalIgnoreCase));
+            }
 
-        if (camera is not null)
-        {
+            ClearPreviewDemand(cameraId);
             DetachCamera(camera);
             camera.Dispose();
+            return true;
         }
-        return true;
     }
 
     public void AddOrReplaceCamera(CameraSettings settings, bool start)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        settings.EnsureProcessingDefaults();
-        if (string.IsNullOrWhiteSpace(settings.Id)) settings.Id = Guid.NewGuid().ToString("N");
-
-        Camera? previous = null;
-        lock (_gate)
+        lock (_cameraControlGate)
         {
-            if (_cameras.Remove(settings.Id, out previous)) { }
-            _settings.Cameras.RemoveAll(item => item.Id.Equals(settings.Id, StringComparison.OrdinalIgnoreCase));
-            _settings.Cameras.Add(settings);
+            if (_shutdown.IsCancellationRequested) return;
+            settings.EnsureProcessingDefaults();
+            if (string.IsNullOrWhiteSpace(settings.Id)) settings.Id = Guid.NewGuid().ToString("N");
+
+            Camera? previous;
+            lock (_gate) _cameras.Remove(settings.Id, out previous);
+            ClearPreviewDemand(settings.Id);
+            if (previous is not null)
+            {
+                DetachCamera(previous);
+                try { previous.Stop(); } catch { }
+                previous.Dispose();
+            }
+
+            lock (_gate)
+            {
+                _settings.Cameras.RemoveAll(item => item.Id.Equals(settings.Id, StringComparison.OrdinalIgnoreCase));
+                _settings.Cameras.Add(settings);
+            }
             if (settings.Enabled)
             {
                 Camera camera = CreateCamera(settings);
-                _cameras[settings.Id] = camera;
+                lock (_gate) _cameras[settings.Id] = camera;
                 if (start) camera.Start();
             }
-        }
-
-        if (previous is not null)
-        {
-            DetachCamera(previous);
-            try { previous.Stop(); } catch { }
-            previous.Dispose();
         }
     }
 
     public void ApplyDetectionSettings(AppSettings settings, bool startCameras)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        settings.Cameras ??= [];
-        foreach (CameraSettings camera in settings.Cameras) camera.EnsureProcessingDefaults();
+        lock (_cameraControlGate)
+        {
+            if (_shutdown.IsCancellationRequested) return;
+            _servicePreviewFps = Math.Clamp(_settingsStore.Service.Runtime?.PreviewFps ?? 15, 1, 15);
+            settings.Cameras ??= [];
+            foreach (CameraSettings camera in settings.Cameras) camera.EnsureProcessingDefaults();
 
-        ClearAssociationState();
+            ClearAssociationState();
 
-        Camera[] previous;
-        lock (_gate) previous = _cameras.Values.ToArray();
-        foreach (Camera camera in previous)
-        {
-            DetachCamera(camera);
-            try { camera.Stop(); } catch { }
-            camera.Dispose();
+            Camera[] previous;
+            lock (_gate)
+            {
+                previous = _cameras.Values.ToArray();
+                _cameras.Clear();
+            }
+            foreach (Camera camera in previous)
+            {
+                ClearPreviewDemand(camera.Settings.Id);
+                DetachCamera(camera);
+                try { camera.Stop(); } catch { }
+                camera.Dispose();
+            }
+            lock (_gate) _settings = settings;
+            foreach (string cameraId in _latestFrames.Keys.ToArray())
+            {
+                if (settings.Cameras.Any(camera => camera.Enabled && camera.Id.Equals(cameraId, StringComparison.OrdinalIgnoreCase))) continue;
+                if (_latestFrames.TryRemove(cameraId, out LatestFrameSlot? removed)) removed.Dispose();
+            }
+            foreach (CameraSettings cameraSettings in settings.Cameras.ToArray())
+                AddOrReplaceCamera(cameraSettings, startCameras);
         }
-        lock (_gate)
-        {
-            _cameras.Clear();
-            _settings = settings;
-        }
-        foreach (string cameraId in _latestFrames.Keys.ToArray())
-        {
-            if (settings.Cameras.Any(camera => camera.Enabled && camera.Id.Equals(cameraId, StringComparison.OrdinalIgnoreCase))) continue;
-            if (_latestFrames.TryRemove(cameraId, out LatestFrameSlot? removed)) removed.Dispose();
-        }
-        foreach (CameraSettings cameraSettings in settings.Cameras.ToArray())
-            AddOrReplaceCamera(cameraSettings, startCameras);
     }
 
     public Bitmap? GetLatestFrame(string cameraId)
     {
         if (!TryGetCamera(cameraId, out Camera? camera) || camera is null || !camera.Settings.Enabled) return null;
+        RequestSnapshotPreview(cameraId);
         if (!_latestFrames.TryGetValue(cameraId, out LatestFrameSlot? slot)) return null;
-        return slot.Clone(out _);
+        return slot.TryClone(out _);
     }
 
     public bool TryGetLatestFrame(string cameraId, out Bitmap? frame, out long sequence)
@@ -305,13 +357,14 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
             sequence = 0;
             return false;
         }
+        RequestSnapshotPreview(cameraId);
         if (!_latestFrames.TryGetValue(cameraId, out LatestFrameSlot? slot))
         {
             frame = null;
             sequence = 0;
             return false;
         }
-        frame = slot.Clone(out sequence);
+        frame = slot.TryClone(out sequence);
         return frame is not null;
     }
 
@@ -384,6 +437,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private Camera CreateCamera(CameraSettings settings)
     {
         Camera camera = new(settings, processingRegistry: ProcessingModules, license: License);
+        camera.ConfigurePreview(Size.Empty, enabled: false, maxFps: _servicePreviewFps);
         camera.FrameReady += Camera_FrameReady;
         camera.PipelineResultsReady += Camera_PipelineResultsReady;
         camera.StatusChanged += Camera_StatusChanged;
@@ -399,30 +453,32 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
 
     private void Camera_FrameReady(CameraRuntime camera, Bitmap frame)
     {
+        bool retained = false;
         try
         {
-            Bitmap clone = new(frame);
-            long sequence = camera.FrameSource.CapturedFrames;
-            _latestFrames.AddOrUpdate(camera.Settings.Id,
-                _ => new LatestFrameSlot(clone, sequence),
-                (_, old) => { old.Replace(clone, sequence); return old; });
+            string cameraId = camera.Settings.Id;
             // The CameraRuntime preview worker is the display path for the
             // service WebRTC viewer. It already consumes the newest raw frame
             // independently of inference and applies the time-bounded overlay
             // snapshot before this event reaches the gateway.
-            if (_webrtc.SessionCount > 0)
+            // Fence the bounded handoff against replacing a runtime under the
+            // same id. Encoding and sending run outside this host lock.
+            lock (_gate)
             {
-                using Bitmap webRtcFrame = new(frame);
-                _webrtc.PushFrame(camera.Settings.Id, webRtcFrame);
+                if (!_cameras.TryGetValue(cameraId, out Camera? current) || !ReferenceEquals(current, camera)) return;
+                CameraRuntime.PreviewFrameTiming timing = camera.PreviewTiming;
+                if (_webrtc.HasViewers(cameraId))
+                    _webrtc.PushFrame(cameraId, frame, timing.Sequence, timing.ReceivedTimestamp);
+                if (HasSnapshotDemand(cameraId))
+                    retained = StoreSnapshot(cameraId, frame, timing.Sequence);
             }
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed to store latest frame for {CameraId}.", camera.Settings.Id); }
         finally
         {
-            // CameraRuntime creates a fresh preview bitmap for this event.
-            // The service clones what it needs above, so the event payload
-            // must be released here after all subscribers have consumed it.
-            frame.Dispose();
+            // The snapshot store may take ownership; the gateway only borrows
+            // this bitmap and copies once into its bounded pending slot.
+            if (!retained) frame.Dispose();
         }
     }
 
@@ -1339,13 +1395,31 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
     private sealed class LatestFrameSlot : IDisposable
     {
         private readonly object _gate = new();
-        private Bitmap _frame;
+        private Bitmap? _frame;
         private long _sequence;
         public LatestFrameSlot(Bitmap frame, long sequence) { _frame = frame; _sequence = sequence; }
         public long Sequence { get { lock (_gate) return _sequence; } }
-        public void Replace(Bitmap frame, long sequence) { lock (_gate) { Bitmap old = _frame; _frame = frame; _sequence = sequence; old.Dispose(); } }
-        public Bitmap Clone(out long sequence) { lock (_gate) { sequence = _sequence; return new Bitmap(_frame); } }
-        public void Dispose() { lock (_gate) _frame.Dispose(); }
+        public bool TryReplace(Bitmap frame, long sequence)
+        {
+            Bitmap? old;
+            lock (_gate)
+            {
+                if (_frame is null) return false;
+                old = _frame; _frame = frame; _sequence = sequence;
+            }
+            old.Dispose();
+            return true;
+        }
+        public Bitmap? TryClone(out long sequence)
+        {
+            lock (_gate) { sequence = _sequence; return _frame is null ? null : new Bitmap(_frame); }
+        }
+        public void Dispose()
+        {
+            Bitmap? old;
+            lock (_gate) { old = _frame; _frame = null; }
+            old?.Dispose();
+        }
     }
 }
 

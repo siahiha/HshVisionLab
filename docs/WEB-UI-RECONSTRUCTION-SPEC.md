@@ -205,8 +205,11 @@ border-top سبز و در حالت متوقف border-top زرد دارد. تصو
 شده، اما در کد فعلی صفحهٔ وب دکمهٔ قابل مشاهدهٔ حذف دوربین render نمی‌شود.
 
 تصویر tile از `CompositeWebRtcStream` می‌آید و فقط برای دوربین فعال و در حال
-اجرا روشن می‌شود. نوع دریافت RTSP انتخابی نیست؛ موتور مستقیماً با FFmpeg، یک
-thread decoder و نگه‌داری جدیدترین فریم می‌خواند.
+اجرا، صفحهٔ visible و tile داخل viewport روشن می‌شود. ابعاد CSS محل نمایش
+بدون ضرب در `devicePixelRatio` به سرویس می‌رود؛ resize همان session را به‌روز
+می‌کند. نوع دریافت RTSP انتخابی نیست؛ موتور مستقیماً با FFmpeg، یک thread
+decoder و نگه‌داری جدیدترین فریم می‌خواند. قرارداد مشترک همهٔ نماهای زنده در
+بخش ۱۲.۲ آمده است.
 
 ### ۴.۲ کلیک ذره‌بین: حالت view مستقل
 
@@ -326,7 +329,7 @@ hint فیلد آخری `0 یعنی توقف inference` است.
   `recommended`؛
 - `High / realtime` — `۱۵ FPS · چهار thread`.
 
-انتخاب profile نرخ‌ها، threads، buffer، active/idle FPS، اندازهٔ ورودی Face و
+انتخاب profile نرخ‌ها، threads، active/idle FPS، اندازهٔ ورودی Face و
 TopK را به draft اعمال می‌کند و thresholdها را تغییر نمی‌دهد. پایین آن
 `مدل‌های قابل انتخاب سرویس` و حداکثر 8 مدل اول catalog نمایش داده می‌شود.
 
@@ -376,14 +379,14 @@ checkbox `ROI فعال` و task editor را نشان می‌دهد. در حال�
 `Known-person threshold` و `Unknown-person match threshold` است و Toggle آن
 `recognitionEnabled` را کنترل می‌کند.
 
-بخش Tracking and recording شامل `Max processing FPS`، `Threads`، `Buffer
-count`، `History record confidence`، `History event cooldown (sec)`،
+بخش Tracking and recording شامل `Max processing FPS`، `Threads`،
+`History record confidence`، `History event cooldown (sec)`،
 `Tracking IoU` و `Track max misses` است.
 
 بخش Palm detection شامل ComboBox مدل، Input size، `Detection confidence`،
 `NMS IoU` و `Max hands` است. بخش Palm recognition شامل ComboBox مدل شناسایی،
 `Recognition input size`، `Known-person threshold` و `Unknown match threshold`
-است و بخش tracking/recording همان کنترل‌های نرخ، thread، buffer، cooldown و
+است و بخش tracking/recording همان کنترل‌های نرخ، thread، cooldown و
 tracker را دارد. `DetectorKind` در UI فیلد جداگانه ندارد؛ runtime آن را از
 مدل انتخاب‌شده تعیین می‌کند (`BlazePalm` یا `RTMDet`).
 
@@ -528,17 +531,55 @@ reconnect برای اتصال باقی‌اند.
 
 ```text
 Camera RTSP → FrameSource/FFmpeg → CameraRuntime preview/overlay
-  → LatestFrameStore → WebRtcGateway → Browser <video>
+  → CameraVideoPump: یک active + یک newest pending
+  → یک encoder VP8 برای دوربین → WebRTC peerهای همان دوربین
 ```
 
 component یک `RTCPeerConnection` با video transceiver از نوع `recvonly` می‌سازد،
-offer را می‌فرستد و answer را روی peer قرار می‌دهد. در cleanup، connection و
-session همان viewer بسته می‌شوند:
+offer را با ابعاد CSS فضای نمایش می‌فرستد و answer را روی peer قرار می‌دهد.
+`maxWidth/maxHeight` بدون ضرب در `devicePixelRatio` محاسبه می‌شوند و با
+`ResizeObserver` به‌روز می‌شوند. سقف preview برابر `1280×720` است؛ ابعاد encode
+به مضرب ۱۶ گرد می‌شوند و نسبت منبع در حد این گردکردن حفظ می‌شود. کل تصویر
+بدون crop یا letterbox resize می‌شود، بنابراین ROI نرمال‌شده روی همان تصویر
+کامل معتبر می‌ماند. ورودی inference و ابعاد منبع تشخیص تغییر نمی‌کنند.
+
+برای هر دوربین بزرگ‌ترین تقاضای viewerهای متصل استفاده می‌شود؛ encoder و
+payload فشرده بین viewerهای همان دوربین مشترک‌اند. هر دوربین worker مستقل
+دارد و کندی encode آن دوربین‌های دیگر را متوقف نمی‌کند. صف حداکثر یک فریم
+در حال encode و یک فریم منتظر است؛ منتظر قدیمی آزاد و جایگزین می‌شود و
+sequence تکراری یا قدیمی دوباره encode نمی‌شود. I420 در ابعاد ثابت buffer
+قابل استفادهٔ مجدد دارد. افزایش viewer همان دوربین encoder دیگری نمی‌سازد.
+
+`Service.Runtime.PreviewFps` در بازهٔ `1..15` اعمال می‌شود و سقف ۱۵ FPS حفظ
+شده است. preview و encoder فقط با viewer متصل یا تقاضای snapshot لازم‌اند؛
+session هنوز در حال signaling آن‌ها را فعال نمی‌کند. در cleanup، connection
+و session همان viewer بسته می‌شوند:
 
 ```text
 POST   /api/v1/streams/{cameraId}/webrtc/offer
+PATCH  /api/v1/streams/webrtc/{sessionId}
 DELETE /api/v1/streams/webrtc/{sessionId}
+GET    /api/v1/streams/diagnostics
 ```
+
+Offer فیلدهای اختیاری `maxWidth/maxHeight` دارد. پاسخ جدید
+`supportsViewportUpdates=true` می‌دهد؛ UI فقط در این حالت PATCH تغییر اندازه
+و heartbeat ده‌ثانیه‌ای می‌فرستد تا با سرویس قدیمی سازگار بماند. Session دارای
+viewport پس از ۴۵ ثانیه بدون تمدید و signaling ناقص پس از ۳۰ ثانیه منقضی
+می‌شود؛ sweep پنج‌ثانیه‌ای پاک‌سازی نهایی را انجام می‌دهد. Session کلاینت قدیمی
+بدون ابعاد، پس از اتصال به heartbeat وابسته نیست.
+
+`IntersectionObserver` و visibility صفحه تقاضا را کنترل می‌کنند: viewer خارج
+از دید یا صفحهٔ مخفی session را می‌بندد و هنگام بازگشت دوباره متصل می‌شود.
+همان session برای resize نگه داشته می‌شود. پس از حذف آخرین viewer، worker
+و bufferهای encoder آزاد می‌شوند؛ capture و inference ادامه دارند. Viewer
+جدید و تغییر ابعاد با keyframe ادامه می‌یابند. RTP از زمان محلی فریم استفاده
+می‌کند تا حذف فریم فاصلهٔ زمانی ویدئو را به tick ثابت محدود نکند.
+
+Diagnostics ابعاد واقعی، viewerهای کل/متصل، encode count، replacement و
+duplicate، زمان encode، سن فریم، FPS و تعداد active/pending را گزارش می‌کند؛
+این endpoint برای بررسی مسیر نمایش است و عدد benchmark دوربین واقعی نیست.
+جزئیات در [Rendering و WebRTC](service/02-RENDERING-WEBRTC.md) است.
 
 در CameraEditor، `status.canWhep` قابلیت source فعال RTSP را اعلام می‌کند و
 به‌همراه `running` و `enabled` تعیین می‌کند preview زنده باشد. live بودن این
@@ -560,6 +601,11 @@ GET /api/v1/streams/{cameraId}/snapshot?ts=<Date.now()>
 helper را استفاده نمی‌کند. در live mode، ابعاد واقعی video برای aspect ratio
 ثبت می‌شوند. SVG نقاط و polygon ویرایشی
 ROI روی هر دو نوع تصویر با مختصات نرمال‌شدهٔ یکسان قرار می‌گیرد.
+
+درخواست snapshot در سرویس تقاضای preview سه‌ثانیه‌ای ایجاد می‌کند؛ در صورت
+نبود viewer زنده، نرخ آن حداکثر ۵ FPS است. اولین درخواست پس از خاموشی preview
+تا ۷۵۰ میلی‌ثانیه منتظر فریم می‌ماند و دوربین متوقف را start نمی‌کند. پس از
+انقضای تقاضا، cache تصویر و منابع preview آزاد می‌شوند.
 
 ### ۱۲.۴ API مستقل پخش خام WHEP
 
@@ -647,6 +693,9 @@ layoutهای camera/faces/events/triggers تک‌ستونه، formها تک‌س
   باشد؛
 - tile، focus و ROI زنده از `CompositeWebRtcStream` و offer/answer سرویس
   استفاده کنند؛ snapshot برای `RoiCanvas` غیرزنده باقی بماند؛
+- ابعاد CSS بدون DPR، resize همان session، heartbeat و cleanup صفحهٔ مخفی یا
+  viewer خارج از دید اعمال شوند؛ هر دوربین یک encoder مشترک، صف محدود به یک
+  active و یک newest pending و diagnostics داشته باشد و سقف ۱۵ FPS حفظ شود؛
 - دریافت RTSP در Windows و سرویس مستقیم FFmpeg با یک thread decoder و فقط
   جدیدترین فریم باشد؛ درگاه مستقل WHEP برای source فعال RTSP در دسترس بماند؛
 - تنظیمات CameraEditor سه tab گفته‌شده و چهار بخش پردازش گفته‌شده را داشته باشد؛

@@ -28,6 +28,8 @@ internal static partial class Program
         Run("A slow preview consumer receives the latest pending frame", PreviewLatestFrame);
         Run("Preview reuses bounded native buffers and releases them when hidden", RuntimePreviewReuse);
         Run("Service preview defaults and unsubscribed capture remain compatible", RuntimePreviewServiceDefaults);
+        Run("Service preview respects its frame-rate budget without resizing inference", ServicePreviewRate);
+        Run("Concurrent preview demand is safe while a runtime is disposed", ServicePreviewDisposal);
         Run("Preview rendering cannot mutate the source used by detection", RuntimePreviewSourceIsolation);
         Run("Retained preview bitmaps survive native buffer reuse and shutdown", RuntimePreviewRetainedBitmap);
         Run("Independent capacity, replacement, fairness, snapshot and completion cache", CapacityAndCache);

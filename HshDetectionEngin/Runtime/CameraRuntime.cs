@@ -36,13 +36,14 @@ public class CameraRuntime : IDisposable
     private Thread? _previewThread;
     private readonly object _previewFrameGate = new();
     private readonly AutoResetEvent _previewFrameReady = new(false);
+    private int _disposed;
     private Mat? _latestPreviewFrame;
     private Mat? _sparePreviewFrame;
     private Mat? _secondSparePreviewFrame;
     private long _latestPreviewReceivedTimestamp;
     private long _latestPreviewSequence;
-    private sealed record PreviewConfiguration(Size MaxSize, bool Enabled);
-    private PreviewConfiguration _previewConfiguration = new(new Size(1280, 720), true);
+    private sealed record PreviewConfiguration(Size MaxSize, bool Enabled, int MaxFps);
+    private PreviewConfiguration _previewConfiguration = new(new Size(1280, 720), true, PreviewFps);
     private PreviewFrameTiming _previewTiming = new(0, 0, 0);
     private readonly object _rawFrameGate = new();
     private Bitmap? _latestRawFrame;
@@ -169,24 +170,26 @@ public class CameraRuntime : IDisposable
     /// size, bounded by the existing 1280x720 ceiling. Detection keeps source resolution.
     /// Hosts that do not configure demand retain the previous preview defaults.
     /// </summary>
-    public void ConfigurePreview(Size maxSize, bool enabled = true)
+    public void ConfigurePreview(Size maxSize, bool enabled = true, int maxFps = PreviewFps)
     {
         var size = new Size(
             maxSize.Width > 0 ? Math.Min(maxSize.Width, 1280) : 1280,
             maxSize.Height > 0 ? Math.Min(maxSize.Height, 720) : 720);
         lock (_previewFrameGate)
         {
+            if (Volatile.Read(ref _disposed) != 0) return;
             PreviewConfiguration previous = _previewConfiguration;
-            if (previous.MaxSize == size && previous.Enabled == enabled) return;
-            Volatile.Write(ref _previewConfiguration, new PreviewConfiguration(size, enabled));
+            int fps = Math.Clamp(maxFps, 1, PreviewFps);
+            if (previous.MaxSize == size && previous.Enabled == enabled && previous.MaxFps == fps) return;
+            Volatile.Write(ref _previewConfiguration, new PreviewConfiguration(size, enabled, fps));
             // Resuming should accept the next fresh frame immediately.
-            if (enabled && !previous.Enabled) _nextPreviewTicks = 0;
+            if (enabled && (!previous.Enabled || previous.MaxFps != fps)) _nextPreviewTicks = 0;
             if (!enabled) DrainPreviewFramesLocked();
+            _previewFrameReady.Set();
         }
-        _previewFrameReady.Set();
     }
 
-    private bool HasPreviewDemand => _running && Volatile.Read(ref _previewConfiguration).Enabled && FrameReady is not null;
+    private bool HasPreviewDemand => Volatile.Read(ref _disposed) == 0 && _running && Volatile.Read(ref _previewConfiguration).Enabled && FrameReady is not null;
 
     private int DetectionOverlayHoldMs => Math.Max(0, Settings.DetectionOverlayHoldMs);
 
@@ -299,7 +302,7 @@ public class CameraRuntime : IDisposable
         lock (_previewFrameGate)
         {
             if (!HasPreviewDemand || receivedTimestamp < _nextPreviewTicks) return;
-            long interval = Math.Max(1, Stopwatch.Frequency / PreviewFps);
+            long interval = Math.Max(1, Stopwatch.Frequency / _previewConfiguration.MaxFps);
             // Keep the deadline anchored. Resetting it to now + interval makes a
             // 30 FPS source settle at 10 FPS whenever callbacks arrive just early.
             _nextPreviewTicks = _nextPreviewTicks <= 0
@@ -483,7 +486,7 @@ public class CameraRuntime : IDisposable
 
     public void Start()
     {
-        if (_running) return;
+        if (_running || Volatile.Read(ref _disposed) != 0) return;
         if (!Settings.Enabled)
         {
             StatusChanged?.Invoke(this, "Camera is disabled.", true);
@@ -1446,6 +1449,7 @@ public class CameraRuntime : IDisposable
     private static Point[] ToLocalPolygon(PointF[] p,Rectangle b)=>p.Select(x=>new Point(Math.Clamp((int)Math.Round(x.X-b.X),0,Math.Max(0,b.Width-1)),Math.Clamp((int)Math.Round(x.Y-b.Y),0,Math.Max(0,b.Height-1)))).ToArray();
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Stop();
         foreach (var h in History) h.Crop.Dispose();
         foreach (var h in AnalysisHistory) h.Crop.Dispose();
@@ -1467,7 +1471,7 @@ public class CameraRuntime : IDisposable
         lock (_analysisHistoryGate) { _analysisHistory.Clear(); }
         _pipelineCoordinator.Dispose();
         FrameSource.Dispose();
-        _previewFrameReady.Dispose();
+        lock (_previewFrameGate) _previewFrameReady.Dispose();
         GC.SuppressFinalize(this);
     }
 }

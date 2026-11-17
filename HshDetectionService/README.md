@@ -80,6 +80,8 @@ GET /api/v1/triggers
 POST /api/v1/triggers
 GET /api/v1/streams/{cameraId}/overlay
 POST /api/v1/streams/{cameraId}/webrtc/offer
+PATCH/DELETE /api/v1/streams/webrtc/{sessionId}
+GET /api/v1/streams/diagnostics
 POST/PATCH/DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 GET /api/v1/streams/{cameraId}/snapshot
 ```
@@ -97,6 +99,32 @@ GET /api/v1/streams/{cameraId}/snapshot
 پس از تغییر تنظیمات باید سرویس restart شود.
 
 ## WebRTC
+
+هر دوربینِ دارای بیننده، یک worker مستقل و یک encoder مشترک بین بیننده‌های
+خود دارد. هر worker فقط یک فریم در حال encode و یک فریم منتظر نگه می‌دارد؛
+فریم منتظر با تصویر جدید جایگزین می‌شود. فریم تکراری دوباره encode نمی‌شود.
+Bitmap مقصد و بافر I420 تا تغییر اندازه دوباره استفاده می‌شوند. timestamp
+ویدئو از زمان یکنواخت دریافت فریم می‌آید.
+
+در offer می‌توان `maxWidth` و `maxHeight` فرستاد. UI اندازهٔ محل نمایش را
+خودکار اعلام می‌کند؛ سرویس بزرگ‌ترین نیاز بیننده‌های همان دوربین را تا سقف
+`1280×720` اعمال و ابعاد encoder را به مضرب ۱۶ تنظیم می‌کند. اندازهٔ فریم
+تشخیص تغییر نمی‌کند. پاسخ جدید `supportsViewportUpdates: true` دارد؛ سپس
+`PATCH /api/v1/streams/webrtc/{sessionId}` اندازه و heartbeat را به‌روزرسانی
+می‌کند. UI هر ۱۰ ثانیه heartbeat می‌فرستد؛ session جدید پس از ۴۵ ثانیه
+بی‌خبری منقضی می‌شود. مذاکرهٔ ناتمام پس از ۳۰ ثانیه پاک می‌شود. کلاینت قدیمی
+بدون فیلدهای اندازه، مشمول lease اتصال فعال نیست.
+
+نمای مخفی، خارج از دید یا بسته‌شده session را آزاد می‌کند. سرویس بدون تقاضای
+ویدئو یا snapshot، preview نمی‌سازد و دریافت/تشخیص ادامه دارند. تقاضای snapshot
+سه ثانیه اعتبار دارد و به‌تنهایی حداکثر ۵ FPS می‌خواهد؛ `runtime.previewFps`
+سقف ویدئوی سرویس را تا ۱۵ FPS کنترل می‌کند. درخواست اولین snapshot پس از
+بیکاری تا ۷۵۰ میلی‌ثانیه برای فریم تازه صبر می‌کند.
+
+`GET /api/v1/streams/diagnostics` تعداد بیننده، اندازه، نرخ و مدت encode،
+تعداد فریم‌های جایگزین/تکراری و وضعیت حافظهٔ منتظر را به تفکیک دوربین می‌دهد.
+این آمار شامل URL یا رمز دوربین نیست. `fps` در وضعیت عمومی دوربین نرخ پردازش
+تشخیص است و نرخ ویدئوی مرورگر محسوب نمی‌شود.
 
 درخواست offer اختصاصی شامل `{ "type": "offer", "sdp": "..." }` است و پاسخ
 شامل `sessionId` و answer SDP خواهد بود. این مسیر آخرین فریم composited را
