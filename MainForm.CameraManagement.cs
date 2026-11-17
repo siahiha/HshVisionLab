@@ -120,7 +120,7 @@ public sealed partial class MainForm
         }
         else if (camera.Settings.Enabled)
         {
-            camera.Start();
+            StartCameraRuntime(camera);
         }
 
         SelectCamera(camera);
@@ -134,7 +134,7 @@ public sealed partial class MainForm
         {
             if (camera.Settings.Enabled && !camera.IsRunning)
             {
-                camera.Start();
+                StartCameraRuntime(camera);
             }
         }
 
@@ -198,7 +198,7 @@ public sealed partial class MainForm
 
             if (wasRunning)
             {
-                camera.Start();
+                StartCameraRuntime(camera);
             }
 
             SaveAll();
@@ -208,7 +208,7 @@ public sealed partial class MainForm
         }
         else if (wasRunning)
         {
-            camera.Start();
+            StartCameraRuntime(camera);
         }
     }
 
@@ -234,13 +234,8 @@ public sealed partial class MainForm
         camera.StatusChanged -= Runtime_StatusChanged;
         _cameras.Remove(camera.Settings.Id);
 
-        lock (_frameGate)
-        {
-            if (_latestFrames.Remove(camera.Settings.Id, out Bitmap? bitmap))
-            {
-                bitmap.Dispose();
-            }
-        }
+        if (_previewBuffers.TryRemove(camera.Settings.Id, out DesktopPreviewBuffer? buffer)) buffer.Dispose();
+        ReleaseDisplayedFrame(camera.Settings.Id);
 
         camera.Dispose();
 
@@ -295,8 +290,6 @@ public sealed partial class MainForm
         target.FaceUnknownMatchThreshold = clone.FaceUnknownMatchThreshold;
         target.FaceEventCooldownSeconds = clone.FaceEventCooldownSeconds;
         target.Transport = clone.Transport;
-        target.CaptureBackend = clone.CaptureBackend;
-        target.BufferCount = clone.BufferCount;
         target.ReconnectDelaySec = clone.ReconnectDelaySec;
         target.Confidence = clone.Confidence;
         target.NmsIoU = clone.NmsIoU;

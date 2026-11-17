@@ -148,7 +148,7 @@ minmax(0, 1fr) minmax(0, 250px)` دارد؛ ستون دوربین در سمت چ
 - دکمهٔ `مدیریت دوربین‌ها` به `/cameras`؛
 - `camera-wall` با حداکثر ۶ tile در هر صفحه؛ صفحه‌بندی با دکمه‌های `قبلی` و
   `بعدی` و شمارندهٔ بازهٔ نمایش داده می‌شود. دوربین‌های صفحات دیگر mount
-  نمی‌شوند تا WHEP، snapshot و overlay آن‌ها فعال نماند؛
+  نمی‌شوند تا sessionهای تصویری آن‌ها فعال نماند؛
 - برای 1 تا 4 tile تعداد ستون متناسب با تعداد tile است و برای 5 یا 6 tile در
   دسکتاپ سه ستون استفاده می‌شود؛
 - برای 0 دوربین، Empty با عنوان `دوربینی تعریف نشده` نمایش داده می‌شود.
@@ -204,10 +204,9 @@ border-top سبز و در حالت متوقف border-top زرد دارد. تصو
 که واقعاً در کد وب برای آن control وجود دارد؛ `api.deleteCamera` در API تعریف
 شده، اما در کد فعلی صفحهٔ وب دکمهٔ قابل مشاهدهٔ حذف دوربین render نمی‌شود.
 
-تصویر tile بر اساس `camera.captureBackend` انتخاب می‌شود:
-
-- `MediaMTX`: کامپوننت فعال `RawMediaMtxStream`؛
-- هر مقدار دیگر: `SnapshotImage` با polling تصویری.
+تصویر tile از `CompositeWebRtcStream` می‌آید و فقط برای دوربین فعال و در حال
+اجرا روشن می‌شود. نوع دریافت RTSP انتخابی نیست؛ موتور مستقیماً با FFmpeg، یک
+thread decoder و نگه‌داری جدیدترین فریم می‌خواند.
 
 ### ۴.۲ کلیک ذره‌بین: حالت view مستقل
 
@@ -281,9 +280,11 @@ border-top سبز و در حالت متوقف border-top زرد دارد. تصو
 3. `Processing / ROI`.
 
 در تب preview، دو ستون وجود دارد: live panel و `وضعیت لحظه‌ای`. برای
-MediaMTX عنوان تصویر `پخش کم‌تاخیر MediaMTX` و زیرعنوان
-`WHEP خام MediaMTX + Overlay سبک سمت کلاینت` است؛ تصویر دوباره encode یا با Drawing پردازش نمی‌شود. برای backend
-دیگر عنوان `آخرین فریم کامپوزیت‌شده` و زیرعنوان
+`status.canWhep=true` عنوان تصویر `پخش زندهٔ کم‌تأخیر` و زیرعنوان
+`WebRTC · استریم پردازش‌شده با ROI، کادرها و نتایج تشخیص` است. این قابلیت برای
+source معتبر RTSP و فعال اعلام می‌شود؛ در حال اجرا بودن دوربین، `RoiCanvas`
+از `CompositeWebRtcStream` استفاده می‌کند. برای sourceهای دیگر عنوان
+`آخرین فریم کامپوزیت‌شده` و زیرعنوان
 `ROI و Drawing روی آخرین تصویر سرویس رسم می‌شوند.` است. همین تب دکمهٔ
 `ROI جدید` و `حذف ROI` را دارد.
 
@@ -305,10 +306,8 @@ MediaMTX عنوان تصویر `پخش کم‌تاخیر MediaMTX` و زیرعن
 
 - `نام دوربین` — input؛
 - `Source URL` — input چپ‌به‌راست و wide؛
-- `RTSP receiver` — select با گزینه‌های `FFmpeg`، `LibVLC`، `MediaMTX`؛
 - `Transport` — select با `TCP` و `UDP`؛
 - `Reconnect delay (sec)` — number؛
-- `Buffer count` — number با hint `0 یعنی فقط آخرین فریم`؛
 - checkbox `نمایش Drawing، ROI و کادر تشخیص`.
 
 ### Motion Gate و نرخ‌ها
@@ -359,7 +358,7 @@ checkbox `ROI فعال` و task editor را نشان می‌دهد. در حال�
 `ردیابی و ثبت سابقه`.
 
 بخش Plate detection شامل ComboBox `Model`، `Input size`، `Preprocessing`، `Confidence`,
-`NMS IoU`، `Max processing FPS`، `Threads`، `Buffer count`،
+`NMS IoU`، `Max processing FPS`، `Threads`،
 `History event cooldown (sec)` و `Track max misses` است.
 
 بخش Plate character recognition جدا از detector است و Toggle
@@ -512,79 +511,78 @@ confidence، Face identity، scope دوربین‌ها و کانال اعلان 
 3. `قابلیت و مدل` — Processing modules با وضعیت available/unavailable و
    Model inventory با نام، module و `HSH package` یا `legacy ONNX`.
 
-## ۱۲. دریافت تصویر و Overlay فعال
+## ۱۲. دریافت تصویر و نمایش فعال
 
-### ۱۲.۱ مسیر MediaMTX
+### ۱۲.۱ دریافت مستقیم موتور
 
-در UI فعلی `RawMediaMtxStream` یک WebRTC peer connection می‌سازد، video
-transceiver را `recvonly` می‌کند و SDP را از WHEP می‌گیرد:
+Windows و سرویس RTSP را مستقیماً با FFmpeg، گزینه‌های کم‌تأخیر و یک thread
+صریح decoder دریافت می‌کنند. source فقط جدیدترین فریم منتظر پردازش را نگه
+می‌دارد. Webcam و فایل نیز پشتیبانی می‌شوند؛ تنظیمات transport TCP/UDP و فاصلهٔ
+reconnect برای اتصال باقی‌اند.
 
-```text
-Camera RTSP
-  ├─ MediaMTX path → local RTSP → Engine/CameraRuntime → inference/state
-  └─ MediaMTX path → POST WHEP → Browser <video>
-                                      └→ GET overlay → LiveOverlaySvg
-```
+### ۱۲.۲ مسیر فعال کامپوزیت‌شده
 
-در شروع stream این endpoint استفاده می‌شود:
-
-```text
-POST /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
-Accept: application/sdp
-Content-Type: application/sdp
-```
-
-با unmount شدن component، DELETE همان viewer ارسال می‌شود. مسیر `PATCH` برای
-trickle ICE در API helper وجود دارد، ولی start فعلی offer کامل را با POST
-ارسال می‌کند.
-
-برای جلوگیری از عقب‌افتادن تدریجی پخش، این component هر دو ثانیه سلامت اتصال و
-پیشرفت فریم را پایش می‌کند. حالت‌های `failed/closed` در PeerConnection یا ICE،
-توقف فریم برای حدود ۷ ثانیه، و jitter buffer بالاتر از حدود ۱٫۵ ثانیه برای چند
-ثانیه، recovery را فعال می‌کنند. recovery فقط همان stream را می‌بندد و با
-`viewerId` جدید WHEP را می‌سازد؛ در نتیجه refresh صفحه یا قطع stream دوربین‌های
-دیگر لازم نیست. retry خطای handshake نیز scoped به همان tile است و با backoff
-۲، ۵، ۱۰ و حداکثر ۳۰ ثانیه انجام می‌شود؛ پس از اتصال سالم شمارنده reset می‌شود.
-
-`useLiveOverlay` برای هر stream فعال endpoint زیر را ابتدا بلافاصله و سپس با
-`setTimeout` poll می‌کند. در thumbnailهای داشبورد فاصلهٔ poll برابر 400ms است؛
-نمای متمرکز برای latency کمتر از مقدار پیش‌فرض 180ms استفاده می‌کند. زمان‌بندی
-بعدی بعد از پایان درخواست انجام می‌شود، بنابراین درخواست‌های overlay روی هم
-انباشته نمی‌شوند:
+`CompositeWebRtcStream` مسیر فعال tileهای داشبورد، نمای متمرکز و `RoiCanvas`
+با `live=true` است. تصویر شامل Drawing زمان‌دار سرویس است و مستقل از پایان
+هر inference منتشر می‌شود:
 
 ```text
-GET /api/v1/streams/{cameraId}/overlay?ts=<Date.now()>
+Camera RTSP → FrameSource/FFmpeg → CameraRuntime preview/overlay
+  → LatestFrameStore → WebRtcGateway → Browser <video>
 ```
 
-`LiveOverlaySvg` روی video یک SVG هم‌اندازهٔ فریم می‌گذارد و این موارد را رسم
-می‌کند: `rois` معمولی، `motionRois`، primitiveهای
-Rectangle/Circle/Points/Polyline/Polygon با رنگ و ضخامت، و detection box با
-رنگ سبز برای accepted و قرمز برای rejected، label/text، track id و confidence.
-ROI معمولی خط نارنجی solid و نام ROI دارد؛ motion ROI با هندسهٔ مقیاس‌شده حول
-مرکز و خط زرد dashed نمایش داده می‌شود. پس در مسیر MediaMTX، تصویر raw است و
-Drawing به‌صورت burn-in داخل ویدئو encode نمی‌شود.
+component یک `RTCPeerConnection` با video transceiver از نوع `recvonly` می‌سازد،
+offer را می‌فرستد و answer را روی peer قرار می‌دهد. در cleanup، connection و
+session همان viewer بسته می‌شوند:
 
-### ۱۲.۲ مسیر غیر MediaMTX
+```text
+POST   /api/v1/streams/{cameraId}/webrtc/offer
+DELETE /api/v1/streams/webrtc/{sessionId}
+```
 
-`SnapshotImage` در thumbnailهای داشبورد از endpoint زیر استفاده می‌کند و پس از
-هر load با تأخیر 400ms درخواست بعدی می‌سازد؛ خطا با تأخیر 500ms دوباره تلاش
-می‌شود. با مخفی‌شدن تب مرورگر، timerها متوقف می‌شوند و با visible شدن دوباره
-از سر گرفته می‌شوند:
+در CameraEditor، `status.canWhep` قابلیت source فعال RTSP را اعلام می‌کند و
+به‌همراه `running` و `enabled` تعیین می‌کند preview زنده باشد. live بودن این
+نما نیز همان خروجی کامپوزیت‌شده است. tile و focus به انتخاب نوع گیرنده وابسته
+نیستند.
+
+### ۱۲.۳ Snapshot
+
+endpoint تصویر آخر سرویس:
 
 ```text
 GET /api/v1/streams/{cameraId}/snapshot?ts=<Date.now()>
 ```
 
-در `RoiCanvas` نیز برای backend غیر MediaMTX snapshot هر 250ms refresh می‌شود.
-برای MediaMTX همان `RawMediaMtxStream` داخل ROI canvas قرار می‌گیرد و ابعاد
-video برای aspect ratio ثبت می‌شود.
+در `RoiCanvas` با `live=false`، `<img>` با state مستقل `imageSource` و
+`refreshTimer` کار می‌کند. `scheduleRefresh` پس از load یا خطا، refresh بعدی
+را 250ms بعد می‌سازد و ابعاد واقعی در `onLoad` ثبت می‌شوند. helper جداگانهٔ
+`SnapshotImage` هنگام hidden شدن تب timer خود را متوقف می‌کند؛ timer ROI این
+helper را استفاده نمی‌کند. در live mode، ابعاد واقعی video برای aspect ratio
+ثبت می‌شوند. SVG نقاط و polygon ویرایشی
+ROI روی هر دو نوع تصویر با مختصات نرمال‌شدهٔ یکسان قرار می‌گیرد.
 
-### ۱۲.۳ مسیر legacy
+### ۱۲.۴ API مستقل پخش خام WHEP
 
-`api.webRtcOffer` و `api.closeWebRtc` و کامپوننت‌های
-`CompositeWebRtcStream`/`LivePreview` برای مسیر قدیمی offer/answer در سورس
-وجود دارند، اما در درخت route فعلی Dashboard و CameraEditor استفاده نمی‌شوند.
-مستندات بازسازی UI نباید آن‌ها را مسیر پیش‌فرض تصویر معرفی کند.
+سرویس برای sourceهای RTSP معتبر و فعال، درگاه مستقل MediaMTX/WHEP دارد. این
+درگاه هنگام درخواست viewer، یک اتصال on-demand جداگانه به دوربین ایجاد می‌کند؛
+موتور تشخیص هم‌زمان مستقیماً از دوربین می‌خواند:
+
+```text
+Camera RTSP ──┬─ FrameSource/FFmpeg → inference/state → Overlay API
+              └─ Service MediaMTX path → WHEP → Browser raw video
+```
+
+```text
+POST/PATCH/DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
+GET              /api/v1/streams/{cameraId}/overlay?ts=<Date.now()>
+```
+
+`RawMediaMtxStream` و `LiveOverlaySvg` مسیر خام را در سورس پیاده می‌کنند، اما
+در tile، focus و preview فعلی mount نمی‌شوند. در صورت استفاده از این مسیر،
+`useLiveOverlay` درخواست‌ها را پس از پایان پاسخ قبلی زمان‌بندی می‌کند؛ state
+شامل ابعاد اصلی، ROI، Motion ROI، detection، label، confidence، track id و
+primitiveهای پردازشی است. ویدئوی خام برای Drawing دوباره encode نمی‌شود.
+جزئیات شبکه و lifecycle در [MediaMTX-WebRTC.md](MediaMTX-WebRTC.md) است.
 
 ## ۱۳. API و polling مورد نیاز
 
@@ -647,12 +645,10 @@ layoutهای camera/faces/events/triggers تک‌ستونه، formها تک‌س
   نشود؛
 - در focus ابزارهای view/edit/new/delete و در edit/new ذخیره/لغو وجود داشته
   باشد؛
-- MediaMTX از WHEP خام و Overlay SVG استفاده کند؛ نمای متمرکز polling پیش‌فرض
-  180ms و thumbnail داشبورد polling 400ms دارد و polling بعدی پس از پایان
-  پاسخ قبلی زمان‌بندی می‌شود؛
-- MediaMTX در UI پایش سلامت WebRTC و recovery خودکار per-tile داشته باشد تا
-  lag تدریجی با refresh کل صفحه برطرف نشود؛
-- backendهای دیگر snapshot باشند؛
+- tile، focus و ROI زنده از `CompositeWebRtcStream` و offer/answer سرویس
+  استفاده کنند؛ snapshot برای `RoiCanvas` غیرزنده باقی بماند؛
+- دریافت RTSP در Windows و سرویس مستقیم FFmpeg با یک thread decoder و فقط
+  جدیدترین فریم باشد؛ درگاه مستقل WHEP برای source فعال RTSP در دسترس بماند؛
 - تنظیمات CameraEditor سه tab گفته‌شده و چهار بخش پردازش گفته‌شده را داشته باشد؛
 - همهٔ modelها از catalog سرویس و پوشه‌های مدل، نه از یک input متنی ثابت، بیایند؛
 - صفحات Faces و Triggers با layout دو ستونه و editor سمت مقابل فهرست پیاده

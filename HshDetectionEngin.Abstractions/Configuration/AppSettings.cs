@@ -48,6 +48,7 @@ public sealed partial class CameraProcessingSettings
     public string ExecutionMode { get; set; } = "Inline";
     public string RecognitionDefinitionId { get; set; } = string.Empty;
     public MotionDirectionSettings MotionDirection { get; set; } = new();
+    public VehicleColorSettings VehicleColor { get; set; } = new();
     public override string ToString() => $"{Name} {(Enabled ? "[Enabled]" : "[Disabled]")}";
 
     public CameraProcessingSettings Clone() => new()
@@ -61,6 +62,7 @@ public sealed partial class CameraProcessingSettings
         ExecutionMode = ExecutionMode,
         RecognitionDefinitionId = RecognitionDefinitionId,
         MotionDirection = MotionDirection?.Clone() ?? new(),
+        VehicleColor = VehicleColor?.Clone() ?? new(),
         Options = Options?.DeepClone()?.AsObject() ?? []
     };
 }
@@ -99,10 +101,6 @@ public class CameraSettings
     public float FaceUnknownMatchThreshold { get; set; } = 0.35f;
     public int FaceEventCooldownSeconds { get; set; } = 60;
     public string Transport { get; set; } = "TCP";
-    /// <summary>Frame receiver to use: FFmpeg, LibVLC, or MediaMTX.</summary>
-    public string CaptureBackend { get; set; } = "FFmpeg";
-    /// <summary>Capture queue capacity shared by the Plate and Face pipelines. 0 keeps only the newest frame.</summary>
-    public int BufferCount { get; set; } = 0;
     public int ReconnectDelaySec { get; set; } = 3;
     public float Confidence { get; set; } = 0.35f;
     public float NmsIoU { get; set; } = 0.45f;
@@ -459,9 +457,6 @@ public sealed class AppSettings
     public float FaceUnknownMatchThreshold { get; set; } = 0.35f;
     public int FaceEventCooldownSeconds { get; set; } = 60;
     public string Transport { get; set; } = "TCP";
-    public string CaptureBackend { get; set; } = "FFmpeg";
-    /// <summary>Capture queue capacity shared by the Plate and Face pipelines. 0 keeps only the newest frame.</summary>
-    public int BufferCount { get; set; } = 0;
     public int ReconnectDelaySec { get; set; } = 3;
     public float Confidence { get; set; } = 0.35f;
     public float NmsIoU { get; set; } = 0.45f;
@@ -528,8 +523,7 @@ public sealed class AppSettings
                         FaceRecognitionEnabled = loaded.FaceRecognitionEnabled, FaceRecognitionModelFile = loaded.FaceRecognitionModelFile,
                         FaceRecognitionThreshold = loaded.FaceRecognitionThreshold,
                         Transport = loaded.Transport,
-                        CaptureBackend = loaded.CaptureBackend,
-                        BufferCount = loaded.BufferCount, ReconnectDelaySec = loaded.ReconnectDelaySec,
+                        ReconnectDelaySec = loaded.ReconnectDelaySec,
                         Confidence = loaded.Confidence, NmsIoU = loaded.NmsIoU, MaxFps = loaded.MaxFps,
                         InputSize = loaded.InputSize, Threads = loaded.Threads, DrawBoxes = loaded.DrawBoxes,
                         DetectionOverlayHoldMs = loaded.DetectionOverlayHoldMs,
@@ -558,11 +552,6 @@ public sealed class AppSettings
                         c.FaceRecordConfidence = c.FaceRecordConfidence <= 0 ? 0.8f : c.FaceRecordConfidence;
                         c.FaceRecognitionModelFile ??= "face_recognition_sface_2021dec.onnx";
                         c.FaceRecognitionThreshold = c.FaceRecognitionThreshold <= 0 ? 0.40f : c.FaceRecognitionThreshold;
-                        c.CaptureBackend = string.Equals(c.CaptureBackend, "LibVLC", StringComparison.OrdinalIgnoreCase)
-                            ? "LibVLC"
-                            : string.Equals(c.CaptureBackend, "MediaMTX", StringComparison.OrdinalIgnoreCase)
-                                ? "MediaMTX"
-                                : "FFmpeg";
                         c.FaceMatchIou = c.FaceMatchIou <= 0 ? 0.25f : c.FaceMatchIou;
                         c.FaceTrackMaxMisses = c.FaceTrackMaxMisses <= 0 ? 10 : c.FaceTrackMaxMisses;
                         c.FacePreprocessing ??= "None";

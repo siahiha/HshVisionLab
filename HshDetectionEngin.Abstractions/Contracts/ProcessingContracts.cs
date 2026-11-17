@@ -12,7 +12,7 @@ public interface IFrameSource : IDisposable
     long CapturedFrames { get; }
     long DroppedFrames { get; }
     string Source { get; }
-    void Configure(string source, string transport, int bufferCount, int reconnectDelayMs);
+    void Configure(string source, string transport, int reconnectDelayMs);
     void Start();
     void Stop();
     bool TryDequeueFrame(out Mat frame, int timeoutMs, CancellationToken cancellationToken);

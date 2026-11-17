@@ -7,7 +7,6 @@ using System.Threading.Channels;
 using Emgu.CV;
 using Emgu.CV.CvEnum;
 using HshDetectionEngin;
-using HshDetectionEngin.Capture;
 using HshDetectionEngin.Face;
 using HshDetectionEngin.Identity;
 using HshDetectionEngin.Licensing;
@@ -171,7 +170,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                         .Count(item => item.Enabled);
                     return new CameraStatusDto(settings.Id, settings.Name, settings.Enabled, false, 0, 0, 0, 0, 0,
                         settings.Enabled ? "Stopped" : "Disabled", roiCount, taskCount, 0,
-                        settings.Enabled ? "NotConfigured" : "Disabled", settings.CaptureBackend);
+                        settings.Enabled ? "NotConfigured" : "Disabled", settings.Enabled && MediaMtxRuntime.SupportsSource(settings.SourceUrl));
                 }
 
                 return new CameraStatusDto(
@@ -191,7 +190,7 @@ public sealed class DetectionRuntimeHost : IAsyncDisposable
                     camera.ActivePipelineCount > 0
                         ? "Ready"
                         : camera.ConfiguredTaskCount > 0 ? "Unavailable" : "NotConfigured",
-                    camera.Settings.CaptureBackend);
+                    camera.Settings.Enabled && MediaMtxRuntime.SupportsSource(camera.Settings.SourceUrl));
             }).ToArray();
         }
     }
@@ -1365,4 +1364,4 @@ public sealed record CameraStatusDto(
     int ConfiguredTaskCount,
     int ActivePipelineCount,
     string ProcessingState,
-    string CaptureBackend);
+    bool CanWhep);

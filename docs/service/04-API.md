@@ -82,7 +82,7 @@ GET  /api/v1/cameras/{cameraId}/status
 GET  /api/v1/cameras/{cameraId}/statistics
 ```
 
-`PUT/PATCH` باید قبل از apply، source، backend، model reference و processing schema را validate کند.
+`PUT/PATCH` باید قبل از apply، source، transport، model reference و processing schema را validate کند. دریافت RTSP در runtime همیشه FFmpeg مستقیم با یک thread decoder و newest-frame است.
 
 `GET/PUT /api/v1/settings` بخش `service.historySubscription` را نیز ذخیره می‌کند.
 این بخش شامل `profiles[]` است و هر profile می‌تواند `mode`، `cameraIds`، `roiIds`،
@@ -283,8 +283,9 @@ POST /api/v1/streams/{cameraId}/webrtc/offer
 POST/PATCH/DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 ```
 
-برای دوربین `MediaMTX`، endpointهای WHEP خروجی خام و کم‌تاخیر path را به مرورگر
-می‌دهند. endpoint `overlay` خروجی ویدئویی نیست و فقط state لازم برای رسم سمت
+برای source معتبر RTSP و فعال، endpointهای WHEP خروجی خام path مستقل سرویس
+را می‌دهند؛ `CameraStatusDto.CanWhep` این قابلیت را با `canWhep` اعلام می‌کند.
+موتور تشخیص مستقیماً از دوربین دریافت می‌کند. endpoint `overlay` فقط state لازم برای رسم سمت
 کلاینت را برمی‌گرداند:
 
 ```json
@@ -314,9 +315,9 @@ POST/PATCH/DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 نرمال‌شدهٔ `0..1`. Overlayهای پویا حدود 2.5 ثانیه TTL دارند؛ ROI ثابت expiry
 ندارد. کلاینت باید این داده را با refresh کوتاه بخواند و روی WHEP خام رسم کند.
 
-offer/answer اختصاصی و `WebRtcGateway` برای clientهای legacy که خروجی
-کامپوزیت‌شده می‌خواهند باقی می‌ماند؛ endpoint POST برای clientهای ساده و تست
-نیز حفظ شده است. برای client فعلی MediaMTX، نباید به `/webrtc/offer` متصل شد.
+offer/answer اختصاصی و `WebRtcGateway` خروجی کامپوزیت‌شده را ارائه می‌کنند و
+مسیر فعال tile، focus و ROI زندهٔ UI فعلی‌اند. مصرف‌کنندهٔ WHEP خام از
+endpointهای `/webrtc/whep/{viewerId}` و Overlay جداگانه استفاده می‌کند.
 
 ## 11. ارتباط پلاک و چهره و subscription کلاینت
 

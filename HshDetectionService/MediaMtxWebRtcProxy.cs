@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using HshDetectionEngin;
-using HshDetectionEngin.Capture;
 
 namespace HshDetectionService;
 
@@ -48,9 +47,9 @@ public sealed class MediaMtxWebRtcProxy : IDisposable
             return;
         }
 
-        if (!string.Equals(camera.CaptureBackend, "MediaMTX", StringComparison.OrdinalIgnoreCase))
+        if (!MediaMtxRuntime.SupportsSource(camera.SourceUrl))
         {
-            await WriteErrorAsync(context, StatusCodes.Status409Conflict, "WHEP is available only when the camera receiver is MediaMTX.").ConfigureAwait(false);
+            await WriteErrorAsync(context, StatusCodes.Status409Conflict, "WHEP requires an RTSP camera source; use snapshots for local sources.").ConfigureAwait(false);
             return;
         }
 
@@ -99,7 +98,7 @@ public sealed class MediaMtxWebRtcProxy : IDisposable
             return;
         }
 
-        await _runtime.EnsurePathAsync(camera.Id, camera.SourceUrl, camera.Transport, cancellationToken, requireRtsp: false).ConfigureAwait(false);
+        await _runtime.EnsurePathAsync(camera.Id, camera.SourceUrl, cancellationToken).ConfigureAwait(false);
         if (_sessions.TryRemove(key, out WhepSession? previous))
         {
             try { await SendWithoutBodyAsync(HttpMethod.Delete, previous.Location, cancellationToken).ConfigureAwait(false); } catch { }

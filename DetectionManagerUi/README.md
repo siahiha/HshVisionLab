@@ -57,19 +57,19 @@ npm run dev
 
 - dashboard چنددوربینه با نمای tile، وضعیت FPS/inference، start/stop و آخرین رخدادها
 - دیوار زندهٔ داشبورد صفحه‌بندی‌شده است و در هر صفحه حداکثر ۶ thumbnail mount می‌کند؛ tileهای صفحات دیگر stream یا polling فعال ندارند
-- thumbnailهای داشبورد با نرخ کنترل‌شدهٔ snapshot/overlay به‌روزرسانی می‌شوند و هنگام مخفی‌شدن تب مرورگر polling و WebRTC متوقف می‌شود تا با افزایش تعداد دوربین‌ها بار UI و API محدود بماند
+- نمای زندهٔ tileها، نمای متمرکز و نمای کامل از WebRTC کامپوزیت‌شدهٔ سرویس استفاده می‌کند؛ تب پیش‌نمایش تنظیمات برای منابع غیر RTSP از snapshot با نرخ کنترل‌شده استفاده می‌کند
 - نوار اکشن بالایی و tileهای دوربین با کنترل‌های Start/Stop، Edit و نمای کامل؛ زیر layout اصلی داشبورد نیز پنل واقعی `وضعیت runtime` برای پنج دوربین اول وجود دارد
 - پنل `Detected events` در کنار تصویر با crop تشخیص، نام دوربین، label، confidence و زمان؛ کارت‌های صرفاً متنی جایگزین این پنل نیستند
 - صفحهٔ تاریخچهٔ تشخیص امکان حذف همهٔ eventها، بازه‌های آماده و بازهٔ سفارشی را با تأیید کاربر دارد؛ artifactهای تصویری حذف‌شده نیز پاک می‌شوند
 - ادیتور تصویری ROI چندضلعی با نقاط نرمال‌شده، نام/فعال‌بودن ROI، اجرای موازی ROIها و انتخاب اجرای سریالی/همزمان taskهای هر ROI
 - UI به‌صورت دوزبانهٔ فارسی/انگلیسی ارائه می‌شود؛ کلید `EN`/`فا` در نوار بالایی زبان و جهت چیدمان را تغییر می‌دهد و انتخاب در مرورگر ذخیره می‌شود
 - نمای متمرکز دوربین تصویر همان دوربین را در workspace میانی نشان می‌دهد و به‌صورت خودکار وارد edit نمی‌شود؛ ابزارهای ویرایش، ROI جدید، حذف، ذخیره، لغو و بازگشت مستقل‌اند
-- تنظیمات کامل General/Capture، FFmpeg، LibVLC یا MediaMTX، TCP/UDP، reconnect، buffer و Motion Gate
+- دریافت مستقیم FFmpeg با decoder تک‌thread و نگهداری جدیدترین فریم؛ تنظیمات General/Capture شامل TCP/UDP، reconnect و Motion Gate هستند
 - پروفایل‌های Weak، Balanced و High مطابق فرم ویندوزی، بدون تغییر thresholdهای تشخیص
 - تنظیمات مستقل Plate، Face و Palm برای هر ROI؛ پردازش‌های هر ROI در تب‌های detection، recognition/identification و tracking/recording در دسترس‌اند و کارت‌های detailed با کلیک باز و بسته می‌شوند
 - مدل‌ها در ComboBox از catalog سرویس (`/api/v1/service/models`) بارگذاری می‌شوند؛ هر ComboBox فقط مدل‌های همان قابلیت را نشان می‌دهد (Plate، Face یا Palm) و UI برای model file ورودی متنی ندارد
-- MediaMTX با WHEP خام و کم‌تاخیر در `<video>` نمایش داده می‌شود و ROI، کادر تشخیص، متن و primitiveهای پردازشی از `/api/v1/streams/{cameraId}/overlay` به‌صورت SVG Overlay سمت کلاینت رسم می‌شوند
-- snapshot برای backendهای غیر MediaMTX و endpoint WebRTC کامپوزیت‌شده برای مصرف‌کننده‌های legacy باقی می‌مانند؛ مسیر اصلی MediaMTX از encode مجدد ویدئو استفاده نمی‌کند
+- وضعیت `canWhep: true` قابلیت منبع RTSP فعال را برای API مستقل WHEP مشخص می‌کند؛ این API و endpoint سبک `/api/v1/streams/{cameraId}/overlay` برای مصرف‌کننده‌های ویدئوی خام و SVG Overlay در دسترس‌اند
+- MediaMTX فقط gateway سرویس برای API مرورگر است؛ موتور تصویر را مستقیماً از FFmpeg می‌گیرد. مسیر اصلی فعلی UI، endpoint WebRTC کامپوزیت‌شدهٔ سرویس است
 - صفحهٔ `مدیریت افراد` (`/faces`) به‌جای Face Database: افراد نام‌دار، Unknown و `Unknown Palm #…` را نشان می‌دهد و برای هر فرد سه تب مستقل `چهره`، `پالم` و `پلاک` دارد؛ تصاویر crop‌شدهٔ Face/Palm، افزودن چندتصویری، Import folder، انتقال/حذف sample، rename و Similarity/Merge از همین صفحه انجام می‌شوند
 - حذف گروهی افراد با checkbox کنار نام (سمت راست ردیف) و تأیید کاربر انجام می‌شود؛ endpoint حذف، متعلقات همان افراد شامل FaceSamples، PalmSamples و PersonPlates را نیز با حذف آبشاری پاک می‌کند
 - مشاهدهٔ eventهای پایدار، فریم کامل، ROI/Plate/Face crop، metadata جزئی و payload کامل trigger

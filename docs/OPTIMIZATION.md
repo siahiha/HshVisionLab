@@ -19,7 +19,7 @@ YOLO با ONNX Runtime و CPU اجرا می‌شود. ورودی با letterbox 
 
 برای latency زنده، مهم‌تر از بالا بردن FPS این موارد هستند:
 
-- برای کمترین latency، `BufferCount = 0` و newest-frame semantics را حفظ کنید؛ پردازش فریم‌های صف‌شده ممکن است باعث عقب‌افتادن تصویر زنده شود.
+- دریافت در Windows و سرویس همیشه newest-frame است و فقط آخرین فریم منتظر پردازش را نگه می‌دارد.
 - ROI دقیق و Motion Gate فعال، تعداد inferenceهای بی‌فایده را کم می‌کند.
 - ROIهای یک دوربین به‌صورت موازی اجرا می‌شوند؛ این latency کلی را کم می‌کند اما
   مصرف CPU و حافظه را بالا می‌برد. در هر ROI، `ProcessingMode = Parallel` فقط
@@ -30,25 +30,34 @@ YOLO با ONNX Runtime و CPU اجرا می‌شود. ورودی با letterbox 
 - `InputSize` بزرگ‌تر معمولاً دقت و هزینهٔ CPU را با هم افزایش می‌دهد.
 - `Threads` تعداد threadهای داخلی ONNX (`IntraOpNumThreads`) است، نه تعداد دوربین یا worker مستقل. افزایش آن برای هر ROI یک مصرف CPU سنگین ایجاد می‌کند؛ ابتدا با `1` baseline بگیرید و فقط اگر latency لازم است به `2` یا بیشتر بروید.
 - API و inference در همان سرویس اجرا می‌شوند، اما graph pipeline دیگر قفل طولانی نگه نمی‌دارد؛ status و تنظیمات باید در زمان inference نیز پاسخ‌گو بمانند. صف event نیز bounded است و مقدار `droppedEventCount` در `GET /api/v1/service/status` نشان می‌دهد که ذخیره‌سازی از پردازش عقب افتاده است.
-- اگر با `threads=4` هنوز CPU یا زمان inference بالا می‌رود، راه کنترل فشار کم‌کردن `MaxFps`/`ActiveDetectionFps`، کوچک‌ترکردن ROI و در صورت امکان استفاده از مدل سبک‌تر است؛ افزایش `BufferCount` برای جبران مناسب نیست و latency را بیشتر می‌کند.
+- اگر با `threads=4` هنوز CPU یا زمان inference بالا می‌رود، راه کنترل فشار کم‌کردن `MaxFps`/`ActiveDetectionFps`، کوچک‌ترکردن ROI و در صورت امکان استفاده از مدل سبک‌تر است.
 
-### latency مسیر نمایش
+### تأخیر، CPU و حافظهٔ نمایش Windows
 
-در حالت MediaMTX، کم‌تاخیرترین مسیر نمایش این است:
+دریافت RTSP در Windows و سرویس مستقیماً با FFmpeg، تنظیمات کم‌تأخیر و فقط جدیدترین فریم انجام می‌شود. TCP/UDP و فاصلهٔ reconnect قابل تنظیم‌اند؛ بافر بودجه‌بندی‌شدهٔ تکمیل تشخیص مستقل است. گزینه‌های کم‌تأخیر FFmpeg به کنترل بافر reader کمک می‌کنند، اما تأخیر encoder دوربین و شبکه را حذف نمی‌کنند.
+
+برای کنترل هزینهٔ CPU و RAM، سقف داخلی preview همچنان ۱۵ FPS است و زمان‌بندی به نوبت‌های ثابت متصل است. فریم preview با حفظ نسبت ابعاد و متناسب با فضای نمایش تا حداکثر `1280×720` آماده می‌شود؛ اندازهٔ ورودی inference حفظ می‌شود. Matهای مسیر preview قابل استفادهٔ مجددند و Bitmap به‌جای clone به UI منتقل می‌شود. هر دوربین قابل مشاهده حداکثر یک Bitmap منتظر و یک Bitmap نمایشی دارد؛ تصاویر جایگزین‌شده آزاد می‌شوند. دوربین مخفی یا پنجرهٔ minimizeشده preview تولید نمی‌کند، اما capture و inference ادامه دارند.
+
+در RTSP، تعداد threadهای decoder هنگام بازکردن FFmpeg با `CAP_PROP_N_THREADS=1` محدود می‌شود؛ این تنظیم با `Threads` مربوط به ONNX تفاوت دارد. مقدار پیش‌فرض OpenCV می‌تواند تا ۱۶ thread باشد و frame threading چند فریم را پیش از خروجی نگه دارد. تنظیمات format مانند `nobuffer` این صف decoder را حذف نمی‌کنند. محدودیت صریح thread از ساخت contextها و بافرهای اضافی decoder جلوگیری می‌کند؛ با این حال توان decode تک‌thread برای streamهای سنگین باید بررسی شود. مقدار واقعی thread و FPS/ابعاد منبع پس از بازشدن در diagnostics ثبت می‌شود. منابع: [OpenCV 4.13](https://github.com/opencv/opencv/blob/4.13.0/modules/videoio/src/cap_ffmpeg_impl.hpp)، [قرارداد propertyهای VideoCapture](https://docs.opencv.org/4.13.0/d4/d15/group__videoio__flags__base.html).
+
+تأخیر محلی از دریافت فریم decodeشده تا آماده‌شدن preview و رسم UI با پنجرهٔ ثابت ۱۲۰ نمونه ثبت می‌شود. این عدد زمان encoder، انتقال و decode را شامل نمی‌شود. بررسی کوتاه H.264 با `1280×720` و نرخ اسمی ۲۰ FPS، تعداد واقعی threadهای decoder را از ۱۶ به ۱ و نرخ دریافت پس از اولین فریم را حدود `20.12` به `19.94` FPS نشان داد. کاربر پس از اصلاح، رفع تأخیر نمایش Windows را تأیید کرده است. درصد کاهش CPU/RAM و عدد تأخیر کامل دوربین اندازه‌گیری نشده‌اند؛ برای مقایسهٔ کمی، همان stream را با inference روشن/خاموش و نمای visible/minimized، CPU، working set/private bytes و ساعت داخل صحنه ارزیابی کنید.
+
+### latency مسیر نمایش سرویس/وب
+
+UI وب فعلی tile، focus و ROI زنده را از `CompositeWebRtcStream` و خروجی
+کامپوزیت‌شدهٔ `WebRtcGateway` می‌گیرد. برای sourceهای فعال RTSP، سرویس درگاه
+مستقل پخش خام نیز فراهم می‌کند:
 
 ```text
 MediaMTX WHEP خام → Browser <video>
 Overlay JSON       → SVG (`LiveOverlaySvg`) روی ویدئو
 ```
 
-ویدئو نباید برای اضافه‌کردن کادر تشخیص به `FrameReady`، تبدیل Bitmap یا
-`WebRtcGateway` کامپوزیت‌شده فرستاده شود؛ این کار یک RTSP داخلی، resize، encode
-مجدد و jitter buffer اضافی وارد مسیر می‌کند. موتور تشخیص می‌تواند هم‌زمان از
-local RTSP MediaMTX استفاده کند و فقط state سبک Overlay را به UI بدهد.
-
-در MediaMTX، `BufferCount = 0` اجباری است و local reader با TCP و گزینه‌های
-FFmpeg `nobuffer`، `low_delay` و `max_delay=0` باز می‌شود. در LibVLC، مقدار
-مثبت `BufferCount` صف واقعی می‌سازد و برای کاهش latency باید صفر بماند.
+در این درگاه مستقل، ویدئوی خام از MediaMTX/WHEP می‌آید و کادرها با Overlay سمت کلاینت
+رسم می‌شوند؛ تبدیل Bitmap و encode مجدد برای اضافه‌کردن Drawing انجام نمی‌شود.
+موتور تشخیص هم‌زمان مستقیماً از دوربین با FFmpeg و یک thread decoder می‌خواند
+و state سبک Overlay را به مصرف‌کننده می‌دهد. CameraEditor برای sourceهای غیر
+RTSP از latest snapshot سرویس استفاده می‌کند.
 
  catalog مدل UI نیز فقط packageهای `.hshmodel` قابل استفاده را از `Models/Plate`، `Models/Face`،
 `Models/Palm`، مسیرهای legacy و fallbackهای Debug فهرست می‌کند؛ ComboBox مدل نباید
@@ -84,8 +93,8 @@ YuNet با ورودی مربعی اجرا می‌شود؛ ROI ابتدا به `F
 
 ترتیب پیشنهادی tuning برای near-real-time با CPU متعادل:
 
-1. `BufferCount = 0` و `MotionGateEnabled = true` را حفظ کنید تا صف فریم و
-   inference بی‌دلیل ایجاد نشود.
+1. `MotionGateEnabled = true` را حفظ کنید تا inference بی‌دلیل ایجاد نشود؛
+   دریافت در هر دو میزبان فقط جدیدترین فریم را نگه می‌دارد.
 2. مدل `face_yunet_2023mar_int8` را انتخاب کنید، سپس `ActiveDetectionFps` و
    Face item `MaxFps` را هر دو روی `8` بگذارید؛ در حالت idle مقدار `0` یا `1`
    مناسب است.

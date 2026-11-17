@@ -39,7 +39,8 @@ public sealed partial class MainForm
             entry.Label,
             entry.Confidence,
             entry.OccurredAtUtc.ToLocalTime(),
-            entry.DisplayAxis);
+            entry.DisplayAxis,
+            VehicleColorPresentation.FromPayload(entry.PayloadJson));
     }
 
     private static Bitmap? LoadEventCrop(string? path)
@@ -75,7 +76,8 @@ public sealed partial class MainForm
         string label,
         float confidence,
         DateTime timestamp,
-        string displayAxis)
+        string displayAxis,
+        string? vehicleColorDetails = null)
     {
         const int maxCards = 25;
         int width = Math.Max(250, _flowPlates.ClientSize.Width - 28);
@@ -163,7 +165,8 @@ public sealed partial class MainForm
 
         var detailLabel = new Label
         {
-            Text = $"Confidence: {confidence:P0}\r\n{timestamp:yyyy-MM-dd HH:mm:ss}",
+            Text = $"Confidence: {confidence:P0}\r\n{timestamp:yyyy-MM-dd HH:mm:ss}" +
+                (string.IsNullOrEmpty(vehicleColorDetails) ? string.Empty : $"\r\n{vehicleColorDetails}"),
             Dock = DockStyle.Fill,
             ForeColor = Color.Silver,
             TextAlign = ContentAlignment.MiddleCenter
@@ -248,6 +251,7 @@ public sealed partial class MainForm
             _stInfer.Text = "| infer: -- ms";
             _stRes.Text = "| res: --";
             _stDropped.Text = "| dropped: 0";
+            _stPreview.Text = "| preview: -- ms";
             return;
         }
 
@@ -257,6 +261,21 @@ public sealed partial class MainForm
             ? "| res: --"
             : $"| res: {_active.LastFrameSize.Width}x{_active.LastFrameSize.Height}";
         _stDropped.Text = $"| dropped: {_active.DroppedFrames}";
+        if (_previewBuffers.TryGetValue(_active.Settings.Id, out DesktopPreviewBuffer? buffer) && buffer.Enabled)
+        {
+            PreviewDisplayMetrics metrics = buffer.Metrics;
+            _stPreview.Text = metrics.SampleCount > 0
+                ? $"| preview: {metrics.LastDisplayMs:0.#} ms ({metrics.DisplayFps:0.#} FPS)"
+                : "| preview: -- ms";
+            _stPreview.ToolTipText = UiLocalization.T("Preview delay measures decoded frame receipt to painting; camera and network delay are excluded.") +
+                $"\r\n{UiLocalization.T("Preparation")}: {metrics.LastRenderMs:0.#} ms; " +
+                $"{UiLocalization.T("Average")}: {metrics.MeanDisplayMs:0.#} ms; P95: {metrics.P95DisplayMs:0.#} ms; " +
+                $"{UiLocalization.T("Replaced preview frames")}: {buffer.ReplacedFrames}";
+            if (_active.FrameSource is HshDetectionEngin.Capture.FrameSource { Diagnostics: { } capture })
+                _stPreview.ToolTipText += $"\r\n{UiLocalization.T("Decoder threads")}: {capture.DecoderThreads}; " +
+                    $"{UiLocalization.T("Source FPS")}: {capture.FramesPerSecond:0.##}";
+        }
+        else _stPreview.Text = "| preview: -- ms";
     }
 
     private void OnSaveSettingsClick()

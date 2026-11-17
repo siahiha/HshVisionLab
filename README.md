@@ -38,7 +38,8 @@
 - پنل ROI در نمای چنددوربینه مخفی است و در نمای بزرگ بلافاصله به‌صورت کامل زیر `Detected events` دیده می‌شود؛ پنل آیکنِ تنها یا overlay روی تصویر وجود ندارد. کنترل‌های آن شامل افزودن، ویرایش نقاط، تغییر نام، حذف و پاک‌کردن همهٔ ROIهاست. ویرایش نقاط با یک polygon جدید شروع می‌شود و نقاط ثبت‌شده جایگزین نقاط قبلی همان ROI می‌شوند.
 - نوار وضعیت پایین صفحه وضعیت دوربین، FPS، زمان inference، resolution و dropped frames را نشان می‌دهد.
 - پنجرهٔ `Identity database` از SQLite مرکزی (`identity-database.db`) استفاده می‌کند. جدول `People` مشخصات شخص را نگه می‌دارد و جدول‌های `PersonPlates`، `FaceSamples` و `PalmSamples` اطلاعات modalityها را با `PersonId` مشترک ذخیره می‌کنند. فرم از یک فهرست اشخاص و تب‌های پلاک، نمونه‌های چهره و نمونه‌های کف دست تشکیل شده و افزودن، حذف و rename را مدیریت می‌کند؛ ابزارهای import و similarity چهره نیز در همان فرم در دسترس‌اند.
-- در تنظیمات هر دوربین، `CaptureBackend` بین `FFmpeg`، `LibVLC` و `MediaMTX` قابل انتخاب است. `FFmpeg` پیش‌فرض است؛ `LibVLC` برای RTSPهایی است که در VLC پایدارتر هستند و به VLC 3.x x64 نصب‌شده یا `VLC_HOME` نیاز دارد؛ `MediaMTX` برای path مستقل، WHEP خام و پخش کم‌تاخیر مرورگر استفاده می‌شود.
+- دریافت RTSP در Windows و سرویس یک مسیر مستقیم FFmpeg با تنظیمات کم‌تأخیر و یک thread decoder دارد و همیشه فقط جدیدترین فریم نگه داشته می‌شود. TCP/UDP و فاصلهٔ reconnect قابل تنظیم‌اند. بافر مستقل تکمیل تشخیص Face/Plate ظرفیت و بودجهٔ حافظهٔ جداگانه دارد.
+- preview فقط برای دوربین قابل مشاهده تولید می‌شود و با سقف داخلی ۱۵ FPS، اندازهٔ متناسب با محل نمایش تا `1280×720`، Matهای قابل استفادهٔ مجدد و انتقال مالکیت Bitmap به UI کار می‌کند. دوربین مخفی یا پنجرهٔ minimizeشده preview نمی‌سازد، اما دریافت و inference آن ادامه دارد. کاربر پس از اصلاح decoder، رفع تأخیر تصویر Windows را تأیید کرده است؛ سنجهٔ محلی از دریافت فریم decodeشده تا رسم تصویر و بررسی کوتاه دریافت، جایگزین مقایسهٔ کمی CPU/RAM و تأخیر کامل دوربین نیستند.
 - دکمهٔ `Detection history` یک Event Store محلی برای رخدادهای Plate/Face/Palm باز می‌کند. رخدادها همراه crop، فریم خام، metadata و payload در `desktop-events.json` و `desktop-event-artifacts` ذخیره می‌شوند و جست‌وجو، فیلتر، صفحه‌بندی، preview و حذف همه/بازه‌ای دارند.
 - دکمهٔ `Triggers and workflows` یک تب `Application subscription` نیز دارد. subscription به‌صورت چندپروفایلی در `desktop-automation.json` ذخیره می‌شود و برای هر سناریو محور تشخیص، دوربین/ROI، requiredهای Face/Plate/Palm، includeهای Face/Plate/Palm، unknown policy، artifact و cooldown را تعیین می‌کند. دوربینی که در هیچ profileای scope نشده باشد، همهٔ تشخیص‌های معتبر پردازش‌شده‌اش را ثبت می‌کند؛ این تنظیم فیلترِ پس از query نیست، بلکه تعیین می‌کند چه رکورد نهایی در Event Store ساخته و در پنل/تاریخچهٔ Windows دیده شود. اگر profile مثلاً `Mode=Plate` و `FaceRequired=true` و `PlateRequired=true` داشته باشد، اجزای خام تا `WindowMs` staging می‌شوند و فقط association نهایی `PlateFace` نمایش داده می‌شود.
 - همان فرم، triggerهای محلی و Invocationهای HTTP/SQLite را مدیریت می‌کند. trigger مسیر مستقل ارسال به کلاینت است؛ هنگام match شدن، subscription داخلی bypass می‌شود و payload کامل موجود شامل Plate، Face و Palm، چه شناخته‌شده و چه ناشناس، با رعایت `includeFace`، `includePlate` و `includePalm` ارسال می‌شود. این بخش هیچ اتصال یا وابستگی به `HshDetectionService` ندارد.
@@ -65,12 +66,14 @@
 فعال می‌کند و edit/new دکمه‌های `ذخیره ROI` و `لغو` دارند. ورود به این نما
 خودکار edit نیست.
 
-برای دوربین‌های `MediaMTX`، ویدئو با WHEP خام MediaMTX مستقیماً به مرورگر
-می‌رود و ROI، کادرهای تشخیص، متن و primitiveهای پردازشی از endpoint سبک
-`/api/v1/streams/{cameraId}/overlay` روی آن رسم می‌شوند. بنابراین ویدئوی زنده
-برای نمایش Drawing دوباره از FFmpeg، Bitmap و encoder اختصاصی عبور نمی‌کند.
-در حالت `LibVLC`، capture مستقیماً از `VlcFrameSource`/LibVLC انجام می‌شود و
-خروجی‌های UI غیر MediaMTX از latest snapshot سرویس استفاده می‌کنند.
+UI وب فعلی در tile، نمای متمرکز و ROI زنده از خروجی کامپوزیت‌شدهٔ
+`CompositeWebRtcStream` و endpoint `/webrtc/offer` استفاده می‌کند. در preview
+صفحهٔ ویرایش، source فعال RTSP امکان نمایش زنده دارد و ورودی‌های دیگر latest
+snapshot را می‌گیرند. ورودی موتور تشخیص در همهٔ این نماها مستقیماً به FFmpeg می‌رود.
+
+سرویس برای source فعال RTSP، درگاه مستقل MediaMTX/WHEP و endpoint سبک
+`/api/v1/streams/{cameraId}/overlay` را نیز ارائه می‌کند. این مسیر پخش خام
+on-demand از دریافت مستقیم موتور مستقل است و متعلق به سرویس است.
 
 جزئیات کامل routeها و ظاهر UI در [مشخصات مرجع بازسازی UI وب](docs/WEB-UI-RECONSTRUCTION-SPEC.md)
 و مسیرهای تصویر در [راهنمای وب و streaming](docs/WEB-UI-AND-STREAMING.md)
@@ -96,7 +99,7 @@ dotnet run --project HshVisionLab.csproj --no-build
 - قانون فونت UI: فارسی با `Tahoma` اندازهٔ پیش‌فرض ۸ و انگلیسی با `Segoe UI` و اندازهٔ فعلی نمایش داده می‌شود.
 - [عملیات لایسنس](docs/LICENSING.md): درخواست، صدور، archive و rotation کلید.
 - [وضعیت](docs/STATUS.md): قابلیت‌های کامل‌شده و backlog آگاهانه.
-- [وب و streaming](docs/WEB-UI-AND-STREAMING.md): چیدمان UI، ROI، MediaMTX/WHEP، LibVLC و Overlay.
+- [وب و streaming](docs/WEB-UI-AND-STREAMING.md): چیدمان UI، ROI، دریافت مستقیم RTSP، نمایش کامپوزیت‌شدهٔ وب و درگاه مستقل WHEP/Overlay.
 - [مشخصات بازسازی UI وب](docs/WEB-UI-RECONSTRUCTION-SPEC.md): قرارداد canonical برای routeها، componentها، متن‌ها، اندازه‌ها و رفتار UI.
 - [SDK Engine](HshDetectionEngin/README.md)، [Face module](HshDetectionEngin.Face/README.md)، [Plate module](HshDetectionEngin.Plate/README.md) و [امنیت](HshDetectionEngin/SECURITY.md).
 
@@ -105,3 +108,9 @@ dotnet run --project HshVisionLab.csproj --no-build
 ## جهت حرکت
 
 در تنظیمات دوربین، پردازش یک ROI را انتخاب کنید و «تنظیمات جهت حرکت» را بزنید. جهت برای پلاک، چهره، کف دست و ماژول‌های دارای شناسهٔ پایدار Track محاسبه می‌شود؛ جسم ثابت `Dir: 0` و جهت نامشخص `Dir: ?` دارد. خط ورود/خروج نیز به‌صورت اختیاری برای هر پردازش قابل تنظیم است. جزئیات کد جهت‌ها، آستانهٔ لرزش و خروجی metadata در [تنظیمات](docs/CONFIGURATION.md) آمده است.
+
+## رنگ خودرو
+
+طرح جایگزین مورد توافق: [مدل سبک رنگ روی یک فریم بالای پلاک](docs/VEHICLE-COLOR-SINGLE-FRAME.fa.md). انتخاب دقیق فریم OCR موفق و worker مستقل/به‌روزرسانی همان رکورد هنوز پیاده نشده‌اند؛ توضیح زیر رفتار فعلی مدل آماده روی نخستین مشاهدهٔ Track است.
+
+روش فعلی از مدل آمادهٔ Intel OMZ 0039 روی همان کادر بالای پلاک استفاده می‌کند؛ هفت رنگ، آستانهٔ امتیاز و فاصلهٔ دو خروجی برتر دارد. اولین مشاهدهٔ هر Track یک‌بار تحلیل می‌شود و ثبت پلاک مستقل از پذیرش رنگ است. خوشه‌بندی جایگزین شده است. دقت روی این برش کوچک هنوز نیاز به ارزیابی واقعی دارد. جزئیات در [تنظیمات رنگ](docs/CONFIGURATION.md) آمده است.

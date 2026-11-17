@@ -14,7 +14,7 @@ export interface CameraStatus {
   configuredTaskCount: number;
   activePipelineCount: number;
   processingState: string;
-  captureBackend?: string;
+  canWhep: boolean;
 }
 export interface RoiPoint {
   x: number;
@@ -47,9 +47,7 @@ export interface CameraSettings {
   plateEnabled: boolean;
   faceEnabled: boolean;
   faceRecognitionEnabled: boolean;
-  captureBackend: string;
   transport: string;
-  bufferCount: number;
   reconnectDelaySec: number;
   drawBoxes: boolean;
   detectionOverlayHoldMs: number;

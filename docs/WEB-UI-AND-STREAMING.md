@@ -22,7 +22,7 @@ npx vite --host 0.0.0.0 --port 5081
 برای مشخصات بازسازی route، component، اندازه‌ها و breakpointها، ابتدا
 [مشخصات مرجع بازسازی UI وب](WEB-UI-RECONSTRUCTION-SPEC.md) را بخوانید. این سند
 رفتار نهایی `DetectionManagerUi` و مسیر تصویر بین دوربین، موتور
-تشخیص، MediaMTX/LibVLC و کلاینت مرورگر را ثبت می‌کند. این سند مکمل
+تشخیص، خروجی کامپوزیت‌شدهٔ وب و درگاه مستقل WHEP را ثبت می‌کند. این سند مکمل
 [معماری کلی](ARCHITECTURE.md)، [پیکربندی](CONFIGURATION.md) و
 [MediaMTX/WebRTC](MediaMTX-WebRTC.md) است.
 
@@ -120,140 +120,98 @@ Palm detector فیلد `detectorKind` نیز اعلام می‌شود، اما �
 select از نام منطقی `model.name` می‌آید؛ `relativePath` مسیر نسبی package را برای catalog
 نگه می‌دارد و مسیر absolute به UI داده نمی‌شود.
 
-## ۴. مسیر MediaMTX با latency کم
+## ۴. دریافت مستقیم و نمایش فعلی وب
 
-MediaMTX برای هر دوربین یک path مستقل دارد. دو مصرف‌کنندهٔ path از هم جدا هستند:
-
-```text
-                         ┌─ WHEP خام ───────────────► Browser video
-دوربین RTSP ► MediaMTX ──┤
-                         └─ RTSP داخلی ► Engine/FFmpeg ► Detection
-```
-
-### ۴.۱ مسیر ورودی موتور تشخیص
+دریافت موتور تشخیص در Windows و سرویس یک مسیر دارد:
 
 ```text
-Camera RTSP
-  → MediaMTX path
-  → rtsp://127.0.0.1:8554/camera-{id}
-  → MediaMtxFrameSource
-  → FrameSource/OpenCV FFmpeg
-  → PreviewLoop و ProcessLoop
+Camera RTSP → FrameSource/FFmpeg (1 decoder thread) → newest-frame → CameraRuntime
 ```
 
-برای receiver داخلی MediaMTX، `LowLatencyMode` فعال است و capture با TCP و
-گزینه‌های `nobuffer`، `low_delay` و `max_delay=0` ساخته می‌شود. در حالت
-MediaMTX، `BufferCount=0` اجباری است تا فقط جدیدترین فریم باقی بماند.
+TCP/UDP و فاصلهٔ reconnect قابل تنظیم‌اند. source فقط جدیدترین فریم منتظر
+پردازش را نگه می‌دارد. Webcam و فایل نیز ورودی‌های پشتیبانی‌شده باقی می‌مانند.
 
-### ۴.۲ مسیر خروجی کلاینت
+در UI فعلی، tileهای داشبورد و نمای متمرکز از `CompositeWebRtcStream` و خروجی
+کامپوزیت‌شدهٔ سرویس استفاده می‌کنند. `RoiCanvas` هنگام `live=true` همان component
+را نمایش می‌دهد و در حالت دیگر latest snapshot را می‌گیرد. در preview صفحهٔ
+ویرایش دوربین، `status.canWhep` قابلیت source فعال RTSP را اعلام می‌کند؛
+RTSP در حال اجرا preview زندهٔ کامپوزیت‌شده دارد و sourceهای دیگر snapshot دارند.
+این Boolean اطلاعات قابلیت ورودی است.
 
 ```text
-Camera RTSP
-  → MediaMTX
-  → WHEP/WebRTC خام
-  → <video> در Browser
-  → SVG Overlay جداگانه (`LiveOverlaySvg`)
+CameraRuntime preview + overlay state
+  → LatestFrameStore
+  → WebRtcGateway
+  → CompositeWebRtcStream / Browser <video>
 ```
 
-ویدئوی MediaMTX در UI از مسیر `FrameReady`، تبدیل Bitmap یا
-`WebRtcGateway` کامپوزیت‌شده عبور نمی‌کند. این تصمیم برای جلوگیری از تأخیر
-تجمیعی ناشی از RTSP داخلی، resize، تبدیل Bitmap و encode مجدد VP8 است.
-
-Overlay با endpoint زیر دریافت می‌شود و روی ویدئو رسم می‌گردد:
+رندر، encoding و دریافت مرورگر مستقل از inference زمان‌بندی می‌شوند؛ کندی
+inference فقط تازگی نتیجهٔ تشخیص را تغییر می‌دهد. قرارداد stream فعلی:
 
 ```text
-GET /api/v1/streams/{cameraId}/overlay?ts=<cache-buster>
+POST   /api/v1/streams/{cameraId}/webrtc/offer
+DELETE /api/v1/streams/webrtc/{sessionId}
 ```
 
-پاسخ شامل ابعاد فریم، ROIهای ثابت، `motionRois`، detectionهای فعال، confidence،
-track id، bounds و primitiveهای پردازشی مانند polygon، polyline، point، circle و
-rectangle است. ROI ثابت در SVG با خط نارنجی solid و motion ROI با خط زرد dashed
-رسم می‌شود. TTL دادهٔ پویا در سرویس تعیین می‌شود؛ نمای متمرکز UI poll بعدی را
-هر 180ms و thumbnailهای داشبورد هر 400ms زمان‌بندی می‌کنند. زمان‌بندی بعدی پس
-از پایان پاسخ انجام می‌شود، ویدئو مستقل از refresh حرکت می‌کند و درخواست‌ها
-روی هم انباشته نمی‌شوند.
+داشبورد دوربین‌ها را به صفحه‌های حداکثر ۶تایی تقسیم می‌کند و فقط tileهای صفحهٔ
+جاری mount می‌شوند. unmount شدن component، peer connection و session متعلق
+به همان viewer را می‌بندد. دریافت و inference دوربین startشده در سرویس مستقل
+از صفحهٔ باز UI ادامه دارند.
 
-### ۴.۴ مقیاس‌پذیری دیوار دوربین
+## ۵. درگاه مستقل WHEP مرورگر
 
-داشبورد دوربین‌ها را به صفحه‌های حداکثر ۶تایی تقسیم می‌کند. فقط tileهای صفحهٔ
-فعلی mount می‌شوند؛ در نتیجه تغییر صفحه، WHEP و overlay دوربین‌های صفحهٔ قبلی
-را با unmount کردن متوقف می‌کند و تعداد درخواست‌های فعال تقریباً متناسب با
-۶ دوربین باقی می‌ماند، نه کل فهرست دوربین‌ها. در تب hidden نیز همهٔ snapshot
-timerها و WebRTC sessionهای UI متوقف می‌شوند و پس از visible شدن دوباره فعال
-می‌گردند. این راهکار از نظر API فشار را محدود می‌کند، اما پردازش و capture
-خود سرویس برای همهٔ دوربین‌هایی که کاربر start کرده همچنان ادامه دارد؛ برای
-مقیاس بسیار بزرگ باید در لایهٔ سرویس نیز سیاست active-camera یا اشتراک push
-برای overlay اضافه شود.
+سرویس برای هر source معتبر RTSP و فعال، API پخش خام MediaMTX/WHEP را نیز
+ارائه می‌کند. `MediaMtxRuntime` فقط در سرویس است و path مستقل هر دوربین را
+هنگام درخواست WHEP می‌سازد. درگاه پخش، اتصال on-demand جداگانه‌ای به دوربین
+دارد؛ ورودی موتور تشخیص مستقیماً از دوربین به FFmpeg می‌رود.
 
-مسیر خام WHEP سرویس:
+```text
+Camera RTSP ──┬─ FrameSource/FFmpeg → CameraRuntime → Overlay API
+              └─ Service MediaMTX path → WHEP → Browser
+```
 
 ```text
 POST   /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 PATCH  /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
+GET    /api/v1/streams/{cameraId}/overlay?ts=<cache-buster>
 ```
 
-### ۴.۳ پایش سلامت و بازیابی خودکار پخش
+`viewerId` برای هر viewer مستقل است. endpoint سبک Overlay شامل ابعاد اصلی،
+ROIهای ثابت، `motionRois`، detectionهای فعال، label، confidence، track id،
+bounds و primitiveهای polygon، polyline، point، circle و rectangle است.
+مصرف‌کنندهٔ WHEP خام می‌تواند این state را روی ویدئو رسم کند.
 
-`RawMediaMtxStream` فقط به باز بودن اتصال اکتفا نمی‌کند. هر دو ثانیه وضعیت
-`RTCPeerConnection`، `iceConnectionState` و آمار `inbound-rtp` را بررسی می‌کند.
-اگر اتصال failed/closed شود، فریم‌های ویدئو بیشتر از حدود ۷ ثانیه جلو نروند، یا
-میانگین `jitterBufferDelay` برای چند ثانیه از حدود ۱٫۵ ثانیه بالاتر بماند، فقط
-همان tile با یک `viewerId` جدید WHEP را دوباره برقرار می‌کند. اتصال قبلی بسته و
-DELETE می‌شود و `<video>` دوباره `play()` می‌شود؛ بنابراین برای رفع lag نیازی
-به refresh کل صفحه نیست. خطای موقت دوربین نیز با retry خودکار همان tile دنبال
-می‌شود. فاصلهٔ retryها پلکانی و محدود به ۲، ۵، ۱۰ و حداکثر ۳۰ ثانیه است و پس
-از اتصال سالم دوباره از ۲ ثانیه شروع می‌شود.
+کامپوننت `RawMediaMtxStream` و `LiveOverlaySvg` این مسیر را در سورس نگه
+می‌دارند، اما در tile، نمای متمرکز و preview فعال فعلی mount نمی‌شوند.
+پایش WebRTC و retry داخلی این component، رفتار مسیر خام در صورت استفاده از آن
+است؛ به `CompositeWebRtcStream` نسبت داده نمی‌شود.
 
-## ۵. مسیر LibVLC/VLC
+جزئیات پورت‌ها و lifecycle در [راهنمای MediaMTX/WHEP](MediaMTX-WebRTC.md) است.
 
-در حالت `LibVLC`، MediaMTX در مسیر capture دوربین قرار ندارد:
-
-```text
-Camera RTSP
-  → VlcFrameSource
-  → LibVLC/Live555
-  → BGRA → BGR Mat
-  → latest-frame slot یا buffer محدود
-  → CameraRuntime PreviewLoop/ProcessLoop
-```
-
-خروجی پردازش‌شدهٔ حالت LibVLC در UIهای غیر MediaMTX از Snapshot آخرین فریم
-استفاده می‌کند و مسیر مشترک Overlay/تاریخچه را حفظ می‌کند. `BufferCount=0`
-جدیدترین فریم را نگه می‌دارد؛ مقدار مثبت صف محدود VLC را فعال می‌کند و می‌تواند
-عمداً latency ایجاد کند.
-
-`LibVLC` برای RTSPهایی مناسب است که در VLC پایدارتر از OpenCV/FFmpeg هستند و
-به VLC 3.x x64 نصب‌شده یا متغیر `VLC_HOME` نیاز دارد.
-
-## ۶. Snapshot و خروجی‌های دیگر
+## ۶. Snapshot
 
 ```text
 GET /api/v1/streams/{cameraId}/snapshot
 ```
 
-Snapshot از آخرین فریم نگهداری‌شدهٔ سرویس ساخته می‌شود. در حالتی که سرویس فریم
-کامپوزیت‌شده تولید کند، این endpoint شامل Drawing سرویس خواهد بود؛ اما مسیر
-اصلی MediaMTX در UI برای کمترین latency از WHEP خام به‌همراه Overlay جداگانه
-استفاده می‌کند.
+Snapshot از آخرین فریم کامپوزیت‌شدهٔ سرویس ساخته می‌شود. در `RoiCanvas` حالت
+snapshot از `<img>` با `imageSource` و `refreshTimer` مستقل استفاده می‌کند؛
+`scheduleRefresh` پس از load یا خطا، درخواست بعدی را 250ms بعد زمان‌بندی
+می‌کند و ابعاد تصویر در `onLoad` ثبت می‌شوند. helper جداگانهٔ `SnapshotImage`
+هنگام hidden شدن تب refresh را متوقف می‌کند؛ این رفتار به timer مستقل
+`RoiCanvas` نسبت داده نمی‌شود. مختصات ROI نسبت به ابعاد واقعی تصویر نرمال می‌شوند و قابلیت‌های
+ویرایش ROI از نوع دریافت دوربین مستقل‌اند.
 
-endpoint زیر همچنان برای کلاینت‌های legacy یا مصرف‌کننده‌هایی که یک فریم
-کامپوزیت‌شده می‌خواهند وجود دارد، ولی مسیر پیش‌فرض MediaMTX در UI نیست:
+## ۷. بررسی تأخیر
 
-```text
-POST /api/v1/streams/{cameraId}/webrtc/offer
-DELETE /api/v1/streams/webrtc/{sessionId}
-```
-
-## ۷. راهنمای عیب‌یابی latency
-
-| مشاهده | مسیر محتمل |
+| مشاهده | مسیر بررسی |
 | --- | --- |
-| تصویر خام MediaMTX سریع است ولی Drawing ندارد | WHEP خام فعال است و Overlay endpoint/کلاینت بررسی شود. |
-| تصویر Drawing دارد ولی حدود دو ثانیه عقب است | مسیر قدیمی کامپوزیت‌شده یا `WebRtcGateway` به‌جای WHEP خام استفاده شده است. |
-| latency فقط در LibVLC زیاد است | `BufferCount` مثبت، buffer داخلی LibVLC یا reconnect را بررسی کنید. |
-| شروع اولیه کند است ولی بعد سریع می‌شود | `sourceOnDemand` و زمان اتصال اولیهٔ upstream MediaMTX است، نه latency هر فریم. |
+| تصویر Windows با ROI خاموش هم عقب می‌ماند | تعداد واقعی decoder، FPS و ابعاد منبع در diagnostics؛ RTSP باید یک thread decoder داشته باشد. |
+| تصویر وب Drawing دارد | مسیر فعال کامپوزیت‌شده از `/webrtc/offer` استفاده می‌کند. |
+| مصرف‌کنندهٔ WHEP خام Drawing نمی‌بیند | state endpoint `overlay` و رسم سمت کلاینت بررسی شود. |
+| اولین اتصال WHEP کند است و ادامهٔ پخش سریع است | راه‌اندازی on-demand درگاه و زمان اتصال upstream بررسی شود. |
 
-برای حالت MediaMTX، ابتدا باید در Network مرورگر endpoint WHEP و endpoint
-`overlay` دیده شوند؛ نباید برای نمایش tile یا ROI درخواست
-`/webrtc/offer` ارسال شود.
+سنجهٔ دریافت decodeشده تا آماده‌شدن preview یا رسم UI فقط بخش محلی را
+پوشش می‌دهد. اندازه‌گیری تأخیر کامل دوربین، encoder، شبکه و decode باید با
+همان stream و ساعت داخل صحنه انجام شود.

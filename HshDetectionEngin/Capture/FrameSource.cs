@@ -7,9 +7,8 @@ namespace HshDetectionEngin.Capture;
 
 /// <summary>
 /// Low-latency live frame source.
-/// Keeps the newest frame by default. When a positive buffer capacity is
-/// configured, a bounded queue is used and the oldest frame is discarded when
-/// the queue is full so processing still does not grow without a limit.
+/// Retains only the newest frame so processing cannot accumulate capture delay
+/// or an unbounded collection of decoded images.
 /// </summary>
 public sealed class FrameSource : IFrameSource
 {
@@ -23,7 +22,6 @@ public sealed class FrameSource : IFrameSource
     private static readonly object FfmpegOpenGate = new();
     private readonly AutoResetEvent _frameReady = new(false);
     private Mat? _latestFrame;
-    private readonly Queue<Mat> _bufferedFrames = new();
     private Thread? _thread;
     private CancellationTokenSource? _cts;
     private VideoCapture? _capture;
@@ -36,7 +34,6 @@ public sealed class FrameSource : IFrameSource
     private string _source = "";
     private string _transport = "TCP";
     private int _reconnectDelayMs = 3000;
-    private int _bufferCapacity;
     private long _captured;
     private long _dropped;
     // Incremented whenever Stop invalidates the current reader or a new
@@ -48,6 +45,12 @@ public sealed class FrameSource : IFrameSource
     // native read outliving Stop() and make the reconnect policy predictable.
     private const int FfmpegOpenTimeoutMs = 5000;
     private const int FfmpegReadTimeoutMs = 5000;
+    // OpenCV 4.13 supports CAP_PROP_N_THREADS (70), but Emgu's CapProp enum
+    // does not expose it yet. This property must be supplied when opening;
+    // setting it afterward does not configure the decoder.
+    // https://github.com/opencv/opencv/blob/4.13.0/modules/videoio/include/opencv2/videoio.hpp
+    private const CapProp FfmpegDecoderThreadsProperty = (CapProp)70;
+    private const int LowLatencyDecoderThreads = 1;
 
     // RTSP sources can briefly lose packets or wait for a keyframe. A count of
     // ten retries at 100 ms used to tear down a session after roughly one
@@ -68,28 +71,28 @@ public sealed class FrameSource : IFrameSource
     public event Action<Mat>? FrameAvailable;
 
     public bool IsRunning { get; private set; }
-    /// <summary>Uses FFmpeg's no-buffer/low-delay flags for gateway-fed live streams.</summary>
-    public bool LowLatencyMode { get; set; }
+    /// <summary>Stream metadata reported by the most recently connected RTSP capture.</summary>
+    public CaptureDiagnostics? Diagnostics { get; private set; }
+    public sealed record CaptureDiagnostics(int DecoderThreads, double FramesPerSecond, int Width, int Height);
     public int QueueCount
     {
         get
         {
             lock (_frameGate)
-                return _bufferCapacity > 0 ? _bufferedFrames.Count : (_latestFrame is null ? 0 : 1);
+                return _latestFrame is null ? 0 : 1;
         }
     }
     public long CapturedFrames => Interlocked.Read(ref _captured);
     public long DroppedFrames => Interlocked.Read(ref _dropped);
     public string Source => _source;
 
-    public void Configure(string source, string transport, int bufferCount, int reconnectDelayMs)
+    public void Configure(string source, string transport, int reconnectDelayMs)
     {
         lock (_lifecycleGate)
         {
             if (_disposed) return;
             _source = source.Trim();
             _transport = string.Equals(transport, "UDP", StringComparison.OrdinalIgnoreCase) ? "UDP" : "TCP";
-            _bufferCapacity = Math.Clamp(bufferCount, 0, 100);
             _reconnectDelayMs = Math.Clamp(reconnectDelayMs, 250, 60000);
         }
     }
@@ -101,8 +104,6 @@ public sealed class FrameSource : IFrameSource
         {
             old = _latestFrame;
             _latestFrame = null;
-            while (_bufferedFrames.Count > 0)
-                _bufferedFrames.Dequeue().Dispose();
         }
         old?.Dispose();
     }
@@ -117,15 +118,7 @@ public sealed class FrameSource : IFrameSource
         {
             lock (_frameGate)
             {
-                if (_bufferCapacity > 0)
-                {
-                    if (_bufferedFrames.Count > 0)
-                    {
-                        frame = _bufferedFrames.Dequeue();
-                        return true;
-                    }
-                }
-                else if (_latestFrame is not null)
+                if (_latestFrame is not null)
                 {
                     frame = _latestFrame;
                     _latestFrame = null;
@@ -230,6 +223,7 @@ public sealed class FrameSource : IFrameSource
 
         CancellationTokenSource? staleCts = _cts;
         _cts = new CancellationTokenSource();
+        Diagnostics = null;
         CancellationTokenSource cts = _cts;
         long frameSessionGeneration = Interlocked.Increment(ref _frameSessionGeneration);
         IsRunning = true;
@@ -289,7 +283,17 @@ public sealed class FrameSource : IFrameSource
                     }
                     else if (capture is not null && TryActivateCapture(capture, ct))
                     {
-                        RaiseState(IsRtspSource(_source) ? $"Connected ({activeTransport})" : "Connected");
+                        if (IsRtspSource(_source))
+                        {
+                            CaptureDiagnostics diagnostics = ReadCaptureDiagnostics(capture);
+                            Diagnostics = diagnostics;
+                            RaiseState(FormattableString.Invariant(
+                                $"Connected ({activeTransport}; decoder threads {diagnostics.DecoderThreads}; source {diagnostics.Width}x{diagnostics.Height} @ {diagnostics.FramesPerSecond:0.##} FPS)"));
+                        }
+                        else
+                        {
+                            RaiseState("Connected");
+                        }
                         ReadFrames(capture, ct, activeTransport, frameSessionGeneration);
                     }
                 }
@@ -428,11 +432,7 @@ public sealed class FrameSource : IFrameSource
 
     private VideoCapture CreateFfmpegCapture(string source, string? rtspTransport)
     {
-        var properties = new[]
-        {
-            Tuple.Create(CapProp.OpenTimeoutMsec, FfmpegOpenTimeoutMs),
-            Tuple.Create(CapProp.ReadTimeoutMsec, FfmpegReadTimeoutMs)
-        };
+        Tuple<CapProp, int>[] properties = GetFfmpegOpenProperties(rtspTransport is not null);
 
         // This gate covers every FFmpeg open. A non-RTSP source opened while
         // the environment variable is temporarily set for RTSP must not
@@ -446,10 +446,7 @@ public sealed class FrameSource : IFrameSource
             string? previousOptions = GetNativeEnvironmentVariable(optionsVariable);
             try
             {
-                string options = $"rtsp_transport;{rtspTransport.ToLowerInvariant()}";
-                if (LowLatencyMode)
-                    options += "|fflags;nobuffer|flags;low_delay|max_delay;0";
-                SetNativeEnvironmentVariable(optionsVariable, options);
+                SetNativeEnvironmentVariable(optionsVariable, GetFfmpegCaptureOptions(rtspTransport));
                 return new VideoCapture(source, VideoCapture.API.Ffmpeg, properties);
             }
             finally
@@ -457,6 +454,49 @@ public sealed class FrameSource : IFrameSource
                 SetNativeEnvironmentVariable(optionsVariable, previousOptions);
             }
         }
+    }
+
+    private static Tuple<CapProp, int>[] GetFfmpegOpenProperties(bool liveRtsp)
+    {
+        Tuple<CapProp, int>[] properties =
+        [
+            Tuple.Create(CapProp.OpenTimeoutMsec, FfmpegOpenTimeoutMs),
+            Tuple.Create(CapProp.ReadTimeoutMsec, FfmpegReadTimeoutMs)
+        ];
+        // FFmpeg frame threading retains future frames before returning the
+        // oldest one. Its default can use 16 threads, adding seconds on a
+        // low-FPS camera and retaining additional decoder frame buffers.
+        // File playback does not require the live RTSP decoder policy.
+        return liveRtsp
+            ? [.. properties, Tuple.Create(FfmpegDecoderThreadsProperty, LowLatencyDecoderThreads)]
+            : properties;
+    }
+
+    private static string GetFfmpegCaptureOptions(string rtspTransport)
+    {
+        // These are input-format options. OpenCV does not pass this dictionary
+        // to avcodec_open2, so codec flags such as low_delay do not configure
+        // the decoder here; use the open-only thread property above instead.
+        return $"rtsp_transport;{rtspTransport.ToLowerInvariant()}|fflags;nobuffer|max_delay;0";
+    }
+
+    private static CaptureDiagnostics ReadCaptureDiagnostics(VideoCapture capture)
+    {
+        static double ReadProperty(VideoCapture capture, CapProp property)
+        {
+            try
+            {
+                double value = capture.Get(property);
+                return double.IsFinite(value) && value > 0 ? value : 0;
+            }
+            catch { return 0; }
+        }
+
+        return new CaptureDiagnostics(
+            (int)ReadProperty(capture, FfmpegDecoderThreadsProperty),
+            ReadProperty(capture, CapProp.Fps),
+            (int)ReadProperty(capture, CapProp.FrameWidth),
+            (int)ReadProperty(capture, CapProp.FrameHeight));
     }
 
     [DllImport("msvcrt.dll", EntryPoint = "getenv", CallingConvention = CallingConvention.Cdecl,
@@ -533,18 +573,8 @@ public sealed class FrameSource : IFrameSource
         {
             if (!IsCurrentFrameSession(frameSessionGeneration)) return false;
 
-            if (_bufferCapacity > 0)
-            {
-                _bufferedFrames.Enqueue(frame);
-                if (_bufferedFrames.Count > _bufferCapacity)
-                    old = _bufferedFrames.Dequeue();
-            }
-            else
-            {
-                old = _latestFrame;
-                _latestFrame = frame;
-            }
-
+            old = _latestFrame;
+            _latestFrame = frame;
         }
 
         if (old is not null)
@@ -617,7 +647,7 @@ public sealed class FrameSource : IFrameSource
                 if (!CanAcceptFrames(ct, frameSessionGeneration)) break;
                 if (!PublishFrame(frame, frameSessionGeneration)) break;
                 Interlocked.Increment(ref _captured);
-                frame = null; // ownership transferred to the latest-frame slot or bounded queue
+                frame = null; // ownership transferred to the latest-frame slot
             }
             finally
             {

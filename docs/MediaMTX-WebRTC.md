@@ -1,18 +1,18 @@
 # MediaMTX / WebRTC
 
-با انتخاب `MediaMTX` در تنظیمات هر دوربین، برنامه یک MediaMTX مشترک را فقط
-هنگام اولین اتصال اجرا می‌کند. برای هر دوربین path جداگانه ساخته می‌شود:
+سرویس برای sourceهای معتبر RTSP و فعال، درگاه مستقل MediaMTX/WHEP دارد.
+`MediaMtxRuntime` در پروژهٔ سرویس، یک MediaMTX مشترک را هنگام اولین درخواست
+پخش خام اجرا می‌کند و برای هر دوربین path جداگانه می‌سازد:
 
 ```text
-RTSP camera -> MediaMTX path -> WebRTC/WHEP browser
-                         \-> local RTSP reader -> detection pipeline
+RTSP camera ──┬─ FrameSource/FFmpeg (1 decoder thread) → detection pipeline
+              └─ Service MediaMTX path → WebRTC/WHEP browser
 ```
 
-این دو شاخه عمداً از هم جدا هستند. شاخهٔ WHEP برای نمایش کم‌تاخیر تصویر خام
-در مرورگر است؛ شاخهٔ RTSP داخلی فقط ورودی موتور تشخیص و state مربوط به
-Overlay را تأمین می‌کند. رابط وب، Drawing را با یک لایهٔ جداگانه روی ویدئوی
-خام رسم می‌کند و برای نمایش MediaMTX از مسیر `FrameReady`، تبدیل Bitmap یا
-`WebRtcGateway` کامپوزیت‌شده استفاده نمی‌کند:
+شاخهٔ WHEP تصویر خام را به مصرف‌کنندهٔ مرورگر می‌دهد و موتور تشخیص هم‌زمان
+مستقیماً با FFmpeg، یک thread decoder و نگه‌داری جدیدترین فریم از دوربین
+می‌خواند. مصرف‌کنندهٔ WHEP می‌تواند Drawing را با یک لایهٔ جداگانه روی ویدئوی
+خام رسم کند:
 
 ```text
 MediaMTX WHEP خام ───────────────► <video> مرورگر
@@ -24,10 +24,14 @@ GET /api/v1/streams/{id}/overlay ────┘  SVG overlay (`LiveOverlaySvg`)
 (`motionRois`)، bounds و مشخصات detectionها و primitiveهای پردازشی است. `rois`
 با خط پیوسته و نام ROI و `motionRois` با همان هندسهٔ scale‌شده و خط‌چین رسم
 می‌شوند تا با previewهای قبلی یکسان باشند. detectionهای پویا پس از حدود 2.5
-ثانیه منقضی می‌شوند. به این ترتیب inference یا render کند، latency خود ویدئو
-را افزایش نمی‌دهد.
+ثانیه منقضی می‌شوند. ویدئوی WHEP خام برای Drawing دوباره encode نمی‌شود.
 
-مسیر WebRTC هیچ HLS segment یا transcoding ندارد. مرورگر از endpoint سرویس
+رابط وب فعلی در tile، نمای متمرکز و ROI زنده از `CompositeWebRtcStream` و
+endpoint `/webrtc/offer` استفاده می‌کند. کامپوننت خام `RawMediaMtxStream`
+در سورس موجود است و در این نماهای فعال mount نمی‌شود. این سند قرارداد درگاه
+WHEP مستقل را شرح می‌دهد.
+
+مسیر خام WHEP هیچ HLS segment یا transcoding ندارد. مصرف‌کننده از endpoint سرویس
 استفاده می‌کند:
 
 ```text
@@ -42,7 +46,7 @@ DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 
 ## پورت‌ها و مسیر binary
 
-نسخهٔ Windows در خروجی Debug/Publish هر دو برنامه در مسیر
+binary در خروجی Debug/Publish سرویس در مسیر
 `MediaMTX/mediamtx.exe` کپی می‌شود. در نصب نهایی نیز می‌توان مسیر آن را با
 `HSH_MEDIAMTX_PATH` تغییر داد.
 
@@ -51,7 +55,6 @@ DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}
 ```text
 HSH_MEDIAMTX_PATH
 HSH_MEDIAMTX_CONFIG
-HSH_MEDIAMTX_RTSP_PORT       (پیش‌فرض 8554)
 HSH_MEDIAMTX_WEBRTC_PORT     (پیش‌فرض 9000)
 HSH_MEDIAMTX_WEBRTC_UDP_PORT (پیش‌فرض 8190)
 HSH_MEDIAMTX_API_PORT        (پیش‌فرض 9997)
@@ -63,19 +66,17 @@ HSH_MEDIAMTX_ADDITIONAL_HOSTS (با comma یا semicolon)
 اگر فقط روی همان سیستم تست می‌شود، `127.0.0.1` و `localhost` به‌صورت پیش‌فرض
 اضافه می‌شوند.
 
-`sourceOnDemand` فعال است؛ بنابراین قطع آخرین local reader یا viewer باعث قطع
-اتصال upstream بعد از timeout کوتاه می‌شود. صف دریافت داخلی نیز در حالت
-`BufferCount = 0` فقط آخرین فریم را نگه می‌دارد.
+`sourceOnDemand` فعال است؛ قطع آخرین viewer باعث قطع اتصال upstream درگاه
+پس از timeout کوتاه می‌شود. تمام viewerهای WHEP یک دوربین از یک اتصال
+upstream درگاه استفاده می‌کنند. اتصال upstream پخش WHEP با TCP برقرار می‌شود؛
+تنظیم TCP/UDP دوربین مربوط به دریافت مستقیم FFmpeg موتور تشخیص است.
+پیکربندی تولیدشدهٔ درگاه listener RTSP را غیرفعال می‌کند و فقط Control API و
+WebRTC را فعال نگه می‌دارد. فایل config سفارشی همچنان قابل استفاده است.
+`sourceOnDemandStartTimeout` و `sourceOnDemandCloseAfter` زمان شروع/بستن
+upstream را کنترل می‌کنند.
 
-در ورودی داخلی MediaMTX، `MediaMtxFrameSource` مسیر local RTSP را با TCP و
-حالت کم‌تاخیر FFmpeg (`nobuffer`، `low_delay` و `max_delay=0`) باز می‌کند و
-برای این backend مقدار buffer را صفر نگه می‌دارد. `sourceOnDemandStartTimeout`
-و `sourceOnDemandCloseAfter` فقط روی شروع/بستن upstream اثر دارند و نباید به‌عنوان
-تأخیر ثابت هر فریم تفسیر شوند.
-
-برای تشخیص latency، اگر مرورگر در حالت MediaMTX به
-`/api/v1/streams/{id}/webrtc/offer` وصل شود، مسیر legacy کامپوزیت‌شده فعال شده
-است. مسیر درست رابط فعلی، WHEP زیر است:
+مصرف‌کنندهٔ پخش خام از endpointهای زیر استفاده می‌کند؛ endpoint
+`/api/v1/streams/{id}/webrtc/offer` خروجی کامپوزیت‌شدهٔ فعال UI فعلی را می‌دهد:
 
 ```text
 POST/PATCH/DELETE /api/v1/streams/{cameraId}/webrtc/whep/{viewerId}

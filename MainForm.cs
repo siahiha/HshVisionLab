@@ -24,9 +24,6 @@ public sealed partial class MainForm : Form
     private readonly DesktopEventStore _eventStore;
     private readonly DesktopAutomationEngine _automation;
     private readonly Dictionary<string, CameraRuntime> _cameras = new();
-    private readonly Dictionary<string, Bitmap> _latestFrames = new();
-    private readonly HashSet<string> _pendingFrameUpdates = new();
-    private readonly object _frameGate = new();
     private readonly object _plateGate = new();
     private readonly Dictionary<string, Dictionary<string, DateTime>> _recentPlates = new();
     private bool _updatingCameraGrid;
@@ -98,8 +95,6 @@ public sealed partial class MainForm : Form
         _cameraGrid.SelectionChanged += CameraGrid_SelectionChanged;
         _cameraGrid.CellContentClick += CameraGrid_CellContentClick;
         _cameraGrid.CellDoubleClick += CameraGrid_CellDoubleClick;
-        _picView.MouseClick += PicView_MouseClick;
-        _picView.Paint += PicView_Paint;
     }
 
     private void LoadCameras()
@@ -133,13 +128,13 @@ public sealed partial class MainForm : Form
 
     private void StartUiTimer()
     {
-        var timer = new System.Windows.Forms.Timer { Interval = 500 };
-        timer.Tick += (_, _) =>
+        _uiTimer = new System.Windows.Forms.Timer { Interval = 500 };
+        _uiTimer.Tick += (_, _) =>
         {
             UpdateCameraGrid();
             UpdateStatsUi();
         };
-        timer.Start();
+        _uiTimer.Start();
     }
 
     private void AddRuntime(CameraSettings settings)
@@ -160,6 +155,8 @@ public sealed partial class MainForm : Form
             processingRegistry: _processingCatalog,
             license: _license,
             enableTrackingCompletion: true);
+        runtime.ConfigurePreview(Size.Empty, enabled: false);
+        _previewBuffers[settings.Id] = new DesktopPreviewBuffer();
         runtime.FrameReady += Runtime_FrameReady;
         runtime.PlateDetected += Runtime_PlateDetected;
         runtime.AnalysisDetected += Runtime_AnalysisDetected;
@@ -174,68 +171,6 @@ public sealed partial class MainForm : Form
         catalog.Register(faceModule.CreateRegistration());
         catalog.Register(palmModule.CreateRegistration());
         return catalog;
-    }
-
-    private void Runtime_FrameReady(CameraRuntime camera, Bitmap frame)
-    {
-        bool scheduleUpdate;
-        lock (_frameGate)
-        {
-            if (_latestFrames.TryGetValue(camera.Settings.Id, out Bitmap? old))
-            {
-                old.Dispose();
-            }
-
-            _latestFrames[camera.Settings.Id] = new Bitmap(frame);
-            scheduleUpdate = _pendingFrameUpdates.Add(camera.Settings.Id);
-        }
-
-        // Coalesce UI work: one queued callback consumes the newest frame.
-        // This prevents BeginInvoke backlog when detection or painting is busy.
-        if (scheduleUpdate)
-        {
-            SafeInvoke(() => ApplyLatestFrame(camera));
-        }
-
-        frame.Dispose();
-    }
-
-    private void ApplyLatestFrame(CameraRuntime camera)
-    {
-        Bitmap? next;
-        lock (_frameGate)
-        {
-            _pendingFrameUpdates.Remove(camera.Settings.Id);
-            next = _latestFrames.TryGetValue(camera.Settings.Id, out Bitmap? latest)
-                ? new Bitmap(latest)
-                : null;
-        }
-
-        if (next is null || IsDisposed)
-        {
-            next?.Dispose();
-            return;
-        }
-
-        if (_cameraTilePictures.TryGetValue(camera.Settings.Id, out PictureBox? tilePicture))
-        {
-            Bitmap? oldTile = tilePicture.Image as Bitmap;
-            tilePicture.Image = next;
-            oldTile?.Dispose();
-
-            if (_active == camera && _isCameraMaximized && !_picView.IsDisposed)
-            {
-                Bitmap? oldView = _picView.Image as Bitmap;
-                _picView.Image = new Bitmap(next);
-                oldView?.Dispose();
-                _lastFrameSize = camera.LastFrameSize;
-                _picView.Invalidate();
-            }
-        }
-        else
-        {
-            next.Dispose();
-        }
     }
 
     private void Runtime_PlateDetected(CameraRuntime camera, CameraRuntime.HistoryItem item)
@@ -264,7 +199,8 @@ public sealed partial class MainForm : Form
         if (shouldPersist && showPanel)
         {
             Bitmap panelCrop = new(item.Crop);
-            SafeInvoke(() => AddDetectionCard(panelCrop, null, camera.Settings.Name, item.Text, item.Confidence, item.Timestamp, historyDecision.DisplayAxis));
+            SafeInvoke(() => AddDetectionCard(panelCrop, null, camera.Settings.Name, item.Text, item.Confidence, item.Timestamp, historyDecision.DisplayAxis,
+                VehicleColorPresentation.FromMetadata(item.Detection?.Metadata)));
         }
 
         using Bitmap? rawFrame = item.SourceFrame is not null ? new Bitmap(item.SourceFrame) : camera.TryGetLatestRawFrame(out _);
@@ -721,17 +657,12 @@ public sealed partial class MainForm : Form
             return;
         }
 
-        lock (_frameGate)
-        {
-            Bitmap? old = _picView.Image as Bitmap;
-            _picView.Image = _latestFrames.TryGetValue(camera.Settings.Id, out Bitmap? latest)
-                ? new Bitmap(latest)
-                : null;
-            old?.Dispose();
-            _lastFrameSize = camera.LastFrameSize;
-        }
-
-        _picView.Invalidate();
+        if (_cameraTilePictures.TryGetValue(camera.Settings.Id, out PictureBox? tile))
+            tile.Image = null;
+        _picView.Image = _displayedFrames.TryGetValue(camera.Settings.Id, out DesktopPreviewFrame? latest)
+            ? latest.Image : null;
+        _lastFrameSize = camera.LastFrameSize;
+        RequestPreviewLayout();
     }
 
     private void ShowThumbnails()
@@ -744,9 +675,7 @@ public sealed partial class MainForm : Form
         _lblViewTitle.Text = "Camera thumbnails  •  double-click a camera to maximize";
         _picView.Visible = false;
         _multiViewGrid.Visible = true;
-        Bitmap? old = _picView.Image as Bitmap;
         _picView.Image = null;
-        old?.Dispose();
         RebuildMultiCameraGrid();
     }
 
@@ -756,9 +685,7 @@ public sealed partial class MainForm : Form
         _appSettings.SelectedCameraId = null;
         RefreshRoiList();
         ExitRoiEditMode();
-        Bitmap? old = _picView.Image as Bitmap;
         _picView.Image = null;
-        old?.Dispose();
         _lastFrameSize = Size.Empty;
         ShowThumbnails();
         PushStatus("No camera configured. Click '+ Add camera'.");
@@ -821,6 +748,13 @@ public sealed partial class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        base.OnFormClosing(e);
+        if (e.Cancel) return;
+        _closing = true;
+        _uiTimer?.Stop();
+        _uiTimer?.Dispose();
+        _uiTimer = null;
+        foreach (DesktopPreviewBuffer buffer in _previewBuffers.Values) buffer.Dispose();
         try
         {
             foreach (CameraRuntime camera in _cameras.Values)
@@ -835,22 +769,11 @@ public sealed partial class MainForm : Form
             // Keep shutdown resilient even if a camera is already disconnected.
         }
 
-        lock (_frameGate)
-        {
-            foreach (Bitmap bitmap in _latestFrames.Values)
-            {
-                bitmap.Dispose();
-            }
-
-            _latestFrames.Clear();
-            _pendingFrameUpdates.Clear();
-        }
-
-        if (_picView.Image is Bitmap image)
-        {
-            image.Dispose();
-            _picView.Image = null;
-        }
+        _picView.Image = null;
+        foreach (PictureBox picture in _cameraTilePictures.Values) picture.Image = null;
+        foreach (DesktopPreviewFrame frame in _displayedFrames.Values) frame.Dispose();
+        _displayedFrames.Clear();
+        _previewBuffers.Clear();
 
         foreach (CameraRuntime camera in _cameras.Values)
         {
@@ -861,6 +784,5 @@ public sealed partial class MainForm : Form
 
         _identityDatabase.Dispose();
 
-        base.OnFormClosing(e);
     }
 }

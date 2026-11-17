@@ -1,0 +1,9 @@
+{
+  "source_sha256": {
+    "vehicle-attributes-recognition-barrier-0039.xml": "235ecf95c739b18fd462b6021c19b73e5b27a192af196e6414e530e74de2853b",
+    "vehicle-attributes-recognition-barrier-0039.bin": "2505925341d19d2bd9909a29a7e3c1adcb2195ba120cb45f19dd859af74896da"
+  },
+  "onnx_sha256": "2570819fa6591268b30b1bf2c8ce4b4d74d39bd8a418f23c4f842720db00f0c9",
+  "max_absolute_error_against_torch_ir": 1.3113021850585938e-06,
+  "tested_random_inputs": 5
+}

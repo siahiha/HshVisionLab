@@ -16,6 +16,20 @@ internal static partial class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        Run("RTSP always caps decoder threads", DecoderThreadOpenSettings);
+        Run("FFmpeg format options preserve transport and shared environment", DecoderThreadFormatOptions);
+        Run("Native FFmpeg applies the decoder thread cap", DecoderThreadNativeOpen);
+        if (args.Contains("--capture-tests-only")) return;
+        Run("Retired capture settings are ignored without changing recognition memory budgets", DesktopCaptureMigration);
+        Run("Windows camera editor preserves transport and recognition memory budgets", DesktopCaptureSettings);
+        Run("Preview ownership, bounded memory, coalescing and shutdown", PreviewOwnership);
+        Run("Preview timing statistics remain bounded and count first paint only", PreviewMetrics);
+        Run("Hidden preview skips rendering and resumes at viewport size", PreviewRuntimeDemand);
+        Run("A slow preview consumer receives the latest pending frame", PreviewLatestFrame);
+        Run("Preview reuses bounded native buffers and releases them when hidden", RuntimePreviewReuse);
+        Run("Service preview defaults and unsubscribed capture remain compatible", RuntimePreviewServiceDefaults);
+        Run("Preview rendering cannot mutate the source used by detection", RuntimePreviewSourceIsolation);
+        Run("Retained preview bitmaps survive native buffer reuse and shutdown", RuntimePreviewRetainedBitmap);
         Run("Independent capacity, replacement, fairness, snapshot and completion cache", CapacityAndCache);
         Run("Generation invalidates in-flight results", Generation);
         Run("Expired queued and in-flight samples never publish", Expiry);
@@ -28,6 +42,15 @@ internal static partial class Program
         Run("Shared motion directions, stationary zero, jitter, gaps and crossing lines", MotionDirections);
         Run("Motion settings persist and clone independently", MotionPersistence);
         Run("Motion metadata passes through sequential/parallel tasks and completion", MotionIntegration);
+        Run("Pretrained vehicle color model, input contract, thresholds and real inference", VehicleColorGeometry);
+        Run("Single-frame vehicle color, no retry, cache and reset", VehicleColorTracking);
+        Run("Raw body samples survive ROI masks, pipeline transforms and completion", VehicleColorIntegration);
+        Run("Vehicle color settings and saved event details round-trip", VehicleColorPersistence);
+        Run("Inline and buffered recognition publishes on the first frame regardless of color or direction", VehicleColorRuntime);
+        Run("Invalid color or motion settings do not disable plate processing", InvalidSupplementSettings);
+        Run("Missing pretrained color model preserves plate output without fallback", MissingColorModel);
+        Run("Moving color guide follows the plate without resampling cached color", MovingColorOverlay);
+        Run("Color crop median filter removes isolated noise without changing the source frame", ColorCropFilter);
         if (args.Contains("--models")) Run("Protected Face and Plate recognizer inference", ModelIntegration);
         Console.WriteLine("All tracked-completion checks passed.");
     }
@@ -225,6 +248,26 @@ internal static partial class Program
         motionBitmap.Save(Path.GetFullPath($"TestResults/motion-settings{suffix}.png"));
         ((Button)motionEditor.AcceptButton!).PerformClick();
         Check(task.MotionDirection.MinimumDisplacementPixels == 6, "Windows motion editor did not persist its settings.");
+        var plateTask = form.Result.Rois[0].Processing.Single(t => t.Kind == ProcessingType.Plate);
+        typeof(CameraSettingsForm).GetMethod("SelectProcessingItem", flags)!.Invoke(form, [plateTask]);
+        form.PerformLayout(); form.DrawToBitmap(bitmap, form.ClientRectangle);
+        bitmap.Save(Path.GetFullPath($"TestResults/vehicle-color-roi{suffix}.png"));
+        using var colorEditor = (Form)typeof(CameraSettingsForm).GetMethod("CreateVehicleColorEditor", flags)!.Invoke(form, [plateTask])!;
+        NumericUpDown ColorNumber(string name) => Descendants(colorEditor).OfType<NumericUpDown>().Single(n => n.Name == name);
+        Check(ColorNumber("Body region height / plate height").Value == 3 && ColorNumber("Body region width / plate width").Value == 1 &&
+            ColorNumber("Gap above plate / plate height").Value == 0, "Default body sampling geometry changed.");
+        ColorNumber("Minimum model color score").Value = .65m;
+        var median = Descendants(colorEditor).OfType<CheckBox>().Single(c => c.Name == "MedianFilterEnabled");
+        Check(median.Checked, "Median filter default was not loaded in Windows settings.");
+        median.Checked = false;
+        colorEditor.Opacity = 0; colorEditor.ShowInTaskbar = false; colorEditor.StartPosition = FormStartPosition.Manual;
+        colorEditor.Location = new Point(-30000, -30000); colorEditor.Show(); Application.DoEvents(); colorEditor.PerformLayout();
+        using var colorBitmap = new Bitmap(colorEditor.Width, colorEditor.Height);
+        colorEditor.DrawToBitmap(colorBitmap, colorEditor.ClientRectangle);
+        colorBitmap.Save(Path.GetFullPath($"TestResults/vehicle-color-settings{suffix}.png"));
+        ((Button)colorEditor.AcceptButton!).PerformClick();
+        Check(Math.Abs(plateTask.VehicleColor.ModelConfidence - .65f) < .001f, "Windows color editor did not save its settings.");
+        Check(!plateTask.VehicleColor.MedianFilterEnabled, "Windows color editor did not save the filter toggle.");
     }
 
     private static IEnumerable<Control> Descendants(Control parent)
@@ -298,7 +341,7 @@ internal static partial class Program
         public long DroppedFrames => 0;
         public string Source => "test";
         public int Dequeued;
-        public void Configure(string source, string transport, int bufferCount, int reconnectDelayMs) { }
+        public void Configure(string source, string transport, int reconnectDelayMs) { }
         public void Start() { IsRunning = true; StateChanged?.Invoke("Connected"); }
         public void Feed(Mat frame) { CapturedFrames++; FrameAvailable?.Invoke(frame); _frames.Enqueue(frame); }
         public bool TryDequeueFrame(out Mat frame, int timeoutMs, CancellationToken cancellationToken)

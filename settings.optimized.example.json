@@ -24,8 +24,6 @@
       "FaceUnknownMatchThreshold": 0.35,
       "FaceEventCooldownSeconds": 60,
       "Transport": "TCP",
-      "CaptureBackend": "FFmpeg",
-      "BufferCount": 0,
       "ReconnectDelaySec": 3,
       "Confidence": 0.35,
       "NmsIoU": 0.45,

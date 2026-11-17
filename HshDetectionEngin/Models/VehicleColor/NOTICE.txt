@@ -1,0 +1,27 @@
+Intel Open Model Zoo vehicle-attributes-recognition-barrier-0039
+Copyright (c) Intel Corporation
+Distributed under the Apache License, Version 2.0; see LICENSE.txt.
+
+Source model and licensing:
+https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/intel/vehicle-attributes-recognition-barrier-0039
+https://docs.openvino.ai/2023.3/omz_models_model_vehicle_attributes_recognition_barrier_0039.html
+
+Original FP32 XML/BIN (2023.0 release):
+https://storage.openvinotoolkit.org/repositories/open_model_zoo/2023.0/models_bin/1/vehicle-attributes-recognition-barrier-0039/FP32/
+
+Modifications in HshVisionLab: IR operators converted to ONNX opset 13,
+then encrypted in the existing .hshmodel application package format.
+Weights were not trained or modified. Conversion script:
+HshDetectionEngin.Tools/ModelTools/convert_vehicle_color.py
+Reconstruction uses the original XML/BIN and Protect-Models.ps1.
+SHA hashes and comparison against a Torch interpreter of the original
+IR are recorded in conversion-report.json. This is numerical validation,
+not evidence of accuracy on above-license-plate image crops.
+
+Input: float32 NCHW [1,3,72,72], BGR pixel values 0..255.
+Preprocessing is in the graph; do not divide by 255 or apply ImageNet normalization.
+Output color: [1,7,1,1], already softmax probabilities in order:
+White, SilverGray (original gray), Yellow, Red, Green, Blue, Black.
+Original model is intended for front-facing vehicle images. Accuracy on
+small body crops is unvalidated. Unsupported colors may be confused with
+supported classes, even at a high score. Low confidence returns Unknown.

@@ -68,6 +68,7 @@ public sealed partial class MainForm
     private ToolStripStatusLabel _stInfer = null!;
     private ToolStripStatusLabel _stRes = null!;
     private ToolStripStatusLabel _stDropped = null!;
+    private ToolStripStatusLabel _stPreview = null!;
 
     private static readonly Color BgDark = Color.FromArgb(24, 26, 32);
     private static readonly Color BgPanel = Color.FromArgb(34, 37, 45);
@@ -96,6 +97,9 @@ public sealed partial class MainForm
         ArrangeDockOrder();
 
         Shown += (_, _) => UpdateCameraGrid();
+        Shown += (_, _) => RequestPreviewLayout();
+        Resize += (_, _) => RequestPreviewLayout();
+        VisibleChanged += (_, _) => RequestPreviewLayout();
         Resize += (_, _) => { if (IsHandleCreated && !IsDisposed) RebuildAllHistoryCards(); };
     }
 
@@ -433,6 +437,12 @@ public sealed partial class MainForm
         };
         _picView.MouseClick += PicView_MouseClick;
         _picView.Paint += PicView_Paint;
+        _picView.Paint += (_, _) =>
+        {
+            if (_maximizedCameraId is not null && _cameras.TryGetValue(_maximizedCameraId, out CameraRuntime? camera))
+                RecordPreviewPaint(camera, _picView);
+        };
+        _picView.SizeChanged += (_, _) => RequestPreviewLayout();
 
         _viewHost.Controls.Add(_multiViewGrid);
         _viewHost.Controls.Add(_picView);
@@ -563,7 +573,13 @@ public sealed partial class MainForm
         _stInfer = new ToolStripStatusLabel { Text = "| infer: -- ms" };
         _stRes = new ToolStripStatusLabel { Text = "| res: --" };
         _stDropped = new ToolStripStatusLabel { Text = "| dropped: 0" };
-        _statusStrip.Items.AddRange([_stState, _stFps, _stInfer, _stRes, _stDropped]);
+        _stPreview = new ToolStripStatusLabel
+        {
+            Text = "| preview: -- ms",
+            ToolTipText = UiLocalization.T("Preview delay measures decoded frame receipt to painting; camera and network delay are excluded.")
+        };
+        _statusStrip.ShowItemToolTips = true;
+        _statusStrip.Items.AddRange([_stState, _stFps, _stInfer, _stRes, _stDropped, _stPreview]);
         Controls.Add(_statusStrip);
     }
 
@@ -640,7 +656,6 @@ public sealed partial class MainForm
         {
             foreach (PictureBox picture in control.Controls.OfType<PictureBox>())
             {
-                picture.Image?.Dispose();
                 picture.Image = null;
             }
 
@@ -664,6 +679,7 @@ public sealed partial class MainForm
                 Font = new Font("Segoe UI", 11F)
             };
             _multiViewGrid.Controls.Add(empty, 0, 0);
+            RequestPreviewLayout();
             return;
         }
 
@@ -767,16 +783,16 @@ public sealed partial class MainForm
             status.Click += click;
             tile.DoubleClick += doubleClick;
             picture.DoubleClick += doubleClick;
+            picture.Paint += (_, _) => RecordPreviewPaint(camera, picture);
+            picture.SizeChanged += (_, _) => RequestPreviewLayout();
             status.DoubleClick += doubleClick;
 
-            lock (_frameGate)
-            {
-                if (_latestFrames.TryGetValue(camera.Settings.Id, out Bitmap? latest))
-                    picture.Image = new Bitmap(latest);
-            }
+            if (!_isCameraMaximized && _displayedFrames.TryGetValue(camera.Settings.Id, out DesktopPreviewFrame? latest))
+                picture.Image = latest.Image;
 
             _multiViewGrid.Controls.Add(tile, index % columns, index / columns);
         }
+        RequestPreviewLayout();
     }
 
     private static Button MakeTileActionButton(string text, Color backColor, string accessibleName)
@@ -808,24 +824,6 @@ public sealed partial class MainForm
             Image = MaterialIconRenderer.Create(icon, Color.White, 16),
             ImageAlign = ContentAlignment.MiddleCenter
         };
-    }
-
-    private void UpdateCameraTile(CameraRuntime camera, Bitmap frame)
-    {
-        if (!_cameraTilePictures.TryGetValue(camera.Settings.Id, out PictureBox? picture)) return;
-        Bitmap copy = new(frame);
-        SafeInvoke(() =>
-        {
-            if (picture.IsDisposed)
-            {
-                copy.Dispose();
-                return;
-            }
-            Bitmap? old = picture.Image as Bitmap;
-            picture.Image = copy;
-            old?.Dispose();
-            UpdateCameraTileLabel(camera);
-        });
     }
 
     private void UpdateCameraTileLabel(CameraRuntime camera)

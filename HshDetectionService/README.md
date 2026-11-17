@@ -10,6 +10,11 @@ dotnet run --project .\HshDetectionService\HshDetectionService.csproj
 
 سرویس فقط API، SignalR، stream و inference را برای `DetectionManagerUi` ارائه می‌کند و UI اصلی را host نمی‌کند. پنل React در پروژهٔ `DetectionManagerUi` جداگانه build/serve می‌شود و با `VITE_HSH_API_BASE_URL` به این سرویس وصل می‌گردد؛ routeهای `/api` و `/hubs` متعلق به سرویس هستند. `HshVisionLab` مشتری این سرویس نیست و باید به‌صورت مستقل با engineهای داخل solution و اتصال مستقیم به دوربین اجرا شود.
 
+دریافت فریم در موتور فقط با FFmpeg مستقیم انجام می‌شود. decoder از یک thread
+استفاده می‌کند و پردازش زنده همیشه جدیدترین فریم را برمی‌دارد؛ صف تاریخچهٔ
+فریم وجود ندارد. در تنظیمات دوربین فقط transport شبکه (TCP/UDP) و زمان
+reconnect قابل تنظیم هستند.
+
 برای build کامل خروجی سرویس:
 
 ```powershell
@@ -95,22 +100,34 @@ GET /api/v1/streams/{cameraId}/snapshot
 
 درخواست offer اختصاصی شامل `{ "type": "offer", "sdp": "..." }` است و پاسخ
 شامل `sessionId` و answer SDP خواهد بود. این مسیر آخرین فریم composited را
-encode می‌کند و برای کلاینت‌های legacy باقی مانده است؛ session با
+encode می‌کند و تصویر زندهٔ فعلی پنل وب و نتایج پردازش را ارائه می‌دهد؛ session با
 `DELETE /api/v1/streams/webrtc/{sessionId}` بسته می‌شود.
 
-برای دوربین‌های `MediaMTX`، مسیر اصلی وب از WHEP خام MediaMTX استفاده می‌کند:
+برای منبع RTSP معتبر و فعال، `canWhep` در وضعیت دوربین `true` است. API مستقل
+WHEP برای این منابع از gateway اختصاصی MediaMTX در خود سرویس استفاده می‌کند:
 
 ```text
-Camera RTSP → MediaMTX path → WHEP → Browser <video>
-                           └→ local RTSP → Engine/Detection
+Camera RTSP → FFmpeg → Engine/Detection
+Camera RTSP → MediaMTX browser gateway → WHEP → Browser <video>
 GET /api/v1/streams/{cameraId}/overlay → Browser SVG overlay (`LiveOverlaySvg`)
 ```
 
 `overlay` فقط دادهٔ سبک ROI، bounds و مشخصات detection/processing overlay را
 برمی‌گرداند؛ ویدئو در این مسیر از `FrameReady`، تبدیل Bitmap یا `WebRtcGateway`
 عبور نمی‌کند. برای جلوگیری از cache شدن وضعیت، کلاینت query timestamp کوتاه
-اضافه می‌کند. Snapshot برای backendهای غیر MediaMTX و مصرف‌کننده‌هایی که آخرین
-فریم کامپوزیت‌شده را می‌خواهند همچنان فعال است.
+اضافه می‌کند. پنل وب فعلی برای نمای زنده از stream کامپوزیت‌شده استفاده می‌کند.
+Snapshot برای webcam، فایل و سایر منابع غیر RTSP در تب پیش‌نمایش تنظیمات و برای
+مصرف‌کننده‌هایی که آخرین فریم کامپوزیت‌شده را می‌خواهند فعال است. gateway فقط
+هنگام وجود بیننده به دوربین متصل می‌شود؛ همهٔ بیننده‌ها همان اتصال اضافی را
+به اشتراک می‌گذارند. دریافت درگاه برای پخش مرورگر با TCP انجام می‌شود؛ تنظیم
+TCP/UDP دوربین برای دریافت مستقل FFmpeg در موتور است.
+
+MediaMTX فقط وابستگی سرویس برای پخش مرورگر است؛ فایل اجرایی آن در خروجی
+سرویس قرار می‌گیرد. تنظیمات مدیریت‌شدهٔ آن listenerهای API و WebRTC را فعال
+می‌کند. متغیرهای محیطی `HSH_MEDIAMTX_PATH`، `HSH_MEDIAMTX_CONFIG`،
+`HSH_MEDIAMTX_API_PORT`، `HSH_MEDIAMTX_WEBRTC_PORT`،
+`HSH_MEDIAMTX_WEBRTC_UDP_PORT` و `HSH_MEDIAMTX_ADDITIONAL_HOSTS` برای استقرار
+gateway در دسترس‌اند.
 
 ## نصب Windows Service
 

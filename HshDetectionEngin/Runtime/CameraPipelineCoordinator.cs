@@ -26,6 +26,9 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         IReadOnlyDictionary<string, object?> DetectionMetadata)
     {
         public TrackMotionAnalyzer Motion { get; } = new();
+        public PlateVehicleColorAnalyzer VehicleColor { get; } = new();
+        public bool MotionFailed { get; set; }
+        public bool ColorFailed { get; set; }
     }
 
     private sealed record RoiPipelineGroup(
@@ -39,7 +42,8 @@ internal sealed class CameraPipelineCoordinator : IDisposable
     private sealed record PipelineRunOutput(
         IReadOnlyList<AnalysisDetection> Detections,
         IReadOnlyList<ProcessingOverlay> Overlays,
-        bool OverlaysUpdated);
+        bool OverlaysUpdated,
+        long ColorGeneration);
 
     private sealed class RoiExecutionResult
     {
@@ -174,7 +178,9 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                 try
                 {
                     item.MotionDirection ??= new();
-                    item.MotionDirection.Validate();
+                    bool motionValid = ValidateSupplement(item.MotionDirection.Validate, "Motion direction");
+                    item.VehicleColor ??= new();
+                    bool colorValid = ValidateSupplement(item.VehicleColor.Validate, "Vehicle color");
                     if (!string.IsNullOrWhiteSpace(module.AvailabilityMessage))
                     {
                         _reportStatus(module.AvailabilityMessage, true);
@@ -188,9 +194,14 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                     };
                     IReadOnlyDictionary<string, object?> metadata = module.GetDetectionMetadata(item);
                     IEnumerable<IProcessingPipeline> created = module.CreatePipelines(context, item);
-                    pipelines.AddRange(created
-                        .Where(pipeline => pipeline is not null)
-                        .Select(pipeline => new PipelineBinding(pipeline, item, metadata)));
+                    foreach (var pipeline in created.Where(pipeline => pipeline is not null))
+                    {
+                        var binding = new PipelineBinding(pipeline, item, metadata)
+                            { MotionFailed = !motionValid, ColorFailed = !colorValid };
+                        if (colorValid && item.VehicleColor.Enabled && item.Kind == ProcessingType.Plate)
+                            binding.ColorFailed = !ValidateSupplement(binding.VehicleColor.Prepare, "Vehicle color model");
+                        pipelines.Add(binding);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -223,7 +234,8 @@ internal sealed class CameraPipelineCoordinator : IDisposable
     public void ResetMotion()
     {
         lock (_gate)
-            foreach (var binding in _graph.Pipelines.Values.SelectMany(g => g.Pipelines)) binding.Motion.Reset();
+            foreach (var binding in _graph.Pipelines.Values.SelectMany(g => g.Pipelines))
+            { binding.Motion.Reset(); binding.VehicleColor.Reset(); }
     }
 
     public PipelineExecutionResult Run(Mat frame, IReadOnlyList<CameraRuntime.RuntimeRoi> rois)
@@ -311,15 +323,15 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             group.ProcessingMode,
             RoiProcessingModes.Parallel,
             StringComparison.OrdinalIgnoreCase)
-            ? RunRoiParallel(input, roi, group.Pipelines, frame.Size)
-            : RunRoiSequential(input, roi, group.Pipelines, frame.Size);
+            ? RunRoiParallel(input, roi, group.Pipelines, frame)
+            : RunRoiSequential(input, roi, group.Pipelines, frame);
     }
 
     private RoiExecutionResult RunRoiSequential(
         Mat input,
         CameraRuntime.RuntimeRoi roi,
         IReadOnlyList<PipelineBinding> pipelines,
-        Size originalFrameSize)
+        Mat sourceFrame)
     {
         var execution = new RoiExecutionResult();
         Mat current = input.Clone();
@@ -331,6 +343,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                 try
                 {
                     long motionGeneration = binding.Motion.Generation;
+                    long colorGeneration = binding.VehicleColor.Generation;
                     using var result = binding.Pipeline.Process(new ProcessingContext
                     {
                         Image = current,
@@ -338,15 +351,15 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                         CameraName = _settings.Name,
                         Timestamp = DateTime.UtcNow,
                         SourceBounds = roi.Bounds,
-                        OriginalFrameSize = originalFrameSize,
+                        OriginalFrameSize = sourceFrame.Size,
                         PreviousDetections = previous.ToArray()
                     });
 
-                    previous = binding.Motion.Apply(result.Detections, binding.Settings.MotionDirection, current.Size, DateTime.UtcNow, motionGeneration)
+                    previous = ApplyMotion(binding, result.Detections, current.Size, motionGeneration)
                         .Select(detection => AttachProcessingSettings(detection, binding, roi.Id, roi.Name))
                         .ToList();
-                    AddPipelineOutput(execution, previous, MotionOverlays(result.Overlays, previous, binding.Settings.MotionDirection, current.Size),
-                        result.OverlaysUpdated || binding.Settings.MotionDirection.Enabled, roi);
+                    AddPipelineOutput(execution, previous, binding.MotionFailed ? result.Overlays : MotionOverlays(result.Overlays, previous, binding.Settings.MotionDirection, current.Size),
+                        result.OverlaysUpdated || binding.Settings.MotionDirection.Enabled, roi, binding, sourceFrame, colorGeneration);
 
                     Mat? next = result.TakeNextImage();
                     if (next is not null)
@@ -379,7 +392,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         Mat input,
         CameraRuntime.RuntimeRoi roi,
         IReadOnlyList<PipelineBinding> pipelines,
-        Size originalFrameSize)
+        Mat sourceFrame)
     {
         var outputs = new PipelineRunOutput?[pipelines.Count];
         Parallel.For(0, pipelines.Count, index =>
@@ -389,6 +402,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             {
                 using Mat pipelineInput = input.Clone();
                 long motionGeneration = binding.Motion.Generation;
+                long colorGeneration = binding.VehicleColor.Generation;
                 using var result = binding.Pipeline.Process(new ProcessingContext
                 {
                     Image = pipelineInput,
@@ -396,16 +410,16 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                     CameraName = _settings.Name,
                     Timestamp = DateTime.UtcNow,
                     SourceBounds = roi.Bounds,
-                    OriginalFrameSize = originalFrameSize,
+                    OriginalFrameSize = sourceFrame.Size,
                     PreviousDetections = []
                 });
 
-                var detections = binding.Motion.Apply(result.Detections, binding.Settings.MotionDirection, pipelineInput.Size, DateTime.UtcNow, motionGeneration)
+                var detections = ApplyMotion(binding, result.Detections, pipelineInput.Size, motionGeneration)
                         .Select(detection => AttachProcessingSettings(detection, binding, roi.Id, roi.Name))
                         .ToArray();
                 outputs[index] = new PipelineRunOutput(detections,
-                    MotionOverlays(result.Overlays, detections, binding.Settings.MotionDirection, pipelineInput.Size),
-                    result.OverlaysUpdated || binding.Settings.MotionDirection.Enabled);
+                    binding.MotionFailed ? result.Overlays : MotionOverlays(result.Overlays, detections, binding.Settings.MotionDirection, pipelineInput.Size),
+                    result.OverlaysUpdated || binding.Settings.MotionDirection.Enabled, colorGeneration);
             }
             catch (Exception ex)
             {
@@ -416,10 +430,11 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         });
 
         var execution = new RoiExecutionResult();
-        foreach (PipelineRunOutput? output in outputs)
+        for (int i = 0; i < outputs.Length; i++)
         {
+            PipelineRunOutput? output = outputs[i];
             if (output is null) continue;
-            AddPipelineOutput(execution, output.Detections, output.Overlays, output.OverlaysUpdated, roi);
+            AddPipelineOutput(execution, output.Detections, output.Overlays, output.OverlaysUpdated, roi, pipelines[i], sourceFrame, output.ColorGeneration);
         }
 
         return execution;
@@ -452,26 +467,77 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         return overlays;
     }
 
-    private static void AddPipelineOutput(
+    private bool ValidateSupplement(Action validate, string name)
+    {
+        try { validate(); return true; }
+        catch (Exception ex) { _reportStatus($"{name} disabled: {ex.Message}", true); return false; }
+    }
+
+    private IReadOnlyList<AnalysisDetection> ApplyMotion(PipelineBinding binding, IReadOnlyList<AnalysisDetection> detections, Size size, long generation)
+    {
+        if (binding.MotionFailed) return detections;
+        try { return binding.Motion.Apply(detections, binding.Settings.MotionDirection, size, DateTime.UtcNow, generation); }
+        catch (Exception ex)
+        {
+            binding.MotionFailed = true;
+            _reportStatus($"Motion direction disabled for '{binding.Settings.Name}': {ex.Message}", true);
+            return detections;
+        }
+    }
+
+    private AnalysisDetection ApplyVehicleColor(PipelineBinding binding, Mat frame, AnalysisDetection detection, long generation)
+    {
+        AnalysisDetection Unavailable()
+        {
+            if (!binding.Settings.VehicleColor.Enabled || detection.Kind != AnalysisKind.Plate) return detection;
+            var metadata = detection.Metadata is null ? new Dictionary<string, object?>() : new Dictionary<string, object?>(detection.Metadata);
+            metadata["VehicleColor"] = "Unknown";
+            metadata["VehicleColorStatus"] = "Failed";
+            metadata["VehicleColorReason"] = "ColorUnavailable";
+            return detection with { Metadata = metadata };
+        }
+        if (binding.ColorFailed) return Unavailable();
+        try { return binding.VehicleColor.Apply(frame, detection, binding.Settings.VehicleColor, DateTime.UtcNow, generation); }
+        catch (Exception ex)
+        {
+            binding.ColorFailed = true;
+            _reportStatus($"Vehicle color disabled for '{binding.Settings.Name}': {ex.Message}", true);
+            return Unavailable();
+        }
+    }
+
+    private void AddPipelineOutput(
         RoiExecutionResult target,
         IReadOnlyList<AnalysisDetection> detections,
         IReadOnlyList<ProcessingOverlay> overlays,
         bool overlaysUpdated,
-        CameraRuntime.RuntimeRoi roi)
+        CameraRuntime.RuntimeRoi roi,
+        PipelineBinding binding,
+        Mat sourceFrame,
+        long colorGeneration)
     {
         target.Detections.AddRange(detections.Select(detection =>
         {
             var metadata = detection.Metadata is null ? new Dictionary<string, object?>() : new Dictionary<string, object?>(detection.Metadata);
             if (metadata.TryGetValue("TrackingLandmarks", out object? value) && value is PointF[] points)
                 metadata["TrackingLandmarks"] = points.Select(p => new PointF(p.X + roi.Bounds.X, p.Y + roi.Bounds.Y)).ToArray();
-            return detection with
+            if (metadata.GetValueOrDefault("PlateDetectorBounds") is Rectangle plate)
+                metadata["PlateDetectorBounds"] = new Rectangle(plate.X + roi.Bounds.X, plate.Y + roi.Bounds.Y, plate.Width, plate.Height);
+            var mapped = detection with
             {
                 Bounds = new Rectangle(detection.Bounds.X + roi.Bounds.X, detection.Bounds.Y + roi.Bounds.Y, detection.Bounds.Width, detection.Bounds.Height),
                 Metadata = metadata
             };
+            var colored = ApplyVehicleColor(binding, sourceFrame, mapped, colorGeneration);
+            if (colored.Metadata?.GetValueOrDefault("VehicleColorDrawRegion") is true &&
+                colored.Metadata.GetValueOrDefault("VehicleColorDisplayBounds") is Dictionary<string, object?> box &&
+                box["width"] is int width && box["height"] is int height && width > 0 && height > 0)
+                target.Overlays.Add(new ProcessingOverlay { Kind = ProcessingOverlayKind.Rectangle, Color = Color.DeepSkyBlue,
+                    Bounds = new Rectangle((int)box["x"]!, (int)box["y"]!, width, height) });
+            return colored;
         }));
         target.Overlays.AddRange(overlays.Select(overlay => MapOverlayToFrame(overlay, roi.Bounds)));
-        target.OverlaysUpdated |= overlaysUpdated || overlays.Count > 0;
+        target.OverlaysUpdated |= overlaysUpdated || overlays.Count > 0 || binding.Settings.VehicleColor.Enabled;
     }
 
     private static AnalysisDetection AttachProcessingSettings(
@@ -540,6 +606,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
             foreach (PipelineBinding binding in pipelines)
             {
                 try { binding.Pipeline.Dispose(); } catch { }
+                try { binding.VehicleColor.Dispose(); } catch { }
             }
         }
     }

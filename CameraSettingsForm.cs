@@ -12,7 +12,6 @@ public sealed partial class CameraSettingsForm : Form
     private readonly TextBox _txtName = new();
     private readonly TextBox _txtSource = new();
     private readonly ComboBox _cmbTransport = new();
-    private readonly ComboBox _cmbCaptureBackend = new();
     private readonly ComboBox _cmbModel = new();
     private readonly ComboBox _cmbInputSize = new();
     private readonly ComboBox _cmbPreprocessing = new();
@@ -48,7 +47,6 @@ public sealed partial class CameraSettingsForm : Form
     private readonly NumericUpDown _numPalmTrackMisses = new();
     private readonly NumericUpDown _numPalmMaxFps = new();
     private readonly NumericUpDown _numPalmThreads = new();
-    private readonly NumericUpDown _numPalmBuffer = new();
     private readonly NumericUpDown _numPalmEventCooldown = new();
     private readonly NumericUpDown _numPlateEventCooldown = new();
     private readonly CheckBox _chkPlateEnabled = new();
@@ -82,8 +80,6 @@ public sealed partial class CameraSettingsForm : Form
     private readonly NumericUpDown _numConfidence = new();
     private readonly NumericUpDown _numIou = new();
     private readonly NumericUpDown _numMaxFps = new();
-    private readonly NumericUpDown _numPlateBuffer = new();
-    private readonly NumericUpDown _numFaceBuffer = new();
     private readonly NumericUpDown _numThreads = new();
     private readonly NumericUpDown _numGenericMaxFps = new();
     private readonly NumericUpDown _numGenericThreads = new();
@@ -109,7 +105,6 @@ public sealed partial class CameraSettingsForm : Form
         string? PlateModelFile,
         string? FaceModelFile,
         int Threads,
-        int BufferCount,
         int PlateInputSize,
         int FaceInputSize,
         int ProcessingFps,
@@ -220,7 +215,6 @@ public sealed partial class CameraSettingsForm : Form
         AddRow(general, "RTSP / camera source", _txtSource);
         AddRow(general, "Enable camera", ConfigureCheckBox(_chkCameraEnabled));
         AddRow(general, "RTSP transport", ConfigureCombo(_cmbTransport, "TCP", "UDP"));
-        AddRow(general, "RTSP receiver", ConfigureCombo(_cmbCaptureBackend, "FFmpeg", "LibVLC", "MediaMTX"));
         AddRow(general, "Reconnect delay (seconds)", ConfigureNumber(_numReconnect, 1, 120, 1, 0));
         AddSection(general, "Performance");
         AddRow(general, "Draw boxes and labels", ConfigureCheckBox(_chkDrawBoxes));
@@ -281,6 +275,7 @@ public sealed partial class CameraSettingsForm : Form
         var routingTable = CreateSettingsTable();
         BuildCompletionRouting(routingTable);
         BuildMotionSettings(routingTable);
+        BuildVehicleColorSettings(routingTable);
         var properties = CreateSettingsTable();
         AddSection(properties, "ROI properties");
         _txtSelectedRoiName.Width = 220;
@@ -303,7 +298,6 @@ public sealed partial class CameraSettingsForm : Form
         AddRow(properties, "NMS IoU", ConfigureNumber(_numIou, 0.05m, 0.90m, 0.05m, 2));
         AddRow(properties, "Max processing FPS", ConfigureNumber(_numMaxFps, 1, 30, 1, 0));
         AddRow(properties, "Threads (ONNX Runtime IntraOp)", ConfigureNumber(_numThreads, 1, Math.Max(1, Math.Min(16, Environment.ProcessorCount)), 1, 0));
-        AddRow(properties, "Buffer count (0 = newest only)", ConfigureNumber(_numPlateBuffer, 0, 10, 1, 0));
         AddRow(properties, "Track max misses", ConfigureNumber(_numTrackMisses, 1, 30, 1, 0));
         AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numPlateEventCooldown, 0, 3600, 1, 0));
         AddSection(properties, "PLATE RECOGNITION  •  OCR processes each plate crop");
@@ -329,7 +323,6 @@ public sealed partial class CameraSettingsForm : Form
         AddSection(properties, "FACE TRACKING AND RECORDING");
         AddRow(properties, "Max processing FPS", ConfigureNumber(_numFaceMaxFps, 1, 30, 1, 0));
         AddRow(properties, "Threads (ONNX Runtime IntraOp)", ConfigureNumber(_numFaceThreads, 1, Math.Max(1, Math.Min(16, Environment.ProcessorCount)), 1, 0));
-        AddRow(properties, "Buffer count (0 = newest only)", ConfigureNumber(_numFaceBuffer, 0, 10, 1, 0));
         AddRow(properties, "History record confidence", ConfigureNumber(_numFaceRecordConfidence, 0.05m, 0.99m, 0.01m, 2));
         AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numFaceEventCooldown, 0, 3600, 1, 0));
         AddRow(properties, "Tracking IoU", ConfigureNumber(_numFaceIou, 0.05m, 0.90m, 0.05m, 2));
@@ -353,7 +346,6 @@ public sealed partial class CameraSettingsForm : Form
         AddSection(properties, "PALM TRACKING AND RECORDING");
         AddRow(properties, "Max processing FPS", ConfigureNumber(_numPalmMaxFps, 1, 30, 1, 0));
         AddRow(properties, "Threads (ONNX Runtime IntraOp)", ConfigureNumber(_numPalmThreads, 1, Math.Max(1, Math.Min(16, Environment.ProcessorCount)), 1, 0));
-        AddRow(properties, "Buffer count (0 = newest only)", ConfigureNumber(_numPalmBuffer, 0, 10, 1, 0));
         AddRow(properties, "History record confidence", ConfigureNumber(_numPalmRecordConfidence, 0.05m, 0.99m, 0.01m, 2));
         AddRow(properties, "History event cooldown (seconds)", ConfigureNumber(_numPalmEventCooldown, 0, 3600, 1, 0));
         AddRow(properties, "Tracking IoU", ConfigureNumber(_numPalmIou, 0.05m, 0.90m, 0.05m, 2));
@@ -387,21 +379,6 @@ public sealed partial class CameraSettingsForm : Form
         {
             if (_numThreads.Value != _numPalmThreads.Value) _numThreads.Value = _numPalmThreads.Value;
             if (_numFaceThreads.Value != _numPalmThreads.Value) _numFaceThreads.Value = _numPalmThreads.Value;
-        };
-        _numPlateBuffer.ValueChanged += (_, _) =>
-        {
-            if (_numFaceBuffer.Value != _numPlateBuffer.Value) _numFaceBuffer.Value = _numPlateBuffer.Value;
-            if (_numPalmBuffer.Value != _numPlateBuffer.Value) _numPalmBuffer.Value = _numPlateBuffer.Value;
-        };
-        _numFaceBuffer.ValueChanged += (_, _) =>
-        {
-            if (_numPlateBuffer.Value != _numFaceBuffer.Value) _numPlateBuffer.Value = _numFaceBuffer.Value;
-            if (_numPalmBuffer.Value != _numFaceBuffer.Value) _numPalmBuffer.Value = _numFaceBuffer.Value;
-        };
-        _numPalmBuffer.ValueChanged += (_, _) =>
-        {
-            if (_numPlateBuffer.Value != _numPalmBuffer.Value) _numPlateBuffer.Value = _numPalmBuffer.Value;
-            if (_numFaceBuffer.Value != _numPalmBuffer.Value) _numFaceBuffer.Value = _numPalmBuffer.Value;
         };
         propertyScroll.Controls.Add(properties);
         processingSplit.Panel2.Controls.Add(propertyScroll);
@@ -694,6 +671,7 @@ public sealed partial class CameraSettingsForm : Form
         bool genericProcessing = _selectedProcessing is not null && !plate && !face && !palm;
         bool roi = _selectedProcessing is null && _selectedTarget?.Roi is not null;
         _motionSettingsTable.Visible = _selectedProcessing is not null;
+        foreach (Control control in _vehicleColorControls) control.Visible = plate;
         foreach (Control control in _completionRoutingControls) control.Visible = plate || face;
         foreach ((Control label, Control value) in _plateProperties) { label.Visible = plate; value.Visible = plate; }
         foreach ((Control label, Control value) in _faceProperties) { label.Visible = face; value.Visible = face; }
@@ -996,11 +974,6 @@ public sealed partial class CameraSettingsForm : Form
         _txtSource.Text = _settings.SourceUrl;
         _chkCameraEnabled.Checked = _settings.Enabled;
         _cmbTransport.SelectedItem = _settings.Transport;
-        _cmbCaptureBackend.SelectedItem = string.Equals(_settings.CaptureBackend, "LibVLC", StringComparison.OrdinalIgnoreCase)
-            ? "LibVLC"
-            : string.Equals(_settings.CaptureBackend, "MediaMTX", StringComparison.OrdinalIgnoreCase)
-                ? "MediaMTX"
-                : "FFmpeg";
         LoadModels();
         LoadCharacterModels();
         LoadFaceModels();
@@ -1008,9 +981,6 @@ public sealed partial class CameraSettingsForm : Form
         LoadPalmModels();
         LoadPalmRecognitionModels();
         _settings.EnsureProcessingDefaults();
-        _numPlateBuffer.Value = Math.Clamp(_settings.BufferCount, 0, 10);
-        _numFaceBuffer.Value = Math.Clamp(_settings.BufferCount, 0, 10);
-        _numPalmBuffer.Value = Math.Clamp(_settings.BufferCount, 0, 10);
         _numThreads.Value = Math.Clamp(_settings.Threads, 1, (int)_numThreads.Maximum);
         RefreshProcessingList();
         _numReconnect.Value = Math.Clamp(_settings.ReconnectDelaySec, 1, 120);
@@ -1048,13 +1018,15 @@ public sealed partial class CameraSettingsForm : Form
         _settings.SourceUrl = _txtSource.Text.Trim();
         _settings.Enabled = _chkCameraEnabled.Checked;
         _settings.Transport = _cmbTransport.SelectedItem?.ToString() ?? "TCP";
-        _settings.CaptureBackend = _cmbCaptureBackend.SelectedItem?.ToString() ?? "FFmpeg";
         if (!CommitSelectedProperties() || !ValidateRoiNames()) return;
         try
         {
             TrackingCompletionSettings.Validate(_settings);
             foreach (var task in _settings.Rois.SelectMany(r => r.Processing))
+            {
                 (task.MotionDirection ??= new()).Validate();
+                (task.VehicleColor ??= new()).Validate();
+            }
             ValidateCompletionModels();
         }
         catch (Exception ex)
@@ -1063,7 +1035,6 @@ public sealed partial class CameraSettingsForm : Form
             return;
         }
         UpdateProcessingFlags();
-        _settings.BufferCount = (int)_numPlateBuffer.Value;
         _settings.ReconnectDelaySec = (int)_numReconnect.Value;
         _settings.DrawBoxes = _chkDrawBoxes.Checked;
         _settings.DetectionOverlayHoldMs = (int)_numDetectionOverlayHold.Value;
@@ -1099,19 +1070,19 @@ public sealed partial class CameraSettingsForm : Form
 
     private static PerformancePreset CreateWeakPreset() => new(
         "Weak / virtual 6-core", "best_416_int8_qdq_experimental.onnx", "face_yunet_2023mar_int8.onnx",
-        Threads: 1, BufferCount: 0,
+        Threads: 1,
         PlateInputSize: 416, FaceInputSize: 640, ProcessingFps: 5,
         ActiveFps: 5, IdleFps: 2, MotionFps: 5, FaceTopK: 2000, MotionHoldMs: 1500);
 
     private static PerformancePreset CreateBalancedPreset() => new(
-        "Balanced / normal system", "best.onnx", "face_yunet_2023mar.onnx", Threads: 2, BufferCount: 0,
+        "Balanced / normal system", "best.onnx", "face_yunet_2023mar.onnx", Threads: 2,
         PlateInputSize: 416, FaceInputSize: 640, ProcessingFps: 8,
         ActiveFps: 8, IdleFps: 0, MotionFps: 8, FaceTopK: 5000, MotionHoldMs: 1200);
 
     private PerformancePreset CreateHighPerformancePreset()
     {
         return new(
-            "High performance / realtime", "best.onnx", "face_yunet_2023mar.onnx", Threads: 4, BufferCount: 0,
+            "High performance / realtime", "best.onnx", "face_yunet_2023mar.onnx", Threads: 4,
             PlateInputSize: 640, FaceInputSize: 640, ProcessingFps: 15,
             ActiveFps: 15, IdleFps: 5, MotionFps: 15, FaceTopK: 10000, MotionHoldMs: 700);
     }
@@ -1120,7 +1091,6 @@ public sealed partial class CameraSettingsForm : Form
     {
         if (!CommitSelectedProperties()) return;
 
-        _settings.BufferCount = preset.BufferCount;
         _settings.Threads = preset.Threads;
         _settings.ModelFile = SelectAvailableModel(_cmbModel, preset.PlateModelFile, _settings.ModelFile);
         _settings.FaceModelFile = SelectAvailableModel(_cmbFaceModel, preset.FaceModelFile, _settings.FaceModelFile);
@@ -1134,8 +1104,6 @@ public sealed partial class CameraSettingsForm : Form
         _settings.ActiveDetectionFps = preset.ActiveFps;
         _settings.IdleDetectionFps = preset.IdleFps;
 
-        SetNumber(_numPlateBuffer, preset.BufferCount);
-        SetNumber(_numFaceBuffer, preset.BufferCount);
         SetNumber(_numThreads, preset.Threads);
         SetNumber(_numFaceThreads, preset.Threads);
         SetNumber(_numMotionFps, preset.MotionFps);

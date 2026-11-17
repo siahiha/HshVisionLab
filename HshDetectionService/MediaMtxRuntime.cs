@@ -5,18 +5,15 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 
-namespace HshDetectionEngin.Capture;
+namespace HshDetectionService;
 
 /// <summary>
-/// Runtime options for the single MediaMTX instance shared by all cameras in
-/// one application. Environment variables are deliberately used here so the
-/// WinForms app and the Windows service can use the same deployment settings.
+/// Runtime options for the service's on-demand RTSP-to-WHEP browser gateway.
 /// </summary>
 public sealed class MediaMtxOptions
 {
     public string ExecutablePath { get; init; } = string.Empty;
     public string ConfigPath { get; init; } = string.Empty;
-    public int RtspPort { get; init; } = 8554;
     // 8889 is commonly excluded by Windows/Hyper-V port reservations on
     // deployed machines. Keep the managed defaults on a less restricted pair.
     public int WebRtcPort { get; init; } = 9000;
@@ -33,7 +30,6 @@ public sealed class MediaMtxOptions
         {
             ExecutablePath = Environment.GetEnvironmentVariable("HSH_MEDIAMTX_PATH") ?? string.Empty,
             ConfigPath = Environment.GetEnvironmentVariable("HSH_MEDIAMTX_CONFIG") ?? string.Empty,
-            RtspPort = ReadPort("HSH_MEDIAMTX_RTSP_PORT", 8554),
             WebRtcPort = ReadPort("HSH_MEDIAMTX_WEBRTC_PORT", 9000),
             WebRtcUdpPort = ReadPort("HSH_MEDIAMTX_WEBRTC_UDP_PORT", 8190),
             ControlPort = ReadPort("HSH_MEDIAMTX_API_PORT", 9997),
@@ -49,8 +45,8 @@ public sealed class MediaMtxOptions
 
 /// <summary>
 /// Owns or reuses one MediaMTX process and manages camera paths through its
-/// Control API. The upstream camera is never opened by this class more than
-/// once per path; additional viewers consume the same MediaMTX path.
+/// Control API for browser playback. Detection receives frames directly from
+/// FFmpeg; all browser viewers share one additional on-demand camera connection.
 /// </summary>
 public sealed class MediaMtxRuntime : IDisposable
 {
@@ -61,7 +57,6 @@ public sealed class MediaMtxRuntime : IDisposable
     private Process? _process;
     private bool _ownsProcess;
     private bool _started;
-    private bool _rtspReady;
     private bool _disposed;
 
     public MediaMtxRuntime(MediaMtxOptions options)
@@ -84,19 +79,21 @@ public sealed class MediaMtxRuntime : IDisposable
         return builder.ToString().TrimEnd('-');
     }
 
-    public Uri GetLocalRtspUri(string cameraId)
-        => new($"rtsp://127.0.0.1:{_options.RtspPort}/{GetPathName(cameraId)}");
-
     public Uri GetWhepUri(string cameraId)
         => new(_options.WebRtcBaseUri, $"{GetPathName(cameraId)}/whep");
 
-    public async Task EnsurePathAsync(string cameraId, string sourceUrl, string transport, CancellationToken cancellationToken = default, bool requireRtsp = true)
+    public static bool SupportsSource(string sourceUrl)
+        => Uri.TryCreate(sourceUrl, UriKind.Absolute, out Uri? source)
+           && string.Equals(source.Scheme, "rtsp", StringComparison.OrdinalIgnoreCase)
+           && !string.IsNullOrWhiteSpace(source.Host);
+
+    public async Task EnsurePathAsync(string cameraId, string sourceUrl, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(sourceUrl)) throw new ArgumentException("RTSP source URL is required.", nameof(sourceUrl));
-        if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out Uri? source) || !string.Equals(source.Scheme, "rtsp", StringComparison.OrdinalIgnoreCase))
+        if (!SupportsSource(sourceUrl))
             throw new ArgumentException("MediaMTX requires a valid RTSP source URL.", nameof(sourceUrl));
 
-        await EnsureStartedAsync(cancellationToken, requireRtsp).ConfigureAwait(false);
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
         string path = GetPathName(cameraId);
         var payload = new Dictionary<string, object?>
         {
@@ -104,8 +101,8 @@ public sealed class MediaMtxRuntime : IDisposable
             ["sourceOnDemand"] = true,
             ["sourceOnDemandStartTimeout"] = "10s",
             ["sourceOnDemandCloseAfter"] = "2s",
-            // TCP is intentional: it avoids UDP packet loss and is the lowest
-            // jitter option for the RTSP hop into the gateway.
+            // Preserve reliable browser delivery over TCP; camera.Transport
+            // configures the engine's independent FFmpeg reader.
             ["rtspTransport"] = "tcp"
         };
 
@@ -132,30 +129,25 @@ public sealed class MediaMtxRuntime : IDisposable
             throw new InvalidOperationException($"MediaMTX path '{path}' could not be removed ({(int)response.StatusCode}).");
     }
 
-    public async Task EnsureStartedAsync(CancellationToken cancellationToken = default, bool requireRtsp = true)
+    public async Task EnsureStartedAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        if (IsRunning && (!requireRtsp || _rtspReady)) return;
+        if (IsRunning) return;
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ThrowIfDisposed();
-            if (IsRunning && (!requireRtsp || _rtspReady)) return;
+            if (IsRunning) return;
 
-            // A service and the desktop application may be running together.
-            // Reuse an already listening MediaMTX instead of starting a second
-            // process on the same ports.
+            // Reuse an already listening gateway on the configured ports.
             MediaMtxProbe existing = await ProbeControlApiAsync(cancellationToken).ConfigureAwait(false);
             if (existing.Responding)
             {
-                if (requireRtsp && !existing.RtspReady)
-                    existing = await TryEnableRtspAsync(existing, cancellationToken).ConfigureAwait(false) ?? existing;
-                if (!existing.WebRtcReady || (requireRtsp && !existing.RtspReady))
+                if (!existing.WebRtcReady)
                     throw new InvalidOperationException(existing.ErrorMessage);
                 _started = true;
                 _ownsProcess = false;
-                _rtspReady = existing.RtspReady;
                 return;
             }
 
@@ -187,10 +179,9 @@ public sealed class MediaMtxRuntime : IDisposable
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 MediaMtxProbe started = await ProbeControlApiAsync(cancellationToken).ConfigureAwait(false);
-                if (started.Responding && started.WebRtcReady && (!requireRtsp || started.RtspReady))
+                if (started.Responding && started.WebRtcReady)
                 {
                     _started = true;
-                    _rtspReady = started.RtspReady;
                     return;
                 }
 
@@ -210,7 +201,6 @@ public sealed class MediaMtxRuntime : IDisposable
         try
         {
             _started = false;
-            _rtspReady = false;
             if (_ownsProcess && _process is { HasExited: false })
             {
                 try { _process.Kill(entireProcessTree: true); } catch { }
@@ -239,47 +229,21 @@ public sealed class MediaMtxRuntime : IDisposable
         {
             using HttpResponseMessage response = await _httpClient.GetAsync("v3/config/global/get", cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return new MediaMtxProbe(false, false, false, 0, 0, $"MediaMTX Control API returned {(int)response.StatusCode} for its global configuration.");
+                return new MediaMtxProbe(false, false, $"MediaMTX Control API returned {(int)response.StatusCode} for its global configuration.");
 
             using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
             JsonElement root = document.RootElement;
             bool webRtc = root.TryGetProperty("webrtc", out JsonElement webRtcElement) && webRtcElement.ValueKind == JsonValueKind.True;
-            bool rtsp = root.TryGetProperty("rtsp", out JsonElement rtspElement) && rtspElement.ValueKind == JsonValueKind.True;
-            int rtspPort = ReadAddressPort(root, "rtspAddress");
             int webRtcPort = ReadAddressPort(root, "webrtcAddress");
-            bool rtspReady = rtsp && (rtspPort <= 0 || rtspPort == _options.RtspPort) &&
-                             await IsTcpListenerReadyAsync(rtspPort <= 0 ? _options.RtspPort : rtspPort, cancellationToken).ConfigureAwait(false);
             bool webRtcReady = webRtc && (webRtcPort <= 0 || webRtcPort == _options.WebRtcPort) &&
                                await IsTcpListenerReadyAsync(webRtcPort <= 0 ? _options.WebRtcPort : webRtcPort, cancellationToken).ConfigureAwait(false);
             string message = $"MediaMTX is already running, but its listeners do not match HshVision. " +
-                             $"RTSP enabled={rtsp}, RTSP port={rtspPort}, expected={_options.RtspPort}; " +
                              $"WebRTC enabled={webRtc}, WebRTC port={webRtcPort}, expected={_options.WebRtcPort}. " +
                              "Stop the old mediamtx.exe or configure the HshVision MediaMTX ports to match it.";
-            return new MediaMtxProbe(true, rtspReady, webRtcReady, rtspPort, webRtcPort, message);
+            return new MediaMtxProbe(true, webRtcReady, message);
         }
-        catch (HttpRequestException) { return new MediaMtxProbe(false, false, false, 0, 0, string.Empty); }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { return new MediaMtxProbe(false, false, false, 0, 0, string.Empty); }
-    }
-
-    private async Task<MediaMtxProbe?> TryEnableRtspAsync(MediaMtxProbe probe, CancellationToken cancellationToken)
-    {
-        // An older instance may have API/WebRTC enabled but RTSP disabled.
-        // MediaMTX supports hot-patching global configuration, so repair this
-        // compatible case instead of silently sending the local reader into a
-        // reconnect loop. Never change a server that uses another RTSP port.
-        if (probe.RtspReady || probe.RtspPort != _options.RtspPort) return probe;
-        var payload = new { rtsp = true, rtspTransports = new[] { "tcp" } };
-        using HttpResponseMessage response = await SendJsonAsync(HttpMethod.Patch, "v3/config/global/patch", payload, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) return probe;
-
-        DateTime deadline = DateTime.UtcNow.AddSeconds(3);
-        while (DateTime.UtcNow < deadline)
-        {
-            MediaMtxProbe updated = await ProbeControlApiAsync(cancellationToken).ConfigureAwait(false);
-            if (updated.Responding && updated.RtspReady) return updated;
-            await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-        }
-        return probe;
+        catch (HttpRequestException) { return new MediaMtxProbe(false, false, string.Empty); }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { return new MediaMtxProbe(false, false, string.Empty); }
     }
 
     private static int ReadAddressPort(JsonElement root, string propertyName)
@@ -305,7 +269,7 @@ public sealed class MediaMtxRuntime : IDisposable
         catch (TimeoutException) { return false; }
     }
 
-    private sealed record MediaMtxProbe(bool Responding, bool RtspReady, bool WebRtcReady, int RtspPort, int WebRtcPort, string ErrorMessage);
+    private sealed record MediaMtxProbe(bool Responding, bool WebRtcReady, string ErrorMessage);
 
     private async Task<HttpResponseMessage> SendJsonAsync(HttpMethod method, string path, object payload, CancellationToken cancellationToken)
     {
@@ -359,13 +323,10 @@ public sealed class MediaMtxRuntime : IDisposable
             "logLevel: warn",
             "api: true",
             $"apiAddress: :{_options.ControlPort}",
-            "rtsp: true",
-            "rtspTransports: [tcp]",
-            $"rtspAddress: :{_options.RtspPort}",
+            "rtsp: false",
             "rtmp: false",
-            // HshVision uses RTSP and WebRTC/WHEP. Disable MediaMTX's
-            // optional HLS listener so deployments do not depend on its
-            // default port (8888), which may be reserved by Windows.
+            // Only the browser gateway is needed; camera ingest is an
+            // upstream RTSP client and does not require an RTSP listener.
             "hls: false",
             "srt: false",
             "moq: false",

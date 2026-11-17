@@ -45,6 +45,10 @@ HshDetectionService
 6. از رویدادهای runtime یک adapter سرویس ایجاد می‌کند.
 7. دوربین‌ها را مستقل start می‌کند.
 
+دریافت RTSP در تمام runtimeها مستقیماً با `FrameSource` و FFmpeg کم‌تأخیر، یک
+thread decoder و نگه‌داری فقط جدیدترین فریم انجام می‌شود. TCP/UDP و فاصلهٔ
+reconnect تنظیمات اتصال‌اند؛ Webcam و فایل نیز پشتیبانی می‌شوند.
+
 در طراحی اولیه، `CameraSettings.Rois[].Processing[]` همان فهرست Detection Taskها است. شناسهٔ `CameraProcessingSettings.Id` شناسهٔ task خواهد بود و metadata فعلی `ProcessingItemId` و `RoiName` به event منتقل می‌شود.
 
 ## 3. جریان اصلی داده
@@ -135,6 +139,11 @@ Windows فقط قراردادی و تجربهٔ کاربری است، نه اش�
 ### `StreamSessionManager`
 
 برای هر دوربین یک منبع تصویری composited دارد و چند کلاینت WebRTC را به همان منبع متصل می‌کند. اتصال یک کلاینت نباید باعث اجرای inference یا compositing جداگانه برای کلاینت‌های دیگر شود.
+
+UI فعلی tile، focus و ROI زنده را از همین خروجی offer/answer کامپوزیت‌شده
+می‌گیرد. درگاه مستقل `MediaMtxRuntime` در خود پروژهٔ سرویس، برای درخواست‌های
+WHEP روی source فعال RTSP یک path on-demand می‌سازد. این اتصال مرورگر از
+اتصال مستقیم FFmpeg موتور تشخیص مستقل است.
 
 ## 5. رفتار تغییر تنظیمات
 

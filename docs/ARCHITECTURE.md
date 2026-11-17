@@ -48,7 +48,7 @@ HshDetectionEngin.LicenseIssuer     ابزار امن مدیریت مشتری و
 ## جریان پردازش
 
 ```text
-Source → frame slot/queue
+Windows/Service source → newest-frame slot (FFmpeg مستقیم برای RTSP)
        ├─ latest-preview slot → preview worker مستقل (≤15 FPS)
        └─ CameraRuntime processing worker
             → Motion روی Motion ROIها → وضعیت Active/Idle مشترک دوربین → کنترل نرخ inference
@@ -69,39 +69,37 @@ Motion Gate پیش از اجرای Coordinator ارزیابی می‌شود. آ�
 رکوردهای نهایی Event Store می‌خوانند، در حالی که `TriggerDefinition` مسیر مستقل
 ارسال payload کامل موجود به کلاینت است و `includePalm` را نیز حفظ می‌کند.
 
-هر دوربین یک `CameraRuntime`، یک `FrameSource`، setting، state Motion و یک `CameraPipelineCoordinator` مستقل دارد. reader مربوط به RTSP فقط فریم را دریافت و در slotهای latest-frame می‌گذارد؛ ساخت preview، resize، overlay و callback UI در worker مستقل و با سقف ۱۵ FPS انجام می‌شود تا کندی UI یا تبدیل `Bitmap` خواندن stream را متوقف نکند. `FrameSource` با `BufferCount = 0` فقط جدیدترین فریم را نگه می‌دارد؛ مقدار مثبت صف محدود همان دوربین را فعال می‌کند.
+هر دوربین یک `CameraRuntime`، یک `FrameSource`، setting، state Motion و یک `CameraPipelineCoordinator` مستقل دارد. دریافت RTSP در Windows و سرویس مستقیماً با FFmpeg، تنظیمات کم‌تأخیر و یک thread decoder انجام می‌شود؛ TCP/UDP و فاصلهٔ reconnect قابل انتخاب‌اند. source همیشه فقط جدیدترین فریم را نگه می‌دارد و با ورود فریم تازه، فریم منتظر قبلی آزاد می‌شود. بافر نمونه‌های تکمیل تشخیص Face/Plate ظرفیت و بودجهٔ حافظهٔ مستقلی دارد.
 
-## مسیرهای capture و کلاینت وب
+reader پس از decode فریم را دریافت می‌کند؛ ساخت preview، overlay و callback UI از inference مستقل است. preview فقط هنگام قابل مشاهده بودن تصویر فعال است، با سقف ۱۵ FPS و زمان‌بندی متصل به نوبت‌های ثابت. resize با حفظ نسبت ابعاد، متناسب با فضای نمایش و حداکثر `1280×720` انجام می‌شود؛ Matهای preview دوباره استفاده می‌شوند. مخفی‌شدن دوربین یا minimize پنجره ساخت preview را متوقف می‌کند و capture/inference ادامه می‌یابد.
 
-Backend دوربین با `CaptureBackend` انتخاب می‌شود:
+UI مالکیت Bitmap آماده را بدون clone می‌گیرد؛ هر دوربین قابل مشاهده فقط یک تصویر منتظر و یک تصویر نمایشی دارد و تصویر کنارگذاشته‌شده dispose می‌شود. آمار دریافت فریم decodeشده تا آماده‌شدن preview و رسم UI با timestamp یکنواخت و حداکثر ۱۲۰ نمونه نگه‌داری می‌شود. کاربر رفع تأخیر تصویر Windows را پس از اصلاح decoder تأیید کرده است؛ این سنجهٔ محلی و بررسی کوتاه دریافت، مقایسهٔ کمی CPU/RAM یا تأخیر کامل دوربین را پوشش نمی‌دهند.
+
+## دریافت سرویس و پخش مرورگر
+
+سرویس برای تشخیص، همان مسیر مستقیم FFmpeg را به کار می‌برد. UI وب فعلی tile، focus و ROI زنده را از خروجی کامپوزیت‌شدهٔ `WebRtcGateway` و `CompositeWebRtcStream` می‌گیرد. برای sourceهای RTSP، درگاه مستقل WHEP نیز در خود سرویس در دسترس است:
 
 ```text
-FFmpeg:  Camera RTSP → FrameSource/FFmpeg → CameraRuntime
-LibVLC:  Camera RTSP → VlcFrameSource/LibVLC → CameraRuntime
-MediaMTX:
-         Camera RTSP → MediaMTX path → local RTSP/FrameSource → CameraRuntime
-                              └──────→ WHEP خام → Browser
+Camera RTSP ──┬─ FrameSource/FFmpeg (1 decoder thread) → CameraRuntime
+              └─ Service MediaMTX path → WHEP خام → Browser
 ```
 
-در حالت MediaMTX، مسیر WHEP خام برای ویدئوی مرورگر از مسیر ورودی موتور تشخیص
-جداست. مرورگر تصویر را مستقیماً از MediaMTX می‌گیرد و endpoint
+مسیر WHEP خام از مسیر مستقیم ورودی موتور تشخیص جداست. مصرف‌کنندهٔ پخش خام
+تصویر را از MediaMTX می‌گیرد و endpoint
 `/api/v1/streams/{cameraId}/overlay` را برای وضعیت سبک ROI و Drawingهای پویا
-poll می‌کند. نمای متمرکز با فاصلهٔ پیش‌فرض 180ms و thumbnailهای داشبورد با
-فاصلهٔ 400ms درخواست بعدی را، پس از پایان درخواست قبلی، زمان‌بندی می‌کنند.
-Overlay فعال در کلاینت با `LiveOverlaySvg` روی `<video>` رسم می‌شود؛ بنابراین نمایش زندهٔ
-MediaMTX دوباره از FFmpeg، Bitmap یا encoder کامپوزیت‌شده عبور نمی‌کند.
+poll می‌کند. کامپوننت خام `RawMediaMtxStream` و `LiveOverlaySvg` این قابلیت را
+در سورس نگه می‌دارند، اما در نماهای فعال فعلی mount نمی‌شوند. ویدئوی خام
+برای Drawing دوباره encode نمی‌شود.
 
 داشبورد thumbnailها را در صفحه‌های حداکثر شش‌تایی نشان می‌دهد و فقط tileهای
-صفحهٔ جاری را mount می‌کند. با تغییر صفحه، WHEP و polling tileهای قبلی با
-unmount شدن متوقف می‌شود. `RawMediaMtxStream` و `SnapshotImage` همچنین به
-`visibilitychange` مرورگر واکنش می‌دهند و هنگام hidden بودن تب، session یا
-timer فعال نگه نمی‌دارند. این محدودسازی فقط مصرف نمایش در UI/API است؛ دوربینی
+صفحهٔ جاری را mount می‌کند. با تغییر صفحه، sessionهای تصویری tileهای قبلی با
+unmount شدن متوقف می‌شوند. این محدودسازی فقط مصرف نمایش در UI/API است؛ دوربینی
 که در سرویس start شده، مستقل از صفحهٔ UI همچنان capture و inference می‌کند.
 
-`/api/v1/streams/{cameraId}/webrtc/offer` و `WebRtcGateway` برای سازگاری با
-کلاینت‌های legacy که خروجی کامپوزیت‌شده می‌خواهند باقی مانده‌اند، اما مسیر اصلی
-نمایش MediaMTX در وب نیست. برای FFmpeg/LibVLC، Snapshot آخرین فریم سرویس همچنان
-خروجی fallback است.
+`/api/v1/streams/{cameraId}/webrtc/offer` و `WebRtcGateway` خروجی کامپوزیت‌شدهٔ
+فعال UI را می‌دهند. در CameraEditor، `canWhep` قابلیت source فعال RTSP را
+اعلام می‌کند و همراه وضعیت running تعیین می‌کند preview زنده باشد؛ sourceهای
+دیگر در همان editor از Snapshot آخرین فریم سرویس استفاده می‌کنند.
 
 ## قرارداد pipeline
 
@@ -274,7 +272,7 @@ Windows و Service باید الگوریتم و قرارداد یکسان این
 
 - `Threads` تعداد threadهای `IntraOp` در sessionهای ONNX Runtime است و در `CameraProcessingSettings` همان آیتم ذخیره می‌شود. UI کنترل Plate و Face را برای آیتم انتخاب‌شده sync می‌کند؛ `CameraSettings.Threads` فقط default ساخت آیتم جدید است و از آیتم موجود دوباره مقداردهی نمی‌شود.
 - نرخ مؤثر Face از دو سقف عبور می‌کند: حلقهٔ دوربین با `ActiveDetectionFps`/`IdleDetectionFps` تعیین می‌کند چه زمانی pipeline فراخوانی شود و خود آیتم Face با `Rois[].Processing[].MaxFps` سقف مستقل دارد؛ بنابراین نرخ عملی حداکثر `min(active-or-idle-rate, item.MaxFps)` است. `FaceMaxFps` در سطح دوربین فقط default ساخت آیتم جدید یا migration است و تغییر آن آیتم Face موجود را overwrite نمی‌کند.
-- وقتی `RecognitionEnabled` فعال است، برای هر چهرهٔ پذیرفته‌شده در هر اجرای Face، SFace embedding ساخته و با نمونه‌های database مقایسه می‌شود؛ `EventCooldownSeconds` فقط ثبت رخداد را محدود می‌کند و هزینهٔ inference را کم نمی‌کند. برای CPU محدود، Motion Gate، `BufferCount = 0`، مدل INT8 و `Threads = 1` در هر دوربین اولویت دارند.
+- وقتی `RecognitionEnabled` فعال است، برای هر چهرهٔ پذیرفته‌شده در هر اجرای Face، SFace embedding ساخته و با نمونه‌های database مقایسه می‌شود؛ `EventCooldownSeconds` فقط ثبت رخداد را محدود می‌کند و هزینهٔ inference را کم نمی‌کند. برای CPU محدود، Motion Gate، مدل INT8 و `Threads = 1` در هر دوربین اولویت دارند؛ دریافت همیشه روی جدیدترین فریم است.
 - `CameraPipelineCoordinator` برای هر ROI فعال فهرست pipeline مستقل می‌سازد و ROIها را موازی اجرا می‌کند؛ Plate، Face و Palm هر سه از `ProcessingRegistry` و registration ماژول خود ساخته می‌شوند. `ProcessingMode` در هر ROI تعیین می‌کند pipelineهای داخل آن زنجیره‌ای (`Sequential`) یا همزمان (`Parallel`) باشند. در حالت موازی، هر pipeline ورودی مستقل دارد و به خروجی/تصویر pipeline دیگر وابسته نیست. `CameraRuntime` فقط lifecycle/capture، Motion، هندسهٔ ROI و policy خروجی را نگه می‌دارد و به concrete type یا factory مخصوص قابلیت‌ها وابسته نیست. state، tracker و محدودیت FPS بین ROIها مشترک نیستند.
 - graph پردازش در `CameraPipelineCoordinator` به‌صورت immutable و قابل تعویض نگه‌داری می‌شود. اجرای inference یک lease کوتاه روی graph می‌گیرد، اما قفل coordinator را در طول inference نگه نمی‌دارد؛ بنابراین status/API پشت اجرای ONNX منتظر نمی‌مانند. هنگام rebuild، graph قبلی فقط پس از پایان inferenceهای فعال dispose می‌شود.
 - صف event ذخیره‌سازی bounded است و ظرفیت آن از `Service.Runtime.MaxEventQueueLength` می‌آید. در صورت پرشدن صف، artifactهای رخداد جدید آزاد و شمارندهٔ `droppedEventCount` افزایش می‌یابد تا فشار ذخیره‌سازی باعث رشد بی‌نهایت حافظه نشود.

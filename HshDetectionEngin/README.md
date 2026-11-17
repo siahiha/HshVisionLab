@@ -41,25 +41,26 @@ camera.PipelineResultsReady += (_, detections) => Render(detections);
 camera.Start();
 ```
 
-هر `Camera` یک `FrameSource` و loop مستقل دارد. به‌صورت پیش‌فرض source فقط جدیدترین فریم را نگه می‌دارد؛ اگر `BufferCount` مثبت باشد، یک صف محدود با همان ظرفیت ایجاد می‌شود و هنگام پرشدن قدیمی‌ترین فریم حذف می‌گردد. برای stream زنده نباید انتظار پردازش تک‌تک فریم‌ها را داشت.
+هر `Camera` یک `FrameSource` و loop مستقل دارد. source همیشه فقط جدیدترین فریم را نگه می‌دارد و فریم منتظر قبلی با ورود فریم تازه آزاد می‌شود. برای stream زنده نباید انتظار پردازش تک‌تک فریم‌ها را داشت.
 
-## Backendهای دریافت تصویر
+## دریافت مستقیم تصویر
 
-`CameraSettings.CaptureBackend` سه مسیر را پشتیبانی می‌کند:
+دریافت RTSP در Windows و سرویس مسیر یکسانی دارد:
 
 ```text
-FFmpeg   → FrameSource/OpenCV FFmpeg
-LibVLC   → VlcFrameSource/LibVLC و Live555
-MediaMTX → MediaMtxFrameSource → local RTSP path در 127.0.0.1:8554
+Camera RTSP → FrameSource/OpenCV FFmpeg → newest-frame slot → CameraRuntime
 ```
 
-در حالت MediaMTX، runtime upstream دوربین را در path اختصاصی MediaMTX ثبت
-می‌کند و engine از local RTSP با TCP و حالت low-latency می‌خواند. این مسیر برای
-inference است؛ مرورگر باید همان path را از WHEP خام بگیرد و Drawing را جداگانه
-روی کلاینت رسم کند. `MediaMtxFrameSource` مقدار buffer را صفر نگه می‌دارد تا
-فریم قدیمی در صف پردازش باقی نماند. در حالت LibVLC، MediaMTX استفاده نمی‌شود و
-فریم decodeشده مستقیماً از callback LibVLC وارد latest-frame slot یا صف محدود
-می‌شود.
+RTSP با تنظیمات کم‌تأخیر و یک thread صریح decoder باز می‌شود؛ TCP/UDP و فاصلهٔ
+reconnect از تنظیمات دوربین می‌آیند. `IFrameSource.Configure(source, transport,
+reconnectDelayMs)` اتصال را تنظیم می‌کند. فریم `FrameAvailable` فقط در طول callback
+borrowed است و فریم خروجی `TryDequeueFrame` به مصرف‌کننده منتقل می‌شود.
+
+نمایش مرورگر متعلق به سرویس است: UI فعلی از خروجی کامپوزیت‌شدهٔ WebRTC سرویس
+استفاده می‌کند. درگاه مستقل MediaMTX/WHEP نیز برای sourceهای فعال RTSP و
+مصرف‌کنندهٔ پخش خام موجود است و Overlay سبک را جداگانه می‌دهد. ورودی تشخیص
+مستقیماً از دوربین به `FrameSource` می‌رود. جزئیات در
+[راهنمای پخش مرورگر](../docs/MediaMTX-WebRTC.md) است.
 
 برای source جدید `IFrameSource` و برای تحلیل جدید `IProcessingPipeline` را پیاده‌سازی کنید و آن را با `ProcessingModuleRegistration` در `ProcessingRegistry` ثبت کنید. نوع قابلیت با `ProcessingType` مشخص می‌شود؛ string فقط برای سازگاری فایل تنظیمات استفاده می‌شود. `ProcessingContext.Image` تصویر محلی ROI است و bounds خروجی باید با ابعاد همان ROI سازگار باشد. برای رسم هندسهٔ بصری از `PipelineResult.Overlays` و `ProcessingOverlayKind` استفاده کنید؛ از ساختن detection برای هر نقطه یا خط پرهیز کنید، چون detection وارد event/history می‌شود و هزینهٔ اضافی دارد. اگر pipeline تصویر را resize می‌کند، نگاشت bounds و overlayها به ROI اصلی بر عهدهٔ خود pipeline است. اگر pipeline `NextImage` برمی‌گرداند، Runtime با `PipelineResult.TakeNextImage()` مالکیت آن را به pipeline بعدی منتقل می‌کند؛ در غیر این صورت `PipelineResult.Dispose()` آن را آزاد می‌کند.
 

@@ -1,5 +1,4 @@
 using HshDetectionService;
-using HshDetectionEngin.Capture;
 
 ServicePaths paths = new();
 ServiceSettingsStore settingsStore = new(paths);

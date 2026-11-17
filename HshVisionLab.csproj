@@ -46,13 +46,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="third_party\mediamtx\mediamtx.exe"
-             Link="MediaMTX\mediamtx.exe"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="Always" />
-  </ItemGroup>
-
-  <ItemGroup>
     <None Include="HshDetectionEngin.Palm\Models\palm_blazepalm_full.hshmodel"
           Link="Models\Palm\palm_blazepalm_full.hshmodel"
           CopyToOutputDirectory="PreserveNewest"

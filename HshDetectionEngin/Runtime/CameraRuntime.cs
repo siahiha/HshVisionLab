@@ -21,9 +21,7 @@ public class CameraRuntime : IDisposable
     private const float OverlayMaxFontSize = 28f;
 
     public CameraSettings Settings { get; }
-    public IFrameSource FrameSource { get; private set; }
-    private readonly bool _hasInjectedFrameSource;
-    private string _frameSourceBackend;
+    public IFrameSource FrameSource { get; }
     private readonly CameraPipelineCoordinator _pipelineCoordinator;
     private TrackingCompletionWorker? _completionWorker;
     private readonly bool _enableTrackingCompletion;
@@ -39,6 +37,13 @@ public class CameraRuntime : IDisposable
     private readonly object _previewFrameGate = new();
     private readonly AutoResetEvent _previewFrameReady = new(false);
     private Mat? _latestPreviewFrame;
+    private Mat? _sparePreviewFrame;
+    private Mat? _secondSparePreviewFrame;
+    private long _latestPreviewReceivedTimestamp;
+    private long _latestPreviewSequence;
+    private sealed record PreviewConfiguration(Size MaxSize, bool Enabled);
+    private PreviewConfiguration _previewConfiguration = new(new Size(1280, 720), true);
+    private PreviewFrameTiming _previewTiming = new(0, 0, 0);
     private readonly object _rawFrameGate = new();
     private Bitmap? _latestRawFrame;
     private long _latestRawFrameSequence;
@@ -68,6 +73,7 @@ public class CameraRuntime : IDisposable
     public LicenseValidationResult License { get; }
     public ProcessingRegistry ProcessingModules => _pipelineCoordinator.Registry;
 
+    /// <summary>The subscriber owns and must dispose the delivered bitmap.</summary>
     public event Action<CameraRuntime, Bitmap>? FrameReady;
     public event Action<CameraRuntime, HistoryItem>? PlateDetected;
     public event Action<CameraRuntime, AnalysisHistoryItem>? AnalysisDetected;
@@ -81,6 +87,8 @@ public class CameraRuntime : IDisposable
     public double LastInferenceMs => Volatile.Read(ref _lastInferenceMs);
     public Size LastFrameSize => _lastFrameSize;
     public long DroppedFrames => FrameSource.DroppedFrames;
+    /// <summary>Timing for the bitmap currently being delivered by FrameReady.</summary>
+    public PreviewFrameTiming PreviewTiming => Volatile.Read(ref _previewTiming);
     public int ConfiguredRoiCount => Settings.Rois.Count(roi => roi.Enabled);
     public int ConfiguredTaskCount => Settings.Rois
         .Where(roi => roi.Enabled)
@@ -143,6 +151,43 @@ public class CameraRuntime : IDisposable
     }
 
     private const int PreviewFps = 15;
+
+    /// <summary>
+    /// Monotonic timestamps for local receive-to-render/display measurements.
+    /// These do not include buffering inside the camera or its RTSP decoder.
+    /// </summary>
+    public sealed record PreviewFrameTiming(long ReceivedTimestamp, long ReadyTimestamp, long Sequence)
+    {
+        public double ReceiveToReadyMs => ReceivedTimestamp > 0 && ReadyTimestamp >= ReceivedTimestamp
+            ? (ReadyTimestamp - ReceivedTimestamp) * 1000.0 / Stopwatch.Frequency
+            : 0;
+    }
+
+    /// <summary>
+    /// Sets preview demand without accessing host controls. A hidden preview does
+    /// no frame copying or rendering. The built-in renderer fits the requested
+    /// size, bounded by the existing 1280x720 ceiling. Detection keeps source resolution.
+    /// Hosts that do not configure demand retain the previous preview defaults.
+    /// </summary>
+    public void ConfigurePreview(Size maxSize, bool enabled = true)
+    {
+        var size = new Size(
+            maxSize.Width > 0 ? Math.Min(maxSize.Width, 1280) : 1280,
+            maxSize.Height > 0 ? Math.Min(maxSize.Height, 720) : 720);
+        lock (_previewFrameGate)
+        {
+            PreviewConfiguration previous = _previewConfiguration;
+            if (previous.MaxSize == size && previous.Enabled == enabled) return;
+            Volatile.Write(ref _previewConfiguration, new PreviewConfiguration(size, enabled));
+            // Resuming should accept the next fresh frame immediately.
+            if (enabled && !previous.Enabled) _nextPreviewTicks = 0;
+            if (!enabled) DrainPreviewFramesLocked();
+        }
+        _previewFrameReady.Set();
+    }
+
+    private bool HasPreviewDemand => _running && Volatile.Read(ref _previewConfiguration).Enabled && FrameReady is not null;
+
     private int DetectionOverlayHoldMs => Math.Max(0, Settings.DetectionOverlayHoldMs);
 
     private bool IsOverlayActive(DateTime updatedUtc, DateTime now)
@@ -207,9 +252,7 @@ public class CameraRuntime : IDisposable
         Settings = settings;
         _enableTrackingCompletion = enableTrackingCompletion;
         License = license ?? LicenseValidator.Load(Path.Combine(AppContext.BaseDirectory, "license.hshlic"));
-        _hasInjectedFrameSource = frameSource is not null;
-        _frameSourceBackend = GetCaptureBackend(Settings);
-        FrameSource = frameSource ?? CreateFrameSource(_frameSourceBackend);
+        FrameSource = frameSource ?? new FrameSource();
         _pipelineCoordinator = new CameraPipelineCoordinator(
             Settings,
             processingRegistry ?? new ProcessingRegistry(),
@@ -220,32 +263,11 @@ public class CameraRuntime : IDisposable
         if (Settings.Enabled) RebuildRoiPipelines();
     }
 
-    private static string GetCaptureBackend(CameraSettings settings)
-    {
-        if (string.Equals(settings.CaptureBackend, "LibVLC", StringComparison.OrdinalIgnoreCase)) return "LibVLC";
-        if (string.Equals(settings.CaptureBackend, "MediaMTX", StringComparison.OrdinalIgnoreCase)) return "MediaMTX";
-        return "FFmpeg";
-    }
-
-    private IFrameSource CreateFrameSource(string backend) =>
-        string.Equals(backend, "LibVLC", StringComparison.OrdinalIgnoreCase)
-            ? new VlcFrameSource()
-            : string.Equals(backend, "MediaMTX", StringComparison.OrdinalIgnoreCase)
-                ? new MediaMtxFrameSource(Settings.Id)
-                : new FrameSource();
-
     private void AttachFrameSource(IFrameSource source)
     {
         source.StateChanged += FrameSource_StateChanged;
         source.ErrorOccurred += FrameSource_ErrorOccurred;
         source.FrameAvailable += FrameSource_FrameAvailable;
-    }
-
-    private void DetachFrameSource(IFrameSource source)
-    {
-        source.StateChanged -= FrameSource_StateChanged;
-        source.ErrorOccurred -= FrameSource_ErrorOccurred;
-        source.FrameAvailable -= FrameSource_FrameAvailable;
     }
 
     private void FrameSource_StateChanged(string state)
@@ -256,25 +278,12 @@ public class CameraRuntime : IDisposable
     }
     private void FrameSource_ErrorOccurred(Exception error) => StatusChanged?.Invoke(this, error.Message, true);
 
-    private void EnsureFrameSourceForSettings()
-    {
-        if (_hasInjectedFrameSource) return;
-
-        string requestedBackend = GetCaptureBackend(Settings);
-        if (string.Equals(requestedBackend, _frameSourceBackend, StringComparison.Ordinal)) return;
-
-        IFrameSource previous = FrameSource;
-        DetachFrameSource(previous);
-        FrameSource = CreateFrameSource(requestedBackend);
-        _frameSourceBackend = requestedBackend;
-        AttachFrameSource(FrameSource);
-        previous.Dispose();
-    }
-
     private void FrameSource_FrameAvailable(Mat frame)
     {
+        long receivedTimestamp = Stopwatch.GetTimestamp();
+        long sequence = Interlocked.Increment(ref _receivedFrameSequence);
         _frameStamps.Remove(frame);
-        _frameStamps.Add(frame, new FrameStamp(Interlocked.Increment(ref _receivedFrameSequence), DateTime.UtcNow, _completionWorker?.Generation ?? 0));
+        _frameStamps.Add(frame, new FrameStamp(sequence, DateTime.UtcNow, _completionWorker?.Generation ?? 0));
         if (!_running || frame.IsEmpty)
         {
             return;
@@ -282,37 +291,46 @@ public class CameraRuntime : IDisposable
 
         _lastFrameSize = frame.Size;
 
-        long now = Stopwatch.GetTimestamp();
-        long interval = Math.Max(1, Stopwatch.Frequency / PreviewFps);
-        if (now < _nextPreviewTicks)
-        {
-            return;
-        }
-
-        _nextPreviewTicks = now + interval;
+        if (!HasPreviewDemand) return;
 
         // The source raises FrameAvailable on its RTSP reader thread. Keep
         // that thread free from resize/bitmap/UI work: publish only the newest
         // preview frame and let the dedicated preview worker render it.
-        Mat? previewFrame = null;
-        try
+        lock (_previewFrameGate)
         {
-            previewFrame = frame.Clone();
-            Mat? old;
-            lock (_previewFrameGate)
-            {
-                old = _latestPreviewFrame;
-                _latestPreviewFrame = previewFrame;
-                previewFrame = null;
-            }
+            if (!HasPreviewDemand || receivedTimestamp < _nextPreviewTicks) return;
+            long interval = Math.Max(1, Stopwatch.Frequency / PreviewFps);
+            // Keep the deadline anchored. Resetting it to now + interval makes a
+            // 30 FPS source settle at 10 FPS whenever callbacks arrive just early.
+            _nextPreviewTicks = _nextPreviewTicks <= 0
+                ? receivedTimestamp + interval
+                : _nextPreviewTicks + ((receivedTimestamp - _nextPreviewTicks) / interval + 1) * interval;
 
-            old?.Dispose();
-            _previewFrameReady.Set();
+            // At most two source-sized Mats exist across the worker, pending
+            // slot and retained spares. CopyTo reuses native storage, including
+            // when a slow renderer requires the pending frame to be replaced.
+            Mat? previewFrame = _latestPreviewFrame;
+            if (previewFrame is null)
+            {
+                previewFrame = _sparePreviewFrame ?? new Mat();
+                _sparePreviewFrame = _secondSparePreviewFrame;
+                _secondSparePreviewFrame = null;
+            }
+            try
+            {
+                frame.CopyTo(previewFrame);
+                _latestPreviewFrame = previewFrame;
+                _latestPreviewReceivedTimestamp = receivedTimestamp;
+                _latestPreviewSequence = sequence;
+            }
+            catch
+            {
+                _latestPreviewFrame = null;
+                previewFrame.Dispose();
+                throw;
+            }
         }
-        finally
-        {
-            previewFrame?.Dispose();
-        }
+        _previewFrameReady.Set();
     }
 
     /// <summary>
@@ -472,7 +490,6 @@ public class CameraRuntime : IDisposable
             return;
         }
         if (string.IsNullOrWhiteSpace(Settings.SourceUrl)) { StatusChanged?.Invoke(this, "Camera source is empty.", true); return; }
-        EnsureFrameSourceForSettings();
         bool tracked = Settings.Rois.Where(r => r.Enabled).SelectMany(r => r.Processing).Any(t => t.Enabled && t.ExecutionMode == "TrackAndQueue");
         if (tracked && !_enableTrackingCompletion)
         {
@@ -489,7 +506,7 @@ public class CameraRuntime : IDisposable
             catch (Exception ex) { StatusChanged?.Invoke(this, ex.Message, true); return; }
         }
         RebuildRoiPipelines();
-        FrameSource.Configure(Settings.SourceUrl, Settings.Transport, Settings.BufferCount, Settings.ReconnectDelaySec * 1000);
+        FrameSource.Configure(Settings.SourceUrl, Settings.Transport, Settings.ReconnectDelaySec * 1000);
         _motionActive = false; _motionActiveUntilTicks = 0;
         foreach (var m in _motionDetectors.Values) m.Dispose(); _motionDetectors.Clear();
         _processed = 0; _stats.Restart(); _nextPreviewTicks = Stopwatch.GetTimestamp();
@@ -585,6 +602,7 @@ public class CameraRuntime : IDisposable
                         CameraPipelineCoordinator.PipelineExecutionResult execution = RunPipelines(frame, rois);
                         var trackedDetections = execution.Detections.Where(IsTrackPending).ToArray();
                         if (trackedDetections.Length > 0) _completionWorker?.Offer(rawFrame, trackedDetections, stamp.ReceivedAtUtc, stamp.Sequence, stamp.CompletionGeneration);
+                        // Color and direction are optional attributes, never acceptance criteria.
                         var completedInline = execution.Detections.Where(d => !IsTrackPending(d)).ToArray();
                         if (_completionWorker is not null)
                             for (int i = 0; i < execution.Detections.Count; i++)
@@ -615,33 +633,66 @@ public class CameraRuntime : IDisposable
 
     private void PreviewLoop(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        Mat? resizedPreview = null;
+        try
         {
-            _previewFrameReady.WaitOne(250);
-            if (ct.IsCancellationRequested) break;
-
-            Mat? frame;
-            lock (_previewFrameGate)
+            while (!ct.IsCancellationRequested)
             {
-                frame = _latestPreviewFrame;
-                _latestPreviewFrame = null;
-            }
+                _previewFrameReady.WaitOne();
+                if (ct.IsCancellationRequested) break;
+                if (!HasPreviewDemand)
+                {
+                    DrainPreviewFrame();
+                    resizedPreview?.Dispose();
+                    resizedPreview = null;
+                    continue;
+                }
 
-            if (frame is null) continue;
-            try { PublishPreview(frame); }
-            finally { frame.Dispose(); }
+                Mat? frame;
+                long receivedTimestamp, sequence;
+                lock (_previewFrameGate)
+                {
+                    frame = _latestPreviewFrame;
+                    _latestPreviewFrame = null;
+                    receivedTimestamp = _latestPreviewReceivedTimestamp;
+                    sequence = _latestPreviewSequence;
+                }
+
+                if (frame is null) continue;
+                try { PublishPreview(frame, receivedTimestamp, sequence, ref resizedPreview); }
+                finally
+                {
+                    lock (_previewFrameGate)
+                    {
+                        if (!HasPreviewDemand) frame.Dispose();
+                        else if (_sparePreviewFrame is null) _sparePreviewFrame = frame;
+                        else if (_secondSparePreviewFrame is null) _secondSparePreviewFrame = frame;
+                        else frame.Dispose();
+                    }
+                }
+            }
         }
+        finally { resizedPreview?.Dispose(); }
     }
 
     private void DrainPreviewFrame()
     {
-        Mat? frame;
         lock (_previewFrameGate)
         {
-            frame = _latestPreviewFrame;
-            _latestPreviewFrame = null;
+            DrainPreviewFramesLocked();
         }
-        frame?.Dispose();
+    }
+
+    private void DrainPreviewFramesLocked()
+    {
+        _latestPreviewFrame?.Dispose();
+        _latestPreviewFrame = null;
+        _sparePreviewFrame?.Dispose();
+        _sparePreviewFrame = null;
+        _secondSparePreviewFrame?.Dispose();
+        _secondSparePreviewFrame = null;
+        _latestPreviewReceivedTimestamp = 0;
+        _latestPreviewSequence = 0;
     }
 
     private void StoreLatestRawFrame(Mat frame, long sequence)
@@ -736,46 +787,63 @@ public class CameraRuntime : IDisposable
             : 60;
     }
 
-    private void PublishPreview(Mat frame)
+    private void PublishPreview(Mat frame, long receivedTimestamp, long sequence, ref Mat? resizedPreview)
     {
+        Bitmap? bitmap = null;
         try
         {
-            IReadOnlyList<AnalysisDetection> results;
-            IReadOnlyList<ProcessingOverlay> overlays;
-            lock (_renderGate) results = _lastAnalysisDetections.ToArray();
-            overlays = GetActiveProcessingOverlays();
-            if (Renderer is not null)
+            if (!HasPreviewDemand) return;
+            PreviewConfiguration configuration = Volatile.Read(ref _previewConfiguration);
+            IReadOnlyList<ProcessingOverlay> overlays = GetActiveProcessingOverlays();
+            IFrameRenderer? renderer = Renderer;
+            if (renderer is not null)
             {
-                FrameReady?.Invoke(this, Renderer.Render(frame, results, Settings, overlays));
-                return;
+                IReadOnlyList<AnalysisDetection> results;
+                lock (_renderGate) results = _lastAnalysisDetections.ToArray();
+                bitmap = renderer.Render(frame, results, Settings, overlays);
+            }
+            else
+            {
+                Size sourceSize = frame.Size;
+                double scale = Math.Min((double)configuration.MaxSize.Width / frame.Width, (double)configuration.MaxSize.Height / frame.Height);
+                Mat preview = frame;
+                if (scale < 1)
+                {
+                    resizedPreview ??= new Mat();
+                    CvInvoke.Resize(frame, resizedPreview, new Size(Math.Max(1, (int)(frame.Width * scale)), Math.Max(1, (int)(frame.Height * scale))), 0, 0, Inter.Linear);
+                    preview = resizedPreview;
+                }
+
+                // This frame already belongs exclusively to the preview worker.
+                // Drawing on it when no resize is needed avoids another native
+                // frame copy; the source/inference Mat is never modified.
+                IReadOnlyList<AnalysisDetection> detections = Settings.DrawBoxes ? GetActiveAnalysisDetections() : [];
+                if (Settings.DrawBoxes)
+                {
+                    DrawRois(preview, GetNamedRois(preview.Size));
+                    DrawAnalysisDetections(preview, detections, sourceSize);
+                    DrawProcessingOverlays(preview, overlays, sourceSize);
+                }
+
+                bitmap = preview.ToBitmap();
+                if (Settings.DrawBoxes)
+                {
+                    DrawOverlay(bitmap);
+                    DrawMotionRois(bitmap, GetMotionRois(bitmap.Size, GetNamedRois(bitmap.Size)));
+                    DrawAnalysisLabels(bitmap, detections, sourceSize);
+                    DrawPlateLabels(bitmap, sourceSize);
+                }
             }
 
-            int maxW = 1280, maxH = 720;
-            using var preview = new Mat();
-            double scale = Math.Min((double)maxW / frame.Width, (double)maxH / frame.Height);
-            if (scale < 1) CvInvoke.Resize(frame, preview, new Size(Math.Max(1,(int)(frame.Width*scale)), Math.Max(1,(int)(frame.Height*scale))), 0,0,Inter.Linear);
-            else frame.CopyTo(preview);
-
-            // Draw only on the preview copy. The captured Mat remains clean
-            // for inference, while the UI still receives its ROI/status marks.
-            if (Settings.DrawBoxes)
-            {
-                DrawRois(preview, GetNamedRois(preview.Size));
-                DrawAnalysisDetections(preview, GetActiveAnalysisDetections(), frame.Size);
-                DrawProcessingOverlays(preview, overlays, frame.Size);
-            }
-
-            var bmp = preview.ToBitmap();
-            if (Settings.DrawBoxes)
-            {
-                DrawOverlay(bmp);
-                DrawMotionRois(bmp, GetMotionRois(bmp.Size, GetNamedRois(bmp.Size)));
-                DrawAnalysisLabels(bmp, GetActiveAnalysisDetections(), frame.Size);
-                DrawPlateLabels(bmp, frame.Size);
-            }
-            FrameReady?.Invoke(this, bmp);
+            Action<CameraRuntime, Bitmap>? handler = FrameReady;
+            if (handler is null || !HasPreviewDemand) return;
+            Volatile.Write(ref _previewTiming, new PreviewFrameTiming(receivedTimestamp, Stopwatch.GetTimestamp(), sequence));
+            Bitmap delivered = bitmap;
+            bitmap = null; // Ownership transfers before invoking host code.
+            handler(this, delivered);
         }
         catch { }
+        finally { bitmap?.Dispose(); }
     }
 
     private void UpdatePlateOverlays(Mat frame, IReadOnlyList<AnalysisDetection> detections)
@@ -1213,7 +1281,7 @@ public class CameraRuntime : IDisposable
             graphics.DrawRectangle(statusPen, plateRectangle.X, plateRectangle.Y, plateRectangle.Width, plateRectangle.Height);
 
             string plateText = IsTrackPending(detection) ? detection.Label : overlay.Text;
-            string specifications = $"Th: {GetDetectionOverlayThreshold(detection):0.00}  Co: {overlay.Confidence:0.00}" + MotionCaption(detection);
+            string specifications = $"Th: {GetDetectionOverlayThreshold(detection):0.00}  Co: {overlay.Confidence:0.00}" + MotionCaption(detection) + VehicleColorCaption(detection);
 
             SizeF plateSize = graphics.MeasureString(plateText, plateFont);
             SizeF specificationSize = graphics.MeasureString(specifications, specFont);
@@ -1252,6 +1320,18 @@ public class CameraRuntime : IDisposable
                 labelY + plateSize.Height - 1f);
             }
         }
+    }
+
+    private static string VehicleColorCaption(AnalysisDetection detection)
+    {
+        if (detection.Metadata?.GetValueOrDefault("VehicleColorStatus") is not string status) return string.Empty;
+        if (status == "Accepted") return $"  Color: {detection.Metadata.GetValueOrDefault("VehicleColor")}";
+        if (status == "Sampling")
+        {
+            string candidate = detection.Metadata.GetValueOrDefault("VehicleColorCandidate")?.ToString() ?? "?";
+            return $"  Color: {candidate} (pending, samples:{detection.Metadata.GetValueOrDefault("VehicleColorSamples")}, attempts:{detection.Metadata.GetValueOrDefault("VehicleColorAttempts")})";
+        }
+        return "  Color: Unknown";
     }
 
     private static string MotionCaption(AnalysisDetection detection)

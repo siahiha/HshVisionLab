@@ -99,10 +99,12 @@ internal sealed class PlatePipeline : IProcessingPipeline
         var results = new List<AnalysisDetection>(plateCrops.Count);
         foreach (var item in plateCrops)
         {
+            Rectangle detectorBounds = Rectangle.Round(new RectangleF(item.Detection.X, item.Detection.Y, item.Detection.Width, item.Detection.Height));
             if (_trackOnly)
             {
                 results.Add(new AnalysisDetection(AnalysisKind.Plate, "Tracking", item.Detection.Score, item.Bounds, item.TrackId,
-                    new Dictionary<string, object?> { ["Accepted"] = true, ["TrackPending"] = true, ["OverlayThreshold"] = _options.Confidence }));
+                    new Dictionary<string, object?> { ["Accepted"] = true, ["TrackPending"] = true, ["OverlayThreshold"] = _options.Confidence,
+                        ["PlateDetectorBounds"] = detectorBounds }));
                 continue;
             }
             List<PlateDetection> inside = [];
@@ -166,6 +168,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
                 new Dictionary<string, object?>
                 {
                     ["Accepted"] = accepted,
+                    ["PlateDetectorBounds"] = detectorBounds,
                     ["PlateText"] = text,
                     ["RecognitionConfidence"] = recognitionConfidence,
                     ["RecognitionModel"] = _ocr is null ? null : Path.GetFileName(_options.CharacterModelFile),

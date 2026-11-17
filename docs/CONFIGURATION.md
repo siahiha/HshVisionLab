@@ -33,8 +33,8 @@
 
 | گروه | فیلدها | نکتهٔ رفتاری |
 | --- | --- | --- |
-| هویت و اتصال | `Id`، `Name`، `SourceUrl`، `Transport`، `CaptureBackend`، `ReconnectDelaySec` | source عددی Webcam/DShow است؛ منبع غیرعددی با backend انتخاب‌شده دریافت می‌شود. `CaptureBackend` یکی از `FFmpeg`، `LibVLC` یا `MediaMTX` است؛ مقدار پیش‌فرض `FFmpeg` است. MediaMTX برای دریافت داخلی از local RTSP و برای مرورگر از WHEP استفاده می‌کند. |
-| فریم | `BufferCount` | مقدار `0` فقط جدیدترین فریم را نگه می‌دارد؛ مقدار مثبت ظرفیت صف محدود فریم را برای هر دو pipeline همان دوربین تعیین می‌کند. |
+| هویت و اتصال | `Id`، `Name`، `SourceUrl`، `Transport`، `ReconnectDelaySec` | در Windows و سرویس، RTSP مستقیماً با FFmpeg کم‌تأخیر و یک thread decoder دریافت می‌شود. TCP/UDP قابل انتخاب است و source عددی Webcam/DShow است. |
+| دریافت فریم | newest-frame | source همیشه فقط جدیدترین فریم را نگه می‌دارد و فریم منتظر قبلی را آزاد می‌کند. بافر تکمیل تشخیص Face/Plate ظرفیت و سقف حافظهٔ جداگانه دارد. |
 | مسیرهای پردازش | `Rois[].Processing[]`، `Rois[].ProcessingMode`، `PlateEnabled`، `FaceEnabled`، `ProcessingSchemaVersion` | ROIهای فعال یک دوربین موازی اجرا می‌شوند. `ProcessingMode` برای taskهای داخل همان ROI مقدار `Sequential` یا `Parallel` دارد؛ مقدار پیش‌فرض `Sequential` است. فقط ROIهایی که زیرمجموعهٔ Processing فعال دارند تحلیل می‌شوند؛ Booleanها برای سازگاری و خلاصهٔ فعال‌بودن نگه داشته می‌شوند. `CameraSettings.Processing` فقط legacy است. |
 | Plate | `Options: PlateProcessingOptions` به‌همراه `MaxFps` و `Threads` | شامل `ModelFile`، `InputSize`، `Preprocessing`، `Confidence`، `NmsIoU`، `CharacterRecognitionEnabled`، `CharacterModelFile`، `CharacterConfidence`، `CharacterMaxFps`، `TrackMaxMisses` و `EventCooldownSeconds` است. `ModelFile` فقط detector کادر پلاک است و `CharacterModelFile` فقط OCR روی crop هر کادر است؛ دو ComboBox مستقل‌اند و انتخاب OCR مدل detector یا Input Size آن را تغییر نمی‌دهد. OCRها با manifest هم‌نام `.ocr.json` به catalog معرفی می‌شوند و خروجی decoderها به قرارداد مشترک `PlateOcrResult` تبدیل می‌شود. در UI مدل‌ها از catalog سرویس انتخاب می‌شوند، نه text input. پس از انتخاب detector، ComboBox سایز از `inputSizes` همان مدل پر می‌شود؛ OCR روی اندازهٔ اعلام‌شده در manifest و decoder خودش کار می‌کند. `Preprocessing` تنظیم ورودی detector نیست: detector همیشه letterbox، تبدیل BGR به RGB، چیدمان CHW و نرمال‌سازی `/255` را خودش انجام می‌دهد؛ این فیلد فقط در مسیر قدیمی استخراج character از خروجی detector، وقتی `CharacterRecognitionEnabled=false` است، کاربرد دارد. در مسیر OCR مستقل، crop خام پلاک مستقیماً به OCR داده می‌شود. مقدار پیش‌فرض `CharacterRecognitionEnabled` برابر `false` است. `ModelFile` و `CharacterModelFile` نام منطقی هستند؛ runtime فقط package هم‌نام `.hshmodel` را از مسیرهای مجاز پیدا می‌کند و ONNX خام را نمی‌پذیرد. |
 | Face | `Options: FaceProcessingOptions` به‌همراه `MaxFps` و `Threads` | شامل مدل YuNet، preprocessing، confidence، recognition، NMS، TopK، tracking، record confidence و cooldown است و در UI در گروه‌های جداگانهٔ Face detection، Face identification و Tracking/recording نمایش داده می‌شود. `FacePreprocessing` در مدل typed با نام `Preprocessing` نگه‌داری می‌شود. Face به‌صورت pipeline ساخته می‌شود؛ هنگام فعال‌بودن SFace مقدار `None` توصیه می‌شود. SFace به‌صورت مستقل landmark alignment و ورودی `112×112` خود را دارد. `Threads` در تنظیمات همان آیتم پردازش ذخیره می‌شود و به `IntraOpNumThreads` sessionهای ONNX Runtime وصل می‌شود؛ `MaxFps` فقط سقف همان آیتم Face است. مدل‌ها ابتدا از `Models/Face`، سپس `Models` و در نهایت مسیر قدیمی `Modules/Face/Models` خوانده می‌شوند؛ در Debug، `HshDetectionEngin.Face/Models` نیز fallback است. |
@@ -42,6 +42,36 @@
 | Identity | `identity-database.db` با جدول‌های `People`، `PersonPlates`، `FaceSamples` و `PalmSamples` | هر شخص یک `PersonId` مشترک دارد و می‌تواند چند پلاک، نمونهٔ چهره و نمونهٔ کف دست داشته باشد. فرم Windows با عنوان `Identity database` مدیریت اشخاص، پلاک‌ها، نمونه‌های Face و Palm و حذف/rename آن‌ها را انجام می‌دهد. |
 | Motion و نمایش | `DrawBoxes`، `DetectionOverlayHoldMs`، `MotionGateEnabled`، `MotionFps`، `MotionThreshold`، `MotionChangedPercent`، `MotionRoiScalePercent`، `MotionHoldMs`، `ActiveDetectionFps`، `IdleDetectionFps` | `DetectionOverlayHoldMs` مدت نمایش آخرین کادر/نتیجهٔ تشخیص برحسب میلی‌ثانیه است و مقدار پیش‌فرض آن `2500` است؛ برای هر نوع تشخیص مستقل اعمال می‌شود. در idle با مقدار `0` برای `IdleDetectionFps` inference متوقف می‌شود. |
 | ROI و هدف پردازش | `Rois[]`، `Rois[].Points`، `Rois[].ProcessingMode`، `Rois[].Processing[]` و `RoiEnabled` | بدون ROI هیچ inferenceای انجام نمی‌شود. ROIهای یک دوربین موازی‌اند؛ هر ROI می‌تواند صفر، یک یا چند آیتم Plate/Face/Palm با مدل و ورودی مستقل داشته باشد. در `Sequential` taskهای همان ROI زنجیره می‌شوند و در `Parallel` مستقل اجرا می‌شوند. |
+
+## تشخیص رنگ بدنه از بالای پلاک با مدل آماده
+
+Windows اکنون از مدل ازپیش‌آموزش‌دیدهٔ Intel `vehicle-attributes-recognition-barrier-0039` استفاده می‌کند. روش خوشه‌بندی و palette در runtime رنگ حذف شده و fallback به آن وجود ندارد. نام روش metadata برابر `AbovePlatePretrainedModel` است.
+
+مدل از منبع رسمی Open Model Zoo دریافت، با checksum رسمی تطبیق، از IR به ONNX تبدیل و با سازوکار موجود `.hshmodel` بسته‌بندی شده است. ورودی `1×3×72×72`، BGR با مقادیر ۰ تا ۲۵۵ و خروجی color دارای softmax است. normalization اضافه، تقسیم بر ۲۵۵ و softmax دوم انجام نمی‌شود. تبدیل با یک interpreter مستقل Torch روی پنج ورودی تصادفی مقایسه شده؛ این بررسی عددی، ارزیابی دقت رنگ خودرو نیست. جزئیات مجوز، منبع و تبدیل در `HshDetectionEngin/Models/VehicleColor/NOTICE.txt` است.
+
+هفت خروجی به ترتیب مدل: White، SilverGray (gray اصلی)، Yellow، Red، Green، Blue و Black. مدل رنگ‌هایی مثل بنفش، قهوه‌ای و نارنجی را کلاس مستقل نمی‌داند و ممکن است آن‌ها را حتی با امتیاز بالا به رنگ دیگری نسبت دهد. برای نمای جلوی خودرو آموزش دیده است؛ عملکرد روی برش کوچک بالای پلاک هنوز با دادهٔ واقعی کاربر ارزیابی نشده است.
+
+برای کادر اصلی detector `(x,y,w,h)`، ناحیهٔ پیش‌فرض `(x,y-3h,w,3h)` است. crop از تصویر رنگی اصلی گرفته می‌شود، نه padding پلاک OCR یا ماسک ROI. ناحیهٔ خارج تصویر clip می‌شود؛ پوشش یا اندازهٔ ناکافی Unknown تولید می‌کند. مدل تنها محتوای همین کادر را می‌بیند و detector خودرو جدیدی اجرا نمی‌شود. فیلتر اختیاری Median ۳×۳ فقط روی کپی crop اعمال می‌شود و سپس resize به ۷۲×۷۲ انجام می‌گیرد؛ فریم مشترک، ورودی OCR و تصویر نمایشی تغییر نمی‌کنند. این فیلتر نویز نقطه‌ای و بازتاب‌های بسیار کوچک را کاهش می‌دهد، اما بازتاب پهن، شیشه یا سایه را حذف نمی‌کند و تضمین بهبود دقت مدل نیست. روشنایی/کنتراست خودکار، histogram equalization و تغییر تراز سفیدی اضافه نشده‌اند. در تنظیمات قدیمی که این فیلد را ندارند پیش‌فرض فعال است؛ برای مقایسهٔ خام و فیلترشده می‌توان آن را خاموش کرد.
+
+تنظیمات Windows در دوربین ← ROI ← پردازش Plate ← تنظیمات رنگ خودرو قرار دارد. نام مدل فعلاً ثابت و روی فرم نمایش داده می‌شود؛ انتخاب مدل‌های متفاوت با قراردادهای دیگر پیاده نشده است.
+
+| تنظیم | پیش‌فرض | معنی |
+| --- | --- | --- |
+| Enabled / DrawSampleRegion | true / true | فعال‌سازی و نمایش کادر |
+| MedianFilterEnabled | true | Median ۳×۳ روی crop اصلی پیش از resize مدل؛ قابل خاموش‌کردن |
+| WidthMultiplier / HeightMultiplier / GapHeightMultiplier | 1 / 3 / 0 | هندسه نسبت به پلاک |
+| ModelConfidence | 0.60 | حداقل امتیاز خروجی مدل برای رنگ اول |
+| ModelMinimumMargin | 0.15 | حداقل اختلاف رنگ اول و دوم |
+| MinimumRegionCoverage | 0.80 | حداقل پوشش کادر داخل تصویر |
+| TrackTimeoutMs | 3000 | انقضای cache پس از ناپدیدشدن Track |
+
+ModelConfidence و ModelMinimumMargin مستقل از آستانهٔ detector و OCR هستند. امتیاز softmax احتمال صحت کالیبره‌شده نیست. نتیجهٔ کم‌امتیاز یا دو رنگ نزدیک Unknown می‌شود. یک کنترل ردِ ناسازگاری نیز وجود دارد: اگر مدل White بگوید اما حداقل ۶۵٪ پیکسل‌های ورودی دارای روشنایی وزنی BGR کمتر از ۸۰ از ۲۵۵ باشند، خروجی با علت WhiteContradictsDarkRegion نامشخص می‌شود. این کنترل رنگ جایگزین حدس نمی‌زند، مدل را دوباره اجرا نمی‌کند و ممکن است سفیدِ زیر سایه را نیز نامشخص کند. آستانهٔ محافظه‌کارانه با مثال مصنوعی بازتاب روی سطح تیره آزموده شده، اما هنوز با دادهٔ دوربین واقعی تنظیم نشده است. AcceptanceScore و MaximumLabDistance قدیمی مانند تنظیمات چندنمونه‌ای فقط برای سازگاری فایل باقی مانده‌اند و دیگر اثر ندارند؛ پس از بازکردن تنظیمات، آستانهٔ مدل جدید را تنظیم کنید.
+
+اولین مشاهدهٔ هر Track در هر task/ROI یک‌بار تحلیل و Accepted یا Unknown همان لحظه نهایی می‌شود؛ حتی Unknown با فریم بعدی تکرار نمی‌شود. بدون TrackId هر detection یک نمونهٔ مستقل است. reset، قطع اتصال و انقضای Track cache را پاک می‌کند. SampleBounds و RegionCoverage مربوط به همان نمونهٔ اولیه حفظ می‌شوند. برای preview، VehicleColorDisplayBounds جداگانه از پلاک فعلی محاسبه می‌شود تا کادر قدیمی روی شیشه یا بالاتر از خودرو باقی نماند. کادر زنده راهنمای هندسهٔ فعلی است؛ حرکت آن باعث نمونه‌گیری دوباره نمی‌شود. این نمونه ممکن است زودتر از موفقیت OCR باشد؛ انتخاب دقیق فریم موفق OCR و worker مستقلِ سند طراحی آینده هنوز پیاده نشده است.
+
+مدل هنگام بازسازی graph آماده و یک ورودی مصنوعی برای warmup اجرا می‌شود، نه در اولین فریم دوربین. inference نمونه در همان مسیر مکمل، روی CPU با یک thread انجام می‌شود؛ در هر binding session مستقل است و همراه graph آزاد می‌شود. worker غیرهم‌زمان مستقل هنوز وجود ندارد؛ زمان inference به زمان پردازش همان فریم اضافه می‌شود. پذیرش پلاک به رنگ وابسته نیست. نبود/خرابی مدل فقط رنگ را Failed/Unknown می‌کند، خطا گزارش می‌شود و pipeline پلاک فعال باقی می‌ماند؛ fallback مخفی اجرا نمی‌شود.
+
+metadata شامل VehicleColor، VehicleColorStatus، VehicleColorScore، VehicleColorModel، VehicleColorMethod، VehicleColorFilter، VehicleColorSamples، VehicleColorAttempts، VehicleColorReason، VehicleColorSampleBounds، VehicleColorDisplayBounds و VehicleColorRegionCoverage است. نتیجه همراه تشخیص و payload ذخیره می‌شود؛ رخداد مجدد پلاک برای رنگ ساخته نمی‌شود. تاریخچهٔ قبلی خودکار بازنویسی نمی‌شود. برای IR رنگ را غیرفعال کنید.
 
 ## جهت حرکت مشترک پردازش‌ها
 
@@ -156,14 +186,13 @@ metadata خروجی شامل `MotionState` (`Unknown`، `Stationary` یا `Movin
 | Motion FPS / threshold / changed percent | `8` / `20` / `0.7` |
 | Motion hold / ROI scale | `1200` ms / `85%` |
 | Active / idle detection FPS | `8` / `0` |
-| Buffer count | `0` |
-| RTSP receiver / CaptureBackend | `FFmpeg` |
+| دریافت RTSP | FFmpeg مستقیم، یک thread decoder، فقط جدیدترین فریم در Windows و سرویس |
 
-مقادیر بالا default کد یا migration هستند و فقط هنگام ساخت تنظیمات جدید یا نبودن مقدار معتبر اعمال می‌شوند؛ بازکردن برنامه مقدارهای موجود در `settings.json` را خودکار بازنویسی نمی‌کند. در schema فعلی مقدار `ProcessingSchemaVersion` برابر `3` است و آیتم‌های مؤثر باید در `Cameras[].Rois[].Processing[]` قرار داشته باشند؛ `Cameras[].Processing` فقط فهرست legacy است و برای فایل جدید باید خالی باشد. تنظیمات قدیمیِ flat مربوط به هر آیتم هنگام Load به `Options` typed مهاجرت می‌کنند.
+مقادیر بالا default کد یا migration هستند و معمولاً هنگام ساخت تنظیمات جدید یا نبودن مقدار معتبر اعمال می‌شوند. دریافت RTSP در هر دو میزبان یک مسیر ثابت FFmpeg با newest-frame است. در schema فعلی مقدار `ProcessingSchemaVersion` برابر `3` است و آیتم‌های مؤثر باید در `Cameras[].Rois[].Processing[]` قرار داشته باشند؛ `Cameras[].Processing` فقط فهرست legacy است و برای فایل جدید باید خالی باشد. تنظیمات قدیمیِ flat مربوط به هر آیتم هنگام Load به `Options` typed مهاجرت می‌کنند.
 
 اگر `Rois[].ProcessingMode` در فایل قدیمی وجود نداشته باشد، مقدار آن هنگام Load برابر `Sequential` می‌شود تا رفتار زنجیره‌ای قبلی حفظ شود. تغییر حالت در UI پس از Save در فایل تنظیمات ذخیره می‌شود و برای اعمال روی runtime به reload معمول تنظیمات نیاز دارد.
 
-`FaceInputSize` برای YuNetهای فعلی از metadata مدل به `640` محدود می‌شود؛ فرم ویندوزی و UI وب همین مقدار را از catalog مشترک می‌گیرند. `FacePreprocessing` برای تشخیص YuNet است و SFace پس از تشخیص، crop را با پنج landmark به `112×112` هم‌تراز می‌کند و آماده‌سازی ورودی خودش را انجام می‌دهد. با فعال‌بودن recognition مقدار `None` توصیه می‌شود؛ `Advanced` با grayscale و equalization ممکن است embedding را تغییر دهد. در تب `Processing`، لیبل‌های Plate و Face شامل `Model`، `Input size`، `Preprocessing`، `Confidence`، `Max processing FPS`، `Threads (ONNX Runtime IntraOpNumThreads)` و `Buffer count (0 = newest only)` هستند. کنترل‌های `Threads` در بخش تشخیص Plate و tracking/recording Face برای آیتم انتخاب‌شده به‌صورت دوطرفه sync می‌شوند و مقدار همان آیتم را ویرایش می‌کنند؛ `Buffer count` در سطح دوربین مشترک است. فیلدهای Face در سطح `CameraSettings` فقط template پیش‌فرض برای ساخت processing item جدید هستند؛ Save تنظیمات آیتم را به camera default برنمی‌گرداند و تغییر camera default آیتم‌های موجود را overwrite نمی‌کند.
+`FaceInputSize` برای YuNetهای فعلی از metadata مدل به `640` محدود می‌شود؛ فرم ویندوزی و UI وب همین مقدار را از catalog مشترک می‌گیرند. `FacePreprocessing` برای تشخیص YuNet است و SFace پس از تشخیص، crop را با پنج landmark به `112×112` هم‌تراز می‌کند و آماده‌سازی ورودی خودش را انجام می‌دهد. با فعال‌بودن recognition مقدار `None` توصیه می‌شود؛ `Advanced` با grayscale و equalization ممکن است embedding را تغییر دهد. در تب `Processing`، لیبل‌های Plate و Face شامل `Model`، `Input size`، `Preprocessing`، `Confidence`، `Max processing FPS` و `Threads (ONNX Runtime IntraOpNumThreads)` هستند. کنترل‌های `Threads` در بخش تشخیص Plate و tracking/recording Face برای آیتم انتخاب‌شده به‌صورت دوطرفه sync می‌شوند و مقدار همان آیتم را ویرایش می‌کنند. دریافت در Windows و سرویس همیشه newest-frame است. فیلدهای Face در سطح `CameraSettings` فقط template پیش‌فرض برای ساخت processing item جدید هستند؛ Save تنظیمات آیتم را به camera default برنمی‌گرداند و تغییر camera default آیتم‌های موجود را overwrite نمی‌کند.
 
 نرخ واقعی Face برابر کمینهٔ نرخ فعال/idle دوربین و `MaxFps` همان آیتم داخل
 `Cameras[].Rois[].Processing[]` است. برای افزایش سرعت، فقط `FaceMaxFps` عمومی
@@ -173,7 +202,7 @@ metadata خروجی شامل `MotionState` (`Unknown`، `Stationary` یا `Movin
 `EventCooldownSeconds` فقط ثبت/ارسال history را محدود می‌کند و جایگزین کاهش نرخ
 inference نیست. برای رسیدن به near-real-time با فشار کنترل‌شده، ابتدا مدل
 `face_yunet_2023mar_int8`، نرخ 8 FPS، `Threads = 1`، Motion Gate فعال و
-`BufferCount = 0` را انتخاب کنید؛ سپس فقط در صورت وجود ظرفیت CPU نرخ 10 FPS یا
+دریافت newest-frame ثابت را در نظر بگیرید؛ سپس فقط در صورت وجود ظرفیت CPU نرخ 10 FPS یا
 `Threads = 2` را آزمایش کنید. پروفایل High performance با 15 FPS و 4 thread
 برای چند دوربین پرمصرف است و نباید انتخاب پیش‌فرض تلقی شود.
 
@@ -187,7 +216,7 @@ inference نیست. برای رسیدن به near-real-time با فشار کنت
 - `Balanced / normal system`: حالت پیشنهادی عمومی؛ دو thread و حدود ۸ FPS، با مصرف متعادل CPU.
 - `High performance / realtime`: برای CPU قوی؛ ۴ thread، حدود ۱۵ FPS، ورودی Face بزرگ‌تر و `TopK` بالاتر.
 
-پروفایل انتخاب‌شده روی تنظیمات عمومی دوربین و تمام processing itemهای ROI اعمال می‌شود؛ thresholdهای تشخیص و شناسایی عمداً تغییر نمی‌کنند. بعد از انتخاب پروفایل باید روی `Save` کلیک شود. `Buffer count` در هر سه حالت صفر می‌ماند تا پردازش روی جدیدترین فریم انجام شود و latency تجمعی ایجاد نشود.
+پروفایل انتخاب‌شده روی تنظیمات عمومی دوربین و تمام processing itemهای ROI اعمال می‌شود؛ thresholdهای تشخیص و شناسایی عمداً تغییر نمی‌کنند. بعد از انتخاب پروفایل باید روی `Save` کلیک شود. دریافت در هر سه پروفایل فقط جدیدترین فریم را نگه می‌دارد.
 
 ### قرارداد ترسیم خروجی پردازش
 
@@ -210,21 +239,25 @@ inference نیست. برای رسیدن به near-real-time با فشار کنت
 
 ### پنجرهٔ تنظیمات دوربین
 
-- `CameraManagerForm` به‌صورت modeless باز می‌شود. دکمهٔ `Add camera` در آن فرم و دکمهٔ `Edit` در جدول، هر دو فرم تنظیمات دوربین را به‌صورت modal با تب‌های `General` و `Processing` باز می‌کنند. در `General` نام، source (RTSP، Webcam index یا فایل)، transport TCP/UDP، `CaptureBackend`، reconnect delay، رسم box/label، Motion Gate، نرخ نمونه‌برداری Motion، threshold، changed percent، مقیاس Motion ROI، hold و نرخ Active/Idle تنظیم می‌شوند. گیرندهٔ پیش‌فرض `FFmpeg` است؛ `LibVLC` برای RTSPهایی است که در VLC پایدارتر از OpenCV FFmpeg هستند و به VLC 3.x x64 نصب‌شده یا متغیر محیطی `VLC_HOME` نیاز دارد. `MediaMTX` برای path مستقل، RTSP داخلی موتور و WHEP خام مرورگر استفاده می‌شود.
-- در `Processing` برای هر ROI می‌توان با انتخاب نوع `Plate`، `Face` یا `Palm` آیتم اضافه یا حذف کرد و ترتیب درخت، ترتیب اجرای پردازش‌هاست. بخش Plate شامل model، input size، preprocessing، confidence، NMS IoU، max FPS، threads، buffer count و track max misses است. بخش Face علاوه بر تشخیص، تنظیمات identification، مدل SFace، thresholdهای known/unknown و tracking/recording را دارد. Palm نیز بخش‌های detection، identification و tracking/recording دارد؛ `DetectorKind` از مدل انتخابی تعیین می‌شود و کنترل جداگانه ندارد. هر task وب کارت detailed کرکره‌ای و تب‌های مستقل دارد. دو کنترل Threads در بخش‌های Plate و Face برای آیتم انتخاب‌شده به‌صورت دوطرفه همگام‌اند؛ Buffer count در سطح دوربین مشترک است. تمام تنظیمات مؤثر Face، از جمله record confidence و event cooldown، از همان processing item خوانده می‌شوند؛ تنظیمات سطح دوربین فقط هنگام ساخت آیتم جدید default هستند.
+- `CameraManagerForm` به‌صورت modeless باز می‌شود. دکمهٔ `Add camera` در آن فرم و دکمهٔ `Edit` در جدول، هر دو فرم تنظیمات دوربین را به‌صورت modal با تب‌های `General` و `Processing` باز می‌کنند. در `General` نام، source (RTSP، Webcam index یا فایل)، transport TCP/UDP، reconnect delay، رسم box/label، Motion Gate، نرخ نمونه‌برداری Motion، threshold، changed percent، مقیاس Motion ROI، hold و نرخ Active/Idle تنظیم می‌شوند. گیرندهٔ Windows ثابت FFmpeg است و کنترل انتخاب backend ندارد.
+- در `Processing` برای هر ROI می‌توان با انتخاب نوع `Plate`، `Face` یا `Palm` آیتم اضافه یا حذف کرد و ترتیب درخت، ترتیب اجرای پردازش‌هاست. بخش Plate شامل model، input size، preprocessing، confidence، NMS IoU، max FPS، threads و track max misses است. بخش Face علاوه بر تشخیص، تنظیمات identification، مدل SFace، thresholdهای known/unknown و tracking/recording را دارد. Palm نیز بخش‌های detection، identification و tracking/recording دارد؛ `DetectorKind` از مدل انتخابی تعیین می‌شود و کنترل جداگانه ندارد. هر task وب کارت detailed کرکره‌ای و تب‌های مستقل دارد. کنترل‌های Threads برای آیتم انتخاب‌شده همگام‌اند؛ دریافت در هر دو میزبان فقط جدیدترین فریم را نگه می‌دارد. ظرفیت و بودجهٔ بافر نمونه‌های تکمیل تشخیص در General مستقل باقی می‌مانند. تمام تنظیمات مؤثر Face، از جمله record confidence و event cooldown، از همان processing item خوانده می‌شوند؛ تنظیمات سطح دوربین فقط هنگام ساخت آیتم جدید default هستند.
 - دکمهٔ `Save` فقط پس از معتبر بودن نام و source و یکتا بودن نام ROIها در همان دوربین تنظیمات را اعمال می‌کند؛ `Cancel` تغییرات ویرایش‌شده را نگه نمی‌دارد. مدل‌ها از catalog سرویس انتخاب می‌شوند و ComboBox هر قابلیت فقط مدل‌های همان قابلیت را نشان می‌دهد؛ در صورت نبود مدل، catalog کامل به‌عنوان fallback نمایش داده نمی‌شود.
 
-### مسیر نمایش زنده
+### مسیر نمایش زندهٔ Windows
 
-- در `MediaMTX`، مرورگر مستقیماً به WHEP خام path وصل می‌شود. تصویر از مسیر
-  `MediaMtxFrameSource` و pipeline تشخیص عبور نمی‌کند؛ فقط endpoint سبک
-  `/api/v1/streams/{cameraId}/overlay` برای ROI، کادر، متن و primitiveهای
-  پردازشی poll می‌شود و Overlay روی ویدئو قرار می‌گیرد.
-- در `FFmpeg`/`LibVLC`، UI غیر MediaMTX از latest snapshot سرویس استفاده می‌کند.
-  `BufferCount = 0` برای newest-frame است؛ مقدار مثبت در VLC یا FFmpeg صف محدود
-  ایجاد می‌کند و برای latency تجمعی مناسب نیست.
-- مسیر `/api/v1/streams/{cameraId}/webrtc/offer` برای کلاینت‌های legacy که
-  فریم کامپوزیت‌شده می‌خواهند باقی می‌ماند و مسیر پیش‌فرض MediaMTX نیست.
+Windows از همان `FrameSource` مستقیم و کم‌تأخیر FFmpeg با یک thread decoder استفاده می‌کند. preview سقف داخلی ۱۵ FPS دارد؛ زمان‌بندی به نوبت‌های ثابت متصل است تا گردکردن فاصلهٔ فریم‌ها نرخ را بی‌دلیل پایین نیاورد. اندازهٔ خروجی از فضای تصویر گرفته می‌شود، نسبت ابعاد حفظ می‌شود و سقف `1280×720` دارد؛ ورودی inference کوچک نمی‌شود. برای دوربین مخفی یا پنجرهٔ minimizeشده، preview غیرفعال و capture/inference فعال می‌مانند.
+
+Matهای preview دوباره استفاده می‌شوند و UI مالکیت Bitmap را بدون clone می‌گیرد. برای هر دوربین قابل مشاهده، حداکثر یک Bitmap منتظر و یک Bitmap در حال نمایش نگه داشته می‌شود و تصویر جایگزین‌شده آزاد می‌شود. سنجهٔ محلی تأخیر از فریم decodeشده تا آماده‌شدن preview و رسم UI، پنجرهٔ ثابت ۱۲۰ نمونه دارد؛ تأخیر شبکه، encoder دوربین و decoder را اندازه نمی‌گیرد. کاربر رفع تأخیر تصویر را تأیید کرده است؛ مقایسهٔ کمی CPU، RAM و تأخیر کامل دوربین همچنان گزارش جداگانه می‌خواهد.
+
+### مسیر نمایش زندهٔ سرویس/وب
+
+- tile، focus و ROI زنده از `CompositeWebRtcStream` و مسیر
+  `/api/v1/streams/{cameraId}/webrtc/offer` با Drawing سرویس استفاده می‌کنند.
+- در preview صفحهٔ CameraEditor، `canWhep` قابلیت source فعال RTSP را اعلام
+  می‌کند؛ RTSP در حال اجرا live composite و sourceهای دیگر latest snapshot دارند.
+- درگاه مستقل MediaMTX/WHEP برای source فعال RTSP موجود است. مصرف‌کنندهٔ خام
+  می‌تواند `/api/v1/streams/{cameraId}/overlay` را برای ROI، کادر، متن و primitiveها
+  بخواند و روی ویدئو رسم کند. موتور تشخیص مستقیماً از دوربین با FFmpeg می‌خواند.
 
 ### صفحهٔ مدیریت افراد و تشابه
 

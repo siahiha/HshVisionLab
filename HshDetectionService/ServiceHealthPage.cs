@@ -193,7 +193,7 @@ internal static class ServiceHealthPage
     function renderCameras(cameras) {
       const panel = document.getElementById('cameras-panel');
       panel.hidden = !cameras.length;
-      document.getElementById('cameras').innerHTML = cameras.length ? `<table><thead><tr><th>دوربین</th><th>Capture</th><th>وضعیت منبع</th><th>FPS</th><th>Pipeline</th></tr></thead><tbody>${cameras.map((camera) => `<tr><td>${esc(camera.name || camera.id)}</td><td><span class="state">${esc(camera.captureBackend || '—')}</span></td><td><span class="state">${esc(camera.sourceState || (camera.running ? 'Running' : 'Stopped'))}</span></td><td><span class="state">${esc(camera.fps ?? 0)}</span></td><td>${camera.activePipelineCount > 0 ? 'فعال' : 'غیرفعال'}</td></tr>`).join('')}</tbody></table>` : '';
+      document.getElementById('cameras').innerHTML = cameras.length ? `<table><thead><tr><th>دوربین</th><th>WHEP</th><th>وضعیت منبع</th><th>FPS</th><th>Pipeline</th></tr></thead><tbody>${cameras.map((camera) => `<tr><td>${esc(camera.name || camera.id)}</td><td><span class="state">${esc(camera.canWhep ? 'پشتیبانی می‌شود' : 'در دسترس نیست')}</span></td><td><span class="state">${esc(camera.sourceState || (camera.running ? 'Running' : 'Stopped'))}</span></td><td><span class="state">${esc(camera.fps ?? 0)}</span></td><td>${camera.activePipelineCount > 0 ? 'فعال' : 'غیرفعال'}</td></tr>`).join('')}</tbody></table>` : '';
     }
     async function probe() {
       resetChecks();

@@ -1184,7 +1184,6 @@ function CameraFocusWorkspace({
           roi={displayedRoi}
           className="camera-focus-roi"
           live={Boolean(status?.running)}
-          streamBackend={draft.captureBackend}
           editable={roiMode !== "view"}
           onChange={updateRoiDraft}
         />
@@ -1333,7 +1332,6 @@ function CameraFullscreen({
               className="fullscreen-roi"
               live={Boolean(status?.running && draft.enabled !== false)}
               enabled={draft.enabled !== false}
-              streamBackend={draft.captureBackend}
               onChange={(points) => roi && updateRoi({ ...roi, points })}
             />
           </div>
@@ -1741,7 +1739,6 @@ function CameraEditor({ id }: { id: string }) {
         ? {
             fps: 5,
             threads: 1,
-            buffer: 0,
             active: 5,
             idle: 2,
             faceSize: 320,
@@ -1751,7 +1748,6 @@ function CameraEditor({ id }: { id: string }) {
           ? {
               fps: 15,
               threads: 4,
-              buffer: 2,
               active: 15,
               idle: 4,
               faceSize: 480,
@@ -1760,7 +1756,6 @@ function CameraEditor({ id }: { id: string }) {
           : {
               fps: 8,
               threads: 2,
-              buffer: 0,
               active: 8,
               idle: 0,
               faceSize: 416,
@@ -1785,7 +1780,6 @@ function CameraEditor({ id }: { id: string }) {
       maxFps: p.fps,
       faceMaxFps: p.fps,
       threads: p.threads,
-      bufferCount: p.buffer,
       activeDetectionFps: p.active,
       idleDetectionFps: p.idle,
       rois,
@@ -1906,12 +1900,12 @@ function CameraEditor({ id }: { id: string }) {
             <div className="panel-head compact">
               <div>
                 <h3>
-                  {draft.captureBackend === "MediaMTX"
-                    ? "پخش کم‌تاخیر MediaMTX"
+                  {status?.canWhep
+                    ? "پخش زندهٔ کم‌تأخیر"
                     : "آخرین فریم کامپوزیت‌شده"}
                 </h3>
                 <span>
-                  {draft.captureBackend === "MediaMTX"
+                  {status?.canWhep
                     ? "WebRTC · استریم پردازش‌شده با ROI، کادرها و نتایج تشخیص"
                     : "ROI و Drawing روی آخرین تصویر سرویس رسم می‌شوند."}
                 </span>
@@ -1923,7 +1917,7 @@ function CameraEditor({ id }: { id: string }) {
             <RoiCanvas
               cameraId={id}
               roi={roi}
-              live={draft.captureBackend === "MediaMTX" && draft.enabled !== false}
+              live={Boolean(status?.running && status.canWhep && draft.enabled !== false)}
               enabled={draft.enabled !== false}
               onChange={(next) => roi && updateRoi({ ...roi, points: next })}
             />
@@ -2602,7 +2596,6 @@ function RoiCanvas({
   className,
   live = false,
   enabled = true,
-  streamBackend,
   editable = true,
   onChange,
 }: {
@@ -2611,7 +2604,6 @@ function RoiCanvas({
   className?: string;
   live?: boolean;
   enabled?: boolean;
-  streamBackend?: string;
   editable?: boolean;
   onChange: (points: { x: number; y: number }[]) => void;
 }) {
@@ -2791,16 +2783,6 @@ function GeneralSettings({
               onChange={(e) => update("sourceUrl", e.target.value)}
             />
           </Field>
-          <Field label="RTSP receiver">
-            <select
-              value={draft.captureBackend}
-              onChange={(e) => update("captureBackend", e.target.value)}
-            >
-              <option>FFmpeg</option>
-              <option>LibVLC</option>
-              <option>MediaMTX</option>
-            </select>
-          </Field>
           <Field label="Transport">
             <select
               value={draft.transport}
@@ -2818,14 +2800,6 @@ function GeneralSettings({
               onChange={(e) =>
                 update("reconnectDelaySec", Number(e.target.value))
               }
-            />
-          </Field>
-          <Field label="Buffer count" hint="0 یعنی فقط آخرین فریم">
-            <input
-              type="number"
-              min="0"
-              value={draft.bufferCount}
-              onChange={(e) => update("bufferCount", Number(e.target.value))}
             />
           </Field>
           <label className="check-field">
@@ -3126,8 +3100,6 @@ function ProcessingSettings({
                       ),
                     })
                   }
-                  bufferCount={draft.bufferCount}
-                  onBufferChange={(value) => update("bufferCount", value)}
                   models={models}
                 />
               ))}
@@ -3294,15 +3266,11 @@ function TaskEditor({
   task,
   onChange,
   onDelete,
-  bufferCount,
-  onBufferChange,
   models,
 }: {
   task: ProcessingTask;
   onChange: (next: ProcessingTask) => void;
   onDelete: () => void;
-  bufferCount: number;
-  onBufferChange: (value: number) => void;
   models: ModelInfo[];
 }) {
   const face = task.type.toLocaleLowerCase() === "face";
@@ -3501,7 +3469,6 @@ function TaskEditor({
           <div className="task-fields">
             <Field label="Max processing FPS"><input type="number" min="1" max="60" value={task.maxFps} onChange={(e) => onChange({ ...task, maxFps: Number(e.target.value) })} /></Field>
             <Field label="Threads"><input type="number" min="1" max="16" value={task.threads} onChange={(e) => onChange({ ...task, threads: Number(e.target.value) })} /></Field>
-            <Field label="Buffer count" hint="۰ یعنی فقط جدیدترین فریم"><input type="number" min="0" max="10" value={bufferCount} onChange={(e) => onBufferChange(Number(e.target.value))} /></Field>
             <Field label="Track max misses"><input type="number" min="1" max="60" value={n(option(task, "trackMaxMisses", 6))} onChange={(e) => set("trackMaxMisses", Number(e.target.value))} /></Field>
             <Field label="History event cooldown (sec)"><input type="number" min="0" max="3600" value={n(option(task, "eventCooldownSeconds", 60))} onChange={(e) => set("eventCooldownSeconds", Number(e.target.value))} /></Field>
           </div>
@@ -3540,7 +3507,6 @@ function TaskEditor({
             <div className="task-fields">
               <Field label="Max processing FPS"><input type="number" min="1" max="60" value={task.maxFps} onChange={(e) => onChange({ ...task, maxFps: Number(e.target.value) })} /></Field>
               <Field label="Threads"><input type="number" min="1" max="16" value={task.threads} onChange={(e) => onChange({ ...task, threads: Number(e.target.value) })} /></Field>
-              <Field label="Buffer count" hint="۰ یعنی فقط جدیدترین فریم"><input type="number" min="0" max="10" value={bufferCount} onChange={(e) => onBufferChange(Number(e.target.value))} /></Field>
               <Field label="History record confidence"><input type="number" min="0" max="1" step=".01" value={n(option(task, "recordConfidence", .55))} onChange={(e) => set("recordConfidence", Number(e.target.value))} /></Field>
               <Field label="History event cooldown (sec)"><input type="number" min="0" value={n(option(task, "eventCooldownSeconds", 60))} onChange={(e) => set("eventCooldownSeconds", Number(e.target.value))} /></Field>
               <Field label="Tracking IoU"><input type="number" min="0" max="1" step=".01" value={n(option(task, "matchIou", .25))} onChange={(e) => set("matchIou", Number(e.target.value))} /></Field>
@@ -3701,15 +3667,6 @@ function TaskEditor({
                   onChange={(e) =>
                     onChange({ ...task, threads: Number(e.target.value) })
                   }
-                />
-              </Field>
-              <Field label="Buffer count" hint="۰ یعنی فقط جدیدترین فریم">
-                <input
-                  type="number"
-                  min="0"
-                  max="10"
-                  value={bufferCount}
-                  onChange={(e) => onBufferChange(Number(e.target.value))}
                 />
               </Field>
               <Field label="History record confidence">

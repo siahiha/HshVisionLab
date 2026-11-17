@@ -76,32 +76,35 @@ Publish(output)
 
 این دقیقاً همان رفتار مطلوب برنامهٔ Windows فعلی است: تصویر زنده مستقل حرکت می‌کند و Drawing از state آخرین نتیجه استفاده می‌کند.
 
-## 4.1 پیاده‌سازی فعلی MediaMTX در وب
+## 4.1 نمایش فعال وب و درگاه مستقل WHEP
 
-برای رسیدن به latency نزدیک به مسیر خام MediaMTX، رابط وب در حالت
-`CaptureBackend = MediaMTX` از دو کانال مستقل استفاده می‌کند:
+UI وب فعلی در tile، focus و ROI زنده از `CompositeWebRtcStream` و
+`POST /api/v1/streams/{cameraId}/webrtc/offer` استفاده می‌کند. تصویر Drawing
+سرویس را دارد و render/encoding مستقل از نرخ inference زمان‌بندی می‌شوند.
+
+درگاه مستقل سرویس برای sourceهای فعال RTSP، WHEP خام و Overlay جداگانه را
+نیز در اختیار مصرف‌کننده قرار می‌دهد:
 
 ```text
 MediaMTX WHEP خام ───────────────► Browser <video>
 Overlay API / polling ───────────► Browser SVG overlay
 ```
 
-موتور تشخیص همچنان ورودی خود را از local RTSP path می‌گیرد:
+موتور تشخیص مستقیماً از دوربین با یک thread decoder دریافت می‌کند:
 
 ```text
-MediaMTX path → local RTSP → MediaMtxFrameSource → CameraRuntime
+Camera RTSP → FrameSource/FFmpeg → newest-frame → CameraRuntime
 ```
 
-بنابراین `FrameReady` و `WebRtcGateway` برای نمایش اصلی MediaMTX در مسیر نیستند
-و ویدئو برای اضافه‌کردن Drawing دوباره encode نمی‌شود. endpoint سبک
+در مسیر خام WHEP، ویدئو برای اضافه‌کردن Drawing دوباره encode نمی‌شود. endpoint سبک
 `/api/v1/streams/{cameraId}/overlay` ROIها، bounds تشخیص، label، confidence،
 track id و primitiveهای پردازشی را می‌دهد. کلاینت این داده را روی همان ابعاد
 فریم خام رسم می‌کند. این مسیر برای inference خاموش یا کند نیز latency ویدئو را
 تغییر نمی‌دهد؛ فقط تازگی Overlay تابع آخرین نتیجهٔ پردازش است.
 
-مسیر compositor و `WebRtcGateway` هنوز برای snapshot کامپوزیت‌شده، کلاینت‌های
-legacy و مصرف‌کننده‌هایی که ویدئوی burn-in شده می‌خواهند قابل استفاده است، اما
-نباید به‌عنوان مسیر پیش‌فرض WHEP MediaMTX استفاده شود.
+`MediaMtxRuntime` فقط در سرویس مدیریت می‌شود و path مرورگر را هنگام درخواست
+WHEP می‌سازد. کامپوننت خام `RawMediaMtxStream` در سورس موجود است؛ نماهای فعال
+فعلی همچنان خروجی compositor و `WebRtcGateway` را استفاده می‌کنند.
 
 ## 4. سیاست overlay پویا
 
@@ -161,7 +164,7 @@ WebRTC Peer Connections
 - snapshot HTTP کامپوزیت‌شده از همان state خروجی گرفته می‌شود.
 - در مسیر MediaMTX، متادیتای detection جدا از ویدئوی WHEP ارسال و در کلاینت
   به‌صورت SVG در `LiveOverlaySvg` رسم می‌شود؛ burn-in فقط برای مسیر
-  compositor/legacy لازم است.
+  compositor لازم است.
 
 ## 7. Signaling و شبکه
 

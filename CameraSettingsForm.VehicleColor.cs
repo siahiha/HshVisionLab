@@ -1,0 +1,62 @@
+namespace HshVisionLab;
+
+public sealed partial class CameraSettingsForm
+{
+    private readonly List<Control> _vehicleColorControls = [];
+
+    private void BuildVehicleColorSettings(TableLayoutPanel table)
+    {
+        int startRow = table.RowCount;
+        var edit = MakeButton("Vehicle color settings", Color.SteelBlue);
+        edit.Click += (_, _) =>
+        {
+            if (_selectedProcessing is null) return;
+            using var form = CreateVehicleColorEditor(_selectedProcessing);
+            form.ShowDialog(this);
+        };
+        AddRow(table, "Vehicle body color", edit);
+        foreach (Control control in table.Controls)
+            if (table.GetRow(control) >= startRow) _vehicleColorControls.Add(control);
+    }
+
+    private Form CreateVehicleColorEditor(CameraProcessingSettings item)
+    {
+        var settings = item.VehicleColor?.Clone() ?? new VehicleColorSettings();
+        var form = CreateCompletionEditor("Vehicle color settings", out var table, out var save);
+        var enabled = new CheckBox { Checked = settings.Enabled };
+        AddEditorRow(table, "Enabled", enabled);
+        var draw = new CheckBox { Checked = settings.DrawSampleRegion };
+        AddEditorRow(table, "Draw body sample region", draw);
+        var median = new CheckBox { Name = "MedianFilterEnabled", Checked = settings.MedianFilterEnabled };
+        AddEditorRow(table, "Reduce color crop noise (Median 3x3)", median);
+        NumericUpDown Number(string label, decimal value, decimal min, decimal max, int decimals = 0)
+        {
+            var number = ConfigureNumber(new NumericUpDown(), min, max, decimals == 0 ? 1 : .01m, decimals);
+            number.Name = label; number.Value = Math.Clamp(value, min, max);
+            AddEditorRow(table, label, number); return number;
+        }
+        var height = Number("Body region height / plate height", (decimal)settings.HeightMultiplier, .25m, 10, 2);
+        var width = Number("Body region width / plate width", (decimal)settings.WidthMultiplier, .25m, 5, 2);
+        var gap = Number("Gap above plate / plate height", (decimal)settings.GapHeightMultiplier, 0, 5, 2);
+        AddEditorRow(table, "Single frame per track; no resampling", new Label { AutoSize = true, Text = "" });
+        var timeout = Number("Color track timeout (ms)", settings.TrackTimeoutMs, 1, 60000);
+        AddEditorRow(table, "Color model", new Label { AutoSize = true, Text = "Intel OMZ 0039 (72x72)" });
+        var score = Number("Minimum model color score", (decimal)settings.ModelConfidence, .01m, 1, 2);
+        var margin = Number("Minimum model color margin", (decimal)settings.ModelMinimumMargin, 0, 1, 2);
+        var coverage = Number("Minimum visible body region", (decimal)settings.MinimumRegionCoverage, .01m, 1, 2);
+        AddEditorRow(table, "Body color is an estimate. Disable for infrared images.", new Label { AutoSize = true, Text = "" });
+        save.Click += (_, _) =>
+        {
+            settings.Enabled = enabled.Checked; settings.DrawSampleRegion = draw.Checked;
+            settings.MedianFilterEnabled = median.Checked;
+            settings.HeightMultiplier = (float)height.Value; settings.WidthMultiplier = (float)width.Value;
+            settings.GapHeightMultiplier = (float)gap.Value;
+            settings.ModelConfidence = (float)score.Value; settings.TrackTimeoutMs = (int)timeout.Value;
+            settings.ModelMinimumMargin = (float)margin.Value; settings.MinimumRegionCoverage = (float)coverage.Value;
+            try { settings.Validate(); }
+            catch (InvalidOperationException ex) { MessageBox.Show(form, UiLocalization.T(ex.Message)); return; }
+            item.VehicleColor = settings; form.DialogResult = DialogResult.OK;
+        };
+        UiLocalization.Apply(form); return form;
+    }
+}
