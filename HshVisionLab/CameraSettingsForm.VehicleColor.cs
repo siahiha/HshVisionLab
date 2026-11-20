@@ -26,7 +26,7 @@ public sealed partial class CameraSettingsForm
         var enabled = new CheckBox { Checked = settings.Enabled };
         AddEditorRow(table, "Enabled", enabled);
         var draw = new CheckBox { Checked = settings.DrawSampleRegion };
-        AddEditorRow(table, "Draw body sample region", draw);
+        AddEditorRow(table, "Draw detected vehicle box", draw);
         var median = new CheckBox { Name = "MedianFilterEnabled", Checked = settings.MedianFilterEnabled };
         AddEditorRow(table, "Reduce color crop noise (Median 3x3)", median);
         NumericUpDown Number(string label, decimal value, decimal min, decimal max, int decimals = 0)
@@ -35,24 +35,43 @@ public sealed partial class CameraSettingsForm
             number.Name = label; number.Value = Math.Clamp(value, min, max);
             AddEditorRow(table, label, number); return number;
         }
-        var height = Number("Body region height / plate height", (decimal)settings.HeightMultiplier, .25m, 10, 2);
-        var width = Number("Body region width / plate width", (decimal)settings.WidthMultiplier, .25m, 5, 2);
-        var gap = Number("Gap above plate / plate height", (decimal)settings.GapHeightMultiplier, 0, 5, 2);
-        AddEditorRow(table, "Single frame per track; no resampling", new Label { AutoSize = true, Text = "" });
+        var models = VehicleModelCatalog.Enumerate();
+        ComboBox ModelSelector(string label, string capability, string selected)
+        {
+            var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 360 };
+            foreach (var model in models.Where(m => m.Capability == capability)) combo.Items.Add(model.Name);
+            selected = Path.ChangeExtension(Path.GetFileName(selected), ".onnx");
+            if (!combo.Items.Contains(selected)) combo.Items.Add(selected);
+            combo.SelectedItem = selected;
+            AddEditorRow(table, label, combo); return combo;
+        }
+        var colorModel = ModelSelector("Color model", "VehicleColor", settings.ModelFile);
+        var contract = new Label { AutoSize = true, MaximumSize = new Size(480, 0) };
+        void ShowContract()
+        {
+            var model = models.FirstOrDefault(m => m.Capability == "VehicleColor" && m.Name == colorModel.SelectedItem?.ToString());
+            contract.Text = model?.ColorContract is { } c
+                ? $"{c.InputWidth} x {c.InputHeight}, {c.ColorOrder}, scale {c.Scale}; {string.Join(", ", c.Labels)}"
+                : "Selected model is unavailable";
+        }
+        colorModel.SelectedIndexChanged += (_, _) => ShowContract(); ShowContract();
+        AddEditorRow(table, "Model input (automatic)", contract);
+        var vehicleModel = ModelSelector("Vehicle detection model", "VehicleDetection", settings.VehicleDetectorModelFile);
+        var vehicleConfidence = Number("Vehicle box confidence", (decimal)settings.VehicleDetectionConfidence, .01m, 1, 2);
+        var vehicleNms = Number("Vehicle NMS IoU", (decimal)settings.VehicleNmsIoU, .01m, 1, 2);
+        var fps = Number("Maximum color processing FPS", settings.MaxFps, 1, 10);
         var timeout = Number("Color track timeout (ms)", settings.TrackTimeoutMs, 1, 60000);
-        AddEditorRow(table, "Color model", new Label { AutoSize = true, Text = "Intel OMZ 0039 (72x72)" });
-        var score = Number("Minimum model color score", (decimal)settings.ModelConfidence, .01m, 1, 2);
-        var margin = Number("Minimum model color margin", (decimal)settings.ModelMinimumMargin, 0, 1, 2);
-        var coverage = Number("Minimum visible body region", (decimal)settings.MinimumRegionCoverage, .01m, 1, 2);
+        AddEditorRow(table, "Color has no minimum score and does not affect plate acceptance.", new Label { AutoSize = true, Text = "" });
         AddEditorRow(table, "Body color is an estimate. Disable for infrared images.", new Label { AutoSize = true, Text = "" });
         save.Click += (_, _) =>
         {
             settings.Enabled = enabled.Checked; settings.DrawSampleRegion = draw.Checked;
             settings.MedianFilterEnabled = median.Checked;
-            settings.HeightMultiplier = (float)height.Value; settings.WidthMultiplier = (float)width.Value;
-            settings.GapHeightMultiplier = (float)gap.Value;
-            settings.ModelConfidence = (float)score.Value; settings.TrackTimeoutMs = (int)timeout.Value;
-            settings.ModelMinimumMargin = (float)margin.Value; settings.MinimumRegionCoverage = (float)coverage.Value;
+            settings.ModelFile = colorModel.SelectedItem?.ToString() ?? settings.ModelFile;
+            settings.VehicleDetectorModelFile = vehicleModel.SelectedItem?.ToString() ?? settings.VehicleDetectorModelFile;
+            settings.VehicleDetectionConfidence = (float)vehicleConfidence.Value;
+            settings.VehicleNmsIoU = (float)vehicleNms.Value;
+            settings.MaxFps = (int)fps.Value; settings.TrackTimeoutMs = (int)timeout.Value;
             try { settings.Validate(); }
             catch (InvalidOperationException ex) { MessageBox.Show(form, UiLocalization.T(ex.Message)); return; }
             item.VehicleColor = settings; form.DialogResult = DialogResult.OK;

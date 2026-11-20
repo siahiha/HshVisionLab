@@ -58,6 +58,8 @@ import {
   Zap,
 } from "lucide-react";
 import { api, ApiError, serviceUrl } from "./api";
+import { detectionPreviews, detectionSummaries } from "./detectionPresentation";
+import { DetectionHistoryCards } from "./DetectionHistoryCards";
 import {
   keys,
   useCamera,
@@ -85,7 +87,6 @@ import {
   useTriggers,
 } from "./hooks";
 import type {
-  Artifact,
   CameraSettings,
   CameraStatus,
   ClientSubscription,
@@ -283,86 +284,19 @@ function eventTitle(event: DetectionEvent) {
     s(event.components.palm?.label, s(event.components.plate?.plateText, event.eventType)),
   );
 }
-function confidenceText(value: unknown) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  if (value <= 1) return value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
-  return `${Math.round(value)}%`;
-}
 function objectValue(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
     : {};
 }
 function eventDetailRows(event: DetectionEvent) {
-  const rows: Array<{
-    kind: "face" | "plate" | "palm";
-    label: string;
-    value: string;
-    confidence: string;
-  }> = [];
-  const plate = event.components.plate;
-  if (plate) {
-    rows.push({
-      kind: "plate",
-      label: "پلاک",
-      value: s(plate.plateText, s(plate.label, "پلاک")),
-      confidence: confidenceText(plate.confidence),
-    });
-  }
-  const face = event.components.face;
-  if (face) {
-    const recognition = objectValue(face.recognition);
-    rows.push({
-      kind: "face",
-      label: "چهره",
-      value: s(recognition.name, s(face.label, "چهره")),
-      confidence: confidenceText(face.confidence),
-    });
-  }
-  const palm = event.components.palm;
-  if (palm) {
-    const recognition = objectValue(palm.recognition);
-    rows.push({
-      kind: "palm",
-      label: "کف دست",
-      value: s(recognition.name, s(palm.label, "کف دست")),
-      confidence: confidenceText(palm.confidence),
-    });
-  }
-  return rows;
+  return detectionSummaries(event).flatMap(detail => [
+    { kind: detail.kind, label: detail.label, value: detail.value, confidence: detail.metrics[0].value },
+    ...(detail.color ? [{ kind: detail.kind, label: "رنگ خودرو", value: detail.color.value, confidence: detail.color.score ?? "—" }] : []),
+  ]);
 }
 function eventPreviewArtifacts(event: DetectionEvent) {
-  const findArtifact = (types: string[]) =>
-    types
-      .map((type) =>
-        event.artifacts.find((artifact) => artifact.type.toLocaleLowerCase() === type),
-      )
-      .find(Boolean);
-  const previews = [
-    event.components.plate
-      ? findArtifact(["platecrop", "detectioncrop"])
-      : undefined,
-    event.components.face
-      ? findArtifact(["facealignedcrop", "detectioncrop"])
-      : undefined,
-    event.components.palm
-      ? findArtifact(["palmcrop", "detectioncrop"])
-      : undefined,
-  ].filter((artifact, index, items): artifact is Artifact => {
-    if (!artifact) return false;
-    return items.findIndex((item) => item?.artifactId === artifact.artifactId) === index;
-  });
-  if (previews.length) return previews;
-  const fallback = findArtifact([
-    "detectioncrop",
-    "platecrop",
-    "facealignedcrop",
-    "palmcrop",
-    "roiannotated",
-    "associatedframeraw",
-    "fullframeraw",
-  ]);
-  return fallback ? [fallback] : [];
+  return detectionPreviews(event).map(preview => preview.artifact);
 }
 
 function App() {
@@ -731,7 +665,7 @@ function Dashboard() {
   const recent = (events.data ?? [])
     .slice()
     .sort((a, b) => b.sequence - a.sequence)
-    .slice(0, 8);
+    .slice(0, 25);
   const running = list.filter((item) => item.running).length;
   const runForAll = async (command: "start" | "stop") => {
     if (!list.length || commandBusy) return;
@@ -951,7 +885,7 @@ function DetectionHistoryPanel({
       <div className="panel-head">
         <div>
           <h3>پنل تشخیص</h3>
-          <span>Detected events · All cameras</span>
+          <span>آخرین تشخیص‌ها · همه دوربین‌ها</span>
         </div>
         <div className="head-actions">
           <Badge tone={events.length ? "green" : "neutral"}>{events.length} رخداد</Badge>
@@ -967,43 +901,7 @@ function DetectionHistoryPanel({
           text="پس از دریافت اولین رخداد، crop و مشخصات متنی تشخیص اینجا نمایش داده می‌شود."
         />
       ) : (
-        <div className="detected-events-list">
-          {events.map((event) => {
-            const previews = eventPreviewArtifacts(event);
-            const details = eventDetailRows(event);
-            const camera = s(event.source.cameraName, s(event.source.cameraId, "دوربین نامشخص"));
-            const roi = s(event.source.roiName, s(event.scenario, "بدون ROI"));
-            return (
-              <button className="detected-event-card" key={event.eventId} onClick={() => onOpenEvent(event.eventId)}>
-                <div className="detected-event-copy">
-                  <div className="detected-event-title">
-                    <span className="detected-event-camera">{camera}</span>
-                    <span className="detected-event-roi">{roi}</span>
-                  </div>
-                  <div className={`detected-event-images count-${Math.min(previews.length, 2)}`}>
-                    {previews.length ? previews.map((artifact) => (
-                      <div className="detected-event-image" key={artifact.artifactId}>
-                        <img src={serviceUrl(artifact.downloadUrl)} alt={artifact.type} />
-                      </div>
-                    )) : (
-                      <div className="detected-event-image"><Database size={28} /></div>
-                    )}
-                  </div>
-                  <div className="detected-event-details">
-                    {details.map((detail) => (
-                      <div className={`detected-event-detail ${detail.kind}`} key={detail.kind}>
-                        <span className="detected-event-detail-label">{detail.label}</span>
-                        <b className="detected-event-detail-value">{detail.value}</b>
-                        <small dir="ltr">conf: {detail.confidence}</small>
-                      </div>
-                    ))}
-                    {!details.length && <span className="detected-event-no-details">جزئیات تشخیص موجود نیست</span>}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        <DetectionHistoryCards events={events} onOpenEvent={onOpenEvent} />
       )}
     </section>
   );
@@ -3375,7 +3273,7 @@ function ProcessingSettings({
   );
 }
 
-type ModelCapability = "plate" | "plateRecognition" | "faceDetection" | "faceRecognition" | "palmDetection" | "palmRecognition";
+type ModelCapability = "plate" | "plateRecognition" | "faceDetection" | "faceRecognition" | "palmDetection" | "palmRecognition" | "vehicleColor" | "vehicleDetection";
 
 function isModelForCapability(model: ModelInfo, capability: ModelCapability) {
   const advertised = model.capability?.toLowerCase();
@@ -3526,7 +3424,14 @@ function TaskEditor({
 }) {
   const face = task.type.toLocaleLowerCase() === "face";
   const palm = task.type.toLocaleLowerCase() === "palm";
-  const [sectionTab, setSectionTab] = useState<"detection" | "recognition" | "tracking">("detection");
+  const [sectionTab, setSectionTab] = useState<"detection" | "recognition" | "tracking" | "color">("detection");
+  const color = { enabled: true, modelFile: "vehicle-attributes-recognition-barrier-0039.onnx",
+    vehicleDetectorModelFile: "yolox_nano.onnx", vehicleDetectionConfidence: .30, vehicleNmsIoU: .45,
+    maxFps: 2, trackTimeoutMs: 3000, medianFilterEnabled: true, drawSampleRegion: true, ...task.vehicleColor };
+  const setColor = (key: keyof typeof color, value: string | number | boolean) =>
+    onChange({ ...task, vehicleColor: { ...color, [key]: value } });
+  const selectedColorModel = models.find(model => isModelForCapability(model, "vehicleColor") &&
+    (model.name === color.modelFile || model.relativePath === color.modelFile));
   const [cardExpanded, setCardExpanded] = useState(false);
   useEffect(() => {
     setSectionTab("detection");
@@ -3610,9 +3515,31 @@ function TaskEditor({
         >
           ردیابی و سابقه
         </button>
+        {!face && !palm && <button className={sectionTab === "color" ? "active" : ""}
+          onClick={() => setSectionTab("color")} role="tab" aria-selected={sectionTab === "color"}>رنگ خودرو</button>}
       </div>
       {!face && !palm && (
         <>
+        {sectionTab === "color" && <div className="processing-option-section plate-section">
+          <div className="processing-section-head">
+            <div><b>رنگ خودرو</b><span>پس از تشخیص کادر پلاک، خودروی متناظر پیدا و تصویر کامل آن بررسی می‌شود؛ مستقل از نتیجه OCR.</span></div>
+            <Toggle checked={color.enabled} onChange={value => setColor("enabled", value)} />
+          </div>
+          <div className="task-fields">
+            <ModelSelect label="مدل رنگ" value={color.modelFile} onChange={value => setColor("modelFile", value)} models={models} capability="vehicleColor" wide />
+            {selectedColorModel?.colorContract && <div className="field wide" dir="ltr">
+              {selectedColorModel.inputWidth} × {selectedColorModel.inputHeight} · {selectedColorModel.colorContract.colorOrder}
+              {" · "}{selectedColorModel.colorContract.labels.join(", ")}
+            </div>}
+            <ModelSelect label="مدل تشخیص خودرو" value={color.vehicleDetectorModelFile} onChange={value => setColor("vehicleDetectorModelFile", value)} models={models} capability="vehicleDetection" wide />
+            <Field label="حداقل اطمینان کادر خودرو"><input type="number" min=".01" max="1" step=".01" value={color.vehicleDetectionConfidence} onChange={e => setColor("vehicleDetectionConfidence", Number(e.target.value))} /></Field>
+            <Field label="Vehicle NMS IoU"><input type="number" min=".01" max="1" step=".01" value={color.vehicleNmsIoU} onChange={e => setColor("vehicleNmsIoU", Number(e.target.value))} /></Field>
+            <Field label="حداکثر نرخ تحلیل رنگ (FPS)"><input type="number" min="1" max="10" value={color.maxFps} onChange={e => setColor("maxFps", Number(e.target.value))} /></Field>
+            <Field label="مهلت ردیابی رنگ (ms)"><input type="number" min="1" max="60000" value={color.trackTimeoutMs} onChange={e => setColor("trackTimeoutMs", Number(e.target.value))} /></Field>
+            <Field label="کاهش نویز تصویر رنگ (Median 3×3)"><Toggle checked={color.medianFilterEnabled} onChange={value => setColor("medianFilterEnabled", value)} /></Field>
+            <Field label="نمایش کادر خودرو"><Toggle checked={color.drawSampleRegion} onChange={value => setColor("drawSampleRegion", value)} /></Field>
+          </div>
+        </div>}
         {sectionTab === "detection" && <div className="processing-option-section plate-section">
           <div className="processing-section-head">
             <div>
@@ -3650,7 +3577,7 @@ function TaskEditor({
                 <option>Advanced</option>
               </select>
             </Field>
-            <Field label="Confidence">
+            <Field label="Plate box confidence">
               <input
                 type="number"
                 min="0"
@@ -3659,6 +3586,11 @@ function TaskEditor({
                 value={n(option(task, "confidence", 0.35))}
                 onChange={(e) => set("confidence", Number(e.target.value))}
               />
+            </Field>
+            <Field label="Character / OCR confidence">
+              <input type="number" min="0" max="1" step=".01"
+                value={n(option(task, "characterConfidence", 0.35))}
+                onChange={(e) => set("characterConfidence", Number(e.target.value))} />
             </Field>
             <Field label="NMS IoU">
               <input
@@ -3676,7 +3608,7 @@ function TaskEditor({
           <div className="processing-section-head">
             <div>
               <b>۲. خواندن کاراکترهای پلاک</b>
-              <span>Plate recognition · مدل OCR روی crop هر پلاک اجرا می‌شود</span>
+              <span>مدل ترکیبی: OCR فقط برای حروف کم‌اطمینان یا متن ناقص اجرا می‌شود؛ مدل کادر: OCR روی هر پلاک</span>
             </div>
             <Toggle
               checked={Boolean(option(task, "characterRecognitionEnabled", false))}
@@ -5296,7 +5228,7 @@ function EventPreview({ id }: { id: string }) {
         <span><b>ROI</b>{s(item.source.roiName, "—")}</span>
         <span><b>زمان</b>{fmtDate(item.occurredAtUtc)}</span>
         {details.map((detail) => (
-          <span key={detail.kind}>
+          <span key={`${detail.kind}:${detail.label}`}>
             <b>{detail.label}</b>
             {detail.value}
             <small>conf: {detail.confidence}</small>
@@ -5948,6 +5880,10 @@ const invocationSourceGroups: { label: string; options: InvocationSourceOption[]
       ["components.plate.isValidIranianPlate", "پلاک ایرانی معتبر است؟"],
       ["components.plate.recognitionConfidence", "اعتماد OCR پلاک"],
       ["components.plate.recognitionModel", "مدل خواندن پلاک"],
+      ["components.plate.vehicleColor.color", "رنگ خودرو"],
+      ["components.plate.vehicleColor.score", "امتیاز رنگ خودرو"],
+      ["components.plate.vehicleColor.status", "وضعیت تشخیص رنگ خودرو"],
+      ["components.plate.vehicleColor.model", "مدل رنگ خودرو"],
       ["components.plate.label", "برچسب تشخیص پلاک"],
       ["components.plate.trackId", "شناسه Track پلاک"],
     ],

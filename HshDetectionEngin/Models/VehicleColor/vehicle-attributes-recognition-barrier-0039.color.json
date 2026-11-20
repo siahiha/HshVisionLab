@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "inputName": "input",
+  "outputName": "color",
+  "inputWidth": 72,
+  "inputHeight": 72,
+  "colorOrder": "BGR",
+  "scale": 1,
+  "mean": [0, 0, 0],
+  "std": [1, 1, 1],
+  "outputKind": "Probabilities",
+  "outputOffset": 0,
+  "labels": ["White", "SilverGray", "Yellow", "Red", "Green", "Blue", "Black"]
+}

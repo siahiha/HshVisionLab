@@ -28,6 +28,18 @@ export interface ProcessingTask {
   maxFps: number;
   threads: number;
   options: Record<string, unknown>;
+  vehicleColor?: Partial<VehicleColorSettings>;
+}
+export interface VehicleColorSettings {
+  enabled: boolean;
+  modelFile: string;
+  vehicleDetectorModelFile: string;
+  vehicleDetectionConfidence: number;
+  vehicleNmsIoU: number;
+  maxFps: number;
+  trackTimeoutMs: number;
+  medianFilterEnabled: boolean;
+  drawSampleRegion: boolean;
 }
 export interface NamedRoi {
   id: Id;
@@ -126,6 +138,9 @@ export interface ModelInfo {
   ocrDecoder?: string;
   ocrAlphabet?: string;
   inputSizes?: number[];
+  inputWidth?: number;
+  inputHeight?: number;
+  colorContract?: { colorOrder: string; scale: number; mean: number[]; std: number[]; labels: string[] };
   packaged: boolean;
 }
 export interface TriggerAction {

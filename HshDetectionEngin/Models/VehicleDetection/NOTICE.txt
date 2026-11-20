@@ -1,0 +1,11 @@
+YOLOX-Nano ONNX, Megvii, Inc. and its affiliates, Apache License 2.0.
+Source: https://github.com/Megvii-BaseDetection/YOLOX
+Asset: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx
+Raw ONNX SHA256: c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d
+Packaged without weight modifications using the application's HSHM0001 format.
+Contract for the asset hash above: float NCHW BGR 1x3x416x416;
+top-left letterbox 114; values 0..255 without normalization.
+Verified against existing road frames; the current official ONNX example's
+preprocessing applies. Legacy ImageNet-normalized RGB is incompatible.
+Output: raw YOLOX grid predictions 1x3549x85, strides 8/16/32.
+Vehicle classes: COCO car (2), bus (5), truck (7).

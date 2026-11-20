@@ -1,0 +1,53 @@
+{
+  "source_url": "https://paddleclas.bj.bcebos.com/models/PULC/vehicle_attribute_infer.tar",
+  "source_sha256": {
+    "vehicle_attribute_infer.tar": "bba326342be959292ec628473d82a0dd9cea43d115e3b4364b4244a0fd104c8b",
+    "inference.pdmodel": "71f841019fdf0eec60bac8aee7b819173b28ada2b02e2e718a76de55c3793643",
+    "inference.pdiparams": "795677bdbf999cd9e72d648eb4b25917ccfa718b624d23a5653aa10001fd775c"
+  },
+  "onnx_sha256": "989f257fec26e2f5784e57f53edf1b79f85f0a88844d4e6132ea7ddb8e2bef7b",
+  "versions": {
+    "paddlepaddle": "2.6.2",
+    "paddle2onnx": "1.3.1",
+    "onnx": "1.16.2"
+  },
+  "input": {
+    "name": "x",
+    "shape": [
+      1,
+      3,
+      192,
+      256
+    ],
+    "color_order": "RGB",
+    "scale": 0.00392156862745098,
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ]
+  },
+  "output": {
+    "name": "sigmoid_2.tmp_0",
+    "shape": [
+      1,
+      19
+    ],
+    "kind": "independent sigmoid probabilities",
+    "color_indices": [
+      0,
+      9
+    ],
+    "type_indices_not_consumed": [
+      10,
+      18
+    ]
+  },
+  "max_absolute_error_against_paddle": 6.556510925292969e-07,
+  "tested_random_inputs": 5
+}

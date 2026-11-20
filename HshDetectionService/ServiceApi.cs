@@ -48,18 +48,20 @@ public static class ServiceApi
             // Keep the web catalog in sync with CameraSettingsForm. Models can live
             // beside the executable, in the legacy Modules folder, or in the
             // project module folders while running from a Debug output directory.
+            var vehicleModels = VehicleModelCatalog.Enumerate();
             var files = EnumerateModelFiles("Plate", "HshDetectionEngin.Plate")
                 .Select(path => new { path, module = "Plate" })
                 .Concat(EnumerateModelFiles("Face", "HshDetectionEngin.Face")
                     .Select(path => new { path, module = "Face" }))
                 .Concat(EnumerateModelFiles("Palm", "HshDetectionEngin.Palm")
-                    .Select(path => new { path, module = "Palm" }));
+                    .Select(path => new { path, module = "Palm" }))
+                .Concat(vehicleModels.Select(model => new { path = model.Path, module = model.Capability }));
 
             var models = files
                 .Select(item =>
                 {
                     string name = Path.ChangeExtension(Path.GetFileName(item.path), ".onnx");
-                    string capability = item.module == "Plate"
+                    string capability = item.module is "VehicleColor" or "VehicleDetection" ? item.module : item.module == "Plate"
                         ? (PlateOcrModelCatalog.IsOcrModel(item.path) ? "PlateRecognition" : "Plate")
                         : item.module == "Face"
                             ? name.Contains("sface", StringComparison.OrdinalIgnoreCase)
@@ -92,6 +94,8 @@ public static class ServiceApi
                         inputSizes = [];
                     }
                     PlateOcrModelCatalog.TryDescribe(item.path, out PlateOcrModelDescriptor? ocrDescriptor);
+                    var vehicleModel = item.module is "VehicleColor" or "VehicleDetection"
+                        ? vehicleModels.FirstOrDefault(m => m.Path == item.path) : null;
                     return new
                     {
                         name,
@@ -103,6 +107,9 @@ public static class ServiceApi
                             : null,
                         ocrDecoder = ocrDescriptor?.Decoder,
                         ocrAlphabet = ocrDescriptor?.Alphabet,
+                        colorContract = vehicleModel?.ColorContract,
+                        inputWidth = vehicleModel?.InputWidth,
+                        inputHeight = vehicleModel?.InputHeight,
                         inputSizes,
                         packaged = true
                     };

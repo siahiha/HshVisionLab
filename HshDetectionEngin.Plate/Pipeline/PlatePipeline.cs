@@ -17,9 +17,10 @@ internal sealed class PlatePipeline : IProcessingPipeline
     private readonly PlateTracker _tracker = new();
     private readonly Dictionary<int, CachedOcr> _ocrCache = [];
     private long _nextProcessTicks;
+    private double _lastOcrInferenceMs;
 
     public string Name => "Iranian Plate Detection";
-    public double LastInferenceMs => _plateDetector.LastInferenceMs + (_ocr?.LastInferenceMs ?? 0);
+    public double LastInferenceMs => _plateDetector.LastInferenceMs + _lastOcrInferenceMs;
 
     public PlatePipeline(PlateProcessingOptions options, int maxFps, int threads, bool trackOnly = false)
     {
@@ -73,8 +74,13 @@ internal sealed class PlatePipeline : IProcessingPipeline
         long now = Stopwatch.GetTimestamp();
         if (now < _nextProcessTicks) return new PipelineResult();
         _nextProcessTicks = now + Math.Max(1, Stopwatch.Frequency / fps);
+        _lastOcrInferenceMs = 0;
 
-        _plateDetector.UpdateThresholds(_options.Confidence, _options.NmsIoU);
+        // A combined model emits box and glyph scores in the same tensor.
+        // Filtering glyphs with the box threshold can remove a required digit
+        // even though the box itself confidently passes detection.
+        _plateDetector.UpdateThresholds(_options.Confidence, _options.NmsIoU,
+            !_trackOnly ? _options.CharacterConfidence : null);
         List<PlateDetection> detections = Deduplicate(_plateDetector.Detect(context.Image));
         _tracker.Update(detections, maxMisses: Math.Clamp(_options.TrackMaxMisses, 1, 60));
         if (_ocrCache.Count > 0)
@@ -109,25 +115,47 @@ internal sealed class PlatePipeline : IProcessingPipeline
             }
             List<PlateDetection> inside = [];
             IReadOnlyList<PlateOcrCharacter> recognizedCharacters = Array.Empty<PlateOcrCharacter>();
-            string text;
-            float recognitionConfidence = 0;
-            if (_ocr is not null)
+            // Prefer the combined model's existing frame output. When OCR is
+            // available, weak/incomplete text goes straight to OCR rather than
+            // spending another detector inference on a preprocessed crop.
+            if (_plateDetector.HasCharacterClasses)
+                inside = _ocr is null
+                    ? ReadCharacters(context.Image, item.Bounds, detectedCharacters)
+                    : GetCharactersInside(detectedCharacters, item.Bounds.Left, item.Bounds.Top, item.Bounds.Right, item.Bounds.Bottom);
+            string text = BuildPlateText(inside);
+            bool reliableDetectorText = IsReliableDetectorText(inside, text, _options.CharacterConfidence);
+            bool boxAccepted = item.Detection.Score >= _options.Confidence;
+            bool usedOcr = _ocr is not null && boxAccepted && !reliableDetectorText;
+            string? fallbackReason = usedOcr && _plateDetector.HasCharacterClasses
+                ? (text.Length < 8 ? "IncompleteOrLowConfidenceCharacters" : "InvalidTextFormat")
+                : null;
+            float recognitionConfidence = inside.Count > 0 ? inside.Average(character => character.Score) : 0;
+            bool recognitionFailed = false;
+            if (usedOcr)
             {
-                PlateOcrResult recognition = ReadOcr(context.Image, item.Bounds, item.TrackId, now);
-                text = recognition.Text;
-                recognitionConfidence = recognition.Confidence;
-                recognizedCharacters = recognition.Characters;
-            }
-            else
-            {
-                inside = ReadCharacters(context.Image, item.Bounds, detectedCharacters);
-                text = BuildPlateText(inside);
+                try
+                {
+                    PlateOcrResult recognition = ReadOcr(context.Image, item.Bounds, item.TrackId, now);
+                    text = recognition.Text;
+                    recognitionConfidence = recognition.Confidence;
+                    recognizedCharacters = recognition.Characters;
+                }
+                catch
+                {
+                    // Preserve the detector box for supplementary analysis even
+                    // when the independent recognizer cannot read this crop.
+                    recognitionFailed = true; text = ""; recognitionConfidence = 0;
+                }
             }
 
-            bool accepted = item.Detection.Score >= _options.Confidence &&
-                (_ocr is null || recognitionConfidence >= _options.CharacterConfidence) &&
-                PersianPlate.IsValidIranianPlate(text);
-            List<Dictionary<string, object?>> characterDetails = _ocr is not null
+            bool validText = PersianPlate.IsValidIranianPlate(text);
+            string? rejectionReason = !boxAccepted ? "LowDetectionConfidence"
+                : recognitionFailed ? "RecognitionFailed"
+                : usedOcr && !(recognitionConfidence >= _options.CharacterConfidence) ? "LowRecognitionConfidence"
+                : !validText ? (text.Length < 8 ? "IncompleteText" : "InvalidTextFormat")
+                : null;
+            bool accepted = rejectionReason is null;
+            List<Dictionary<string, object?>> characterDetails = usedOcr
                 ? recognizedCharacters.Select((character, index) => new Dictionary<string, object?>
                 {
                     ["index"] = index,
@@ -168,10 +196,16 @@ internal sealed class PlatePipeline : IProcessingPipeline
                 new Dictionary<string, object?>
                 {
                     ["Accepted"] = accepted,
+                    ["RejectionReason"] = rejectionReason,
+                    ["TextValid"] = validText,
+                    ["CharacterCount"] = text.Length,
+                    ["CharacterThreshold"] = _options.CharacterConfidence,
                     ["PlateDetectorBounds"] = detectorBounds,
                     ["PlateText"] = text,
                     ["RecognitionConfidence"] = recognitionConfidence,
-                    ["RecognitionModel"] = _ocr is null ? null : Path.GetFileName(_options.CharacterModelFile),
+                    ["RecognitionModel"] = Path.GetFileName(usedOcr ? _options.CharacterModelFile : _options.ModelFile),
+                    ["RecognitionSource"] = usedOcr ? (_plateDetector.HasCharacterClasses ? "OcrFallback" : "Ocr") : "Detector",
+                    ["OcrFallbackReason"] = fallbackReason,
                     ["Threshold"] = _options.Confidence,
                     ["OverlayThreshold"] = _options.Confidence,
                     ["HasCharacterDetails"] = characterDetails.Count > 0,
@@ -191,6 +225,7 @@ internal sealed class PlatePipeline : IProcessingPipeline
         }
         using var crop = new Mat(image, bounds);
         PlateOcrResult result = _ocr!.Read(crop);
+        _lastOcrInferenceMs += _ocr.LastInferenceMs;
         if (trackId is int track) _ocrCache[track] = new CachedOcr(result, now);
         return result;
     }
@@ -202,8 +237,19 @@ internal sealed class PlatePipeline : IProcessingPipeline
             return GetCharactersInside(characters, bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
         using var crop = new Mat(image, bounds);
         using var prepared = PlatePreprocessor.Apply(crop, preprocessing);
-        return _plateDetector.Detect(prepared).Where(d => !PersianPlate.IsPlate(d.ClassId)).ToList();
+        float scaleX = bounds.Width / (float)prepared.Width;
+        float scaleY = bounds.Height / (float)prepared.Height;
+        return _plateDetector.Detect(prepared)
+            .Where(d => !PersianPlate.IsPlate(d.ClassId))
+            .Select(d => d with { X = bounds.X + d.X * scaleX, Y = bounds.Y + d.Y * scaleY,
+                Width = d.Width * scaleX, Height = d.Height * scaleY })
+            .ToList();
     }
+
+    private static bool IsReliableDetectorText(List<PlateDetection> characters, string text, float threshold) =>
+        PersianPlate.IsValidIranianPlate(text) && characters.Count == 8 &&
+        characters.All(character => float.IsFinite(character.Score) && character.Score >= threshold &&
+            !string.IsNullOrEmpty(PersianPlate.CharOf(character.Label, character.ClassId)));
 
     private int? FindTrackId(PlateDetection detection)
     {

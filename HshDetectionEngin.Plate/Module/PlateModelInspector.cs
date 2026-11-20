@@ -40,6 +40,10 @@ public static class PlateModelInspector
         string name = Path.GetFileName(configuredName);
         if (string.IsNullOrWhiteSpace(name)) name = "best.onnx";
 
+        // EOS_IDR is a fixed 640x640 export; its name does not encode the size.
+        if (string.Equals(Path.GetFileNameWithoutExtension(name), "EOS_IDR", StringComparison.OrdinalIgnoreCase))
+            return [640];
+
         if (Cache.TryGetValue(name, out Lazy<int[]>? cached) && cached.IsValueCreated)
         {
             int[] inspected = cached.Value;

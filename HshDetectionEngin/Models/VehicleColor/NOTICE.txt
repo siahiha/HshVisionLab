@@ -24,4 +24,5 @@ Output color: [1,7,1,1], already softmax probabilities in order:
 White, SilverGray (original gray), Yellow, Red, Green, Blue, Black.
 Original model is intended for front-facing vehicle images. Accuracy on
 small body crops is unvalidated. Unsupported colors may be confused with
-supported classes, even at a high score. Low confidence returns Unknown.
+supported classes, even at a high score. The application now uses the detected
+whole-vehicle crop and returns argmax without a minimum color score.

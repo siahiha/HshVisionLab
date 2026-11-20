@@ -15,6 +15,8 @@ internal sealed class YoloOptions
     public int InputWidth { get; set; } = 640;
     public int InputHeight { get; set; } = 640;
     public float ConfThreshold { get; set; } = 0.30f;
+    /// <summary>Optional glyph threshold for combined plate/character models.</summary>
+    public float? CharacterConfThreshold { get; set; }
     public float NmsIoUThreshold { get; set; } = 0.45f;
     public int IntraOpThreads { get; set; } = 2;
     public bool AutoOptimizeModel { get; set; }

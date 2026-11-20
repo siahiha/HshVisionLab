@@ -1284,7 +1284,7 @@ public class CameraRuntime : IDisposable
             graphics.DrawRectangle(statusPen, plateRectangle.X, plateRectangle.Y, plateRectangle.Width, plateRectangle.Height);
 
             string plateText = IsTrackPending(detection) ? detection.Label : overlay.Text;
-            string specifications = $"Th: {GetDetectionOverlayThreshold(detection):0.00}  Co: {overlay.Confidence:0.00}" + MotionCaption(detection) + VehicleColorCaption(detection);
+            string specifications = $"Score: {overlay.Confidence:P1}  Min: {GetDetectionOverlayThreshold(detection):P0}" + PlateAcceptanceCaption(detection) + MotionCaption(detection) + VehicleColorCaption(detection);
 
             SizeF plateSize = graphics.MeasureString(plateText, plateFont);
             SizeF specificationSize = graphics.MeasureString(specifications, specFont);
@@ -1323,6 +1323,24 @@ public class CameraRuntime : IDisposable
                 labelY + plateSize.Height - 1f);
             }
         }
+    }
+
+    private static string PlateAcceptanceCaption(AnalysisDetection detection)
+    {
+        if (IsTrackPending(detection)) return string.Empty;
+        string? reason = detection.Metadata?.GetValueOrDefault("RejectionReason") as string;
+        object? count = detection.Metadata?.GetValueOrDefault("CharacterCount");
+        string source = detection.Metadata?.GetValueOrDefault("RecognitionSource") as string == "OcrFallback"
+            ? "  OCR fallback" : string.Empty;
+        return source + (reason switch
+        {
+            "LowDetectionConfidence" => "  Box score low",
+            "LowRecognitionConfidence" => "  OCR score low",
+            "RecognitionFailed" => "  OCR failed",
+            "IncompleteText" => $"  Text incomplete ({count}/8)",
+            "InvalidTextFormat" => "  Text format invalid",
+            _ => string.Empty
+        });
     }
 
     private static string VehicleColorCaption(AnalysisDetection detection)

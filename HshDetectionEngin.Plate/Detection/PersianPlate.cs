@@ -73,6 +73,14 @@ internal static class PersianPlate
         ["تشریفات"] = "تشریفات"
     };
 
+    // Short labels used by the EOS_IDR combined plate/character model.
+    private static readonly Dictionary<string, string> ShortLabelAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["A"] = "ا", ["B"] = "ب", ["D"] = "د", ["EIN"] = "ع", ["GH"] = "ق",
+        ["H"] = "ه", ["J"] = "ج", ["L"] = "ل", ["M"] = "م", ["N"] = "ن",
+        ["P"] = "پ", ["T"] = "ت", ["TAXI"] = "ت", ["V"] = "و", ["Y"] = "ی"
+    };
+
     // Iranian private plates are eight characters in the OCR output:
     // number-number-letter-number-number-number-number-number.
     private static readonly Regex IranianPlatePattern = new(
@@ -97,8 +105,20 @@ internal static class PersianPlate
                 return ((char)('\u06F0' + (value[0] - '0'))).ToString();
 
             if (LabelAliases.TryGetValue(value, out string? symbol)) return symbol;
+            if (ShortLabelAliases.TryGetValue(value, out symbol)) return symbol;
         }
         return CharOf(fallbackClassId);
+    }
+
+    /// <summary>Maps a reordered combined model's labels to the engine's class IDs.</summary>
+    public static int ClassIdOfLabel(string label)
+    {
+        if (string.Equals(label, "plate", StringComparison.OrdinalIgnoreCase)) return PlateClassId;
+        string symbol = CharOf(label, -1);
+        foreach (var entry in CharMap)
+            if (entry.Value == symbol) return entry.Key;
+        // Unsupported special symbols (such as ACC) must not become a legacy letter.
+        return -1;
     }
 
     /// <summary>Display name (English) for a class id.</summary>

@@ -1,0 +1,27 @@
+PaddleClas PULC vehicle_attribute, PP-LCNet_x1_0
+Copyright (c) PaddlePaddle Authors. Apache License 2.0; see LICENSE.txt.
+
+Official model source:
+https://paddleclas.bj.bcebos.com/models/PULC/vehicle_attribute_infer.tar
+Documentation, color order, and preprocessing:
+https://github.com/PaddlePaddle/PaddleClas/blob/release/2.6/docs/en/PULC/PULC_vehicle_attribute_en.md
+https://github.com/PaddlePaddle/PaddleClas/blob/release/2.6/deploy/configs/PULC/vehicle_attribute/inference_vehicle_attribute.yaml
+https://github.com/PaddlePaddle/PaddleClas/blob/release/2.6/deploy/python/postprocess.py
+License: https://github.com/PaddlePaddle/PaddleClas/blob/release/2.6/LICENSE
+
+Modified for this application: exported Paddle inference graph to ONNX
+opset 14 with Paddle2ONNX 1.3.1, fixed the dynamic batch to 1, and packaged
+in the application's HSHM0001 .hshmodel format. No training or weight changes.
+Rebuild: HshDetectionEngin.Tools/ModelTools/convert_pplcnet_vehicle_color.py RAW_DIR
+The script checks source hashes and compares ONNX with Paddle 2.6.2 CPU
+inference on five random inputs. See the corresponding conversion-report.json.
+
+Input: float32 NCHW [1,3,192,256], RGB, resize width=256 height=192,
+pixel/255, mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225].
+Output: sigmoid_2.tmp_0 [1,19], independent sigmoid probabilities.
+Indices 0..9: Yellow, Orange, Green, SilverGray (original gray), Red,
+Blue, White, Gold (original golden), Brown, Black. Indices 10..18 are vehicle
+types and are not consumed. No additional softmax or renormalization.
+The application uses argmax of the ten colors without a minimum score.
+Scores are not calibrated across models. Numerical export verification
+does not establish accuracy on this application's camera images.

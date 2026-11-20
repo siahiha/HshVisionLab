@@ -694,8 +694,43 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 /* Give the camera wall the dominant width on the dashboard. */
-.dashboard-live-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 250px); }
-.detection-history-panel { width: 100%; max-width: 250px; }
+.dashboard-live-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 335px); }
+.detection-history-panel { width: 100%; max-width: 335px; }
+.detected-event-card.compact { gap: 5px; padding: 8px; }
+.detected-event-card.compact > .detected-event-camera { font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+.detected-compact-component { display: grid; grid-template-columns: minmax(0, 1fr) 78px; align-items: center; gap: 10px; min-width: 0; }
+.detected-compact-component + .detected-compact-component { margin-top: 6px; padding-top: 7px; border-top: 1px solid #ffffff12; }
+.detected-compact-image { grid-column: 2; grid-row: 1; display: grid; place-items: center; width: 78px; height: 44px; overflow: hidden; color: #83919f; border: 1px solid #ffffff18; border-radius: 3px; background: #101215; }
+.detected-compact-image.face, .detected-compact-image.palm { width: 44px; justify-self: center; }
+.detected-compact-image img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.detected-compact-result { grid-column: 1; grid-row: 1; display: grid; gap: 3px; min-width: 0; }
+.detected-compact-kind { color: #94a3b1; font-size: 9px; }
+.detected-compact-value { color: #f0f3f6; font-size: 12px; overflow-wrap: anywhere; }
+.detected-compact-component.plate .detected-compact-value { direction: ltr; unicode-bidi: isolate-override; font-size: 18px; line-height: 1.35; text-align: right; }
+.detected-compact-confidence { display: flex; align-items: center; gap: 6px; color: #99aab8; font-size: 9px; }
+.detected-compact-confidence b { color: #d5e0e9; font-size: 10px; font-weight: 500; }
+.detection-hover-details { position: fixed; z-index: 1200; width: min(330px, calc(100vw - 16px)); max-height: min(440px, calc(100dvh - 16px)); overflow-y: auto; box-sizing: border-box; padding: 12px; direction: rtl; text-align: right; border: 1px solid #526476; border-radius: 6px; background: #1d242c; color: #e7edf2; box-shadow: 0 10px 30px #0008; font-size: 11px; }
+.detection-hover-source { display: grid; gap: 4px; margin-bottom: 10px; color: #a8b6c2; font-size: 10px; }
+.detection-hover-source b { color: #70b9e7; font-size: 11px; }
+.detection-hover-component { display: grid; gap: 5px; padding-top: 9px; border-top: 1px solid #ffffff1a; }
+.detection-hover-component + .detection-hover-component { margin-top: 10px; }
+.detected-component-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #aabac8; font-size: 10px; }
+.detection-hover-value { font-size: 13px; overflow-wrap: anywhere; }
+.detection-hover-component.plate .detection-hover-value { direction: ltr; unicode-bidi: isolate-override; }
+.detected-component-status { color: #aeb9c6; font-size: 10px; }
+.detected-component-status.accepted { color: #72d5a2; }
+.detected-component-status.rejected { color: #f19494; }
+.detected-component-metrics { display: grid; gap: 4px; margin: 0; font-size: 10px; }
+.detected-component-metrics > div { display: flex; justify-content: space-between; gap: 6px; }
+.detected-component-metrics dt { color: #a8b6c2; }
+.detected-component-metrics dd { color: #e3eaf0; margin: 0; text-align: end; }
+.detected-component-color { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 10px; color: #a8b6c2; }
+.detected-component-color b { display: inline-flex; align-items: center; gap: 4px; color: #e0e5ea; font-weight: 500; }
+.detected-component-color i { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; border: 1px solid #ffffff60; }
+.detected-component-color small { font-size: 10px; color: #c1cbd4; }
+.detection-hover-reason { flex-basis: 100%; color: #a8b6c2; }
+.detected-trigger { font-size: 10px; color: #f1c071; }
+.detected-event-card:focus-visible { outline: 2px solid #55bfff; outline-offset: 2px; }
 
 /* Event history retention controls. */
 .event-delete-tools { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }

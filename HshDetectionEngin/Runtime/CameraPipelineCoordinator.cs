@@ -199,7 +199,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                         var binding = new PipelineBinding(pipeline, item, metadata)
                             { MotionFailed = !motionValid, ColorFailed = !colorValid };
                         if (colorValid && item.VehicleColor.Enabled && item.Kind == ProcessingType.Plate)
-                            binding.ColorFailed = !ValidateSupplement(binding.VehicleColor.Prepare, "Vehicle color model");
+                            binding.ColorFailed = !ValidateSupplement(() => binding.VehicleColor.Prepare(item.VehicleColor), "Vehicle color model");
                         pipelines.Add(binding);
                     }
                 }
@@ -485,24 +485,27 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         }
     }
 
-    private AnalysisDetection ApplyVehicleColor(PipelineBinding binding, Mat frame, AnalysisDetection detection, long generation)
+    private IReadOnlyList<AnalysisDetection> ApplyVehicleColor(PipelineBinding binding, Mat frame, IReadOnlyList<AnalysisDetection> detections, long generation)
     {
-        AnalysisDetection Unavailable()
+        AnalysisDetection Unavailable(AnalysisDetection detection)
         {
-            if (!binding.Settings.VehicleColor.Enabled || detection.Kind != AnalysisKind.Plate) return detection;
+            if (!binding.Settings.VehicleColor.Enabled || detection.Kind != AnalysisKind.Plate ||
+                !float.IsFinite(detection.Confidence) || detection.Confidence < binding.Settings.GetOptions<PlateProcessingOptions>().Confidence) return detection;
             var metadata = detection.Metadata is null ? new Dictionary<string, object?>() : new Dictionary<string, object?>(detection.Metadata);
             metadata["VehicleColor"] = "Unknown";
             metadata["VehicleColorStatus"] = "Failed";
             metadata["VehicleColorReason"] = "ColorUnavailable";
             return detection with { Metadata = metadata };
         }
-        if (binding.ColorFailed) return Unavailable();
-        try { return binding.VehicleColor.Apply(frame, detection, binding.Settings.VehicleColor, DateTime.UtcNow, generation); }
+        if (binding.Settings.Kind != ProcessingType.Plate) return detections;
+        if (binding.ColorFailed) return detections.Select(Unavailable).ToArray();
+        try { return binding.VehicleColor.Apply(frame, detections, binding.Settings.VehicleColor,
+            binding.Settings.GetOptions<PlateProcessingOptions>().Confidence, DateTime.UtcNow, generation); }
         catch (Exception ex)
         {
             binding.ColorFailed = true;
             _reportStatus($"Vehicle color disabled for '{binding.Settings.Name}': {ex.Message}", true);
-            return Unavailable();
+            return detections.Select(Unavailable).ToArray();
         }
     }
 
@@ -516,7 +519,7 @@ internal sealed class CameraPipelineCoordinator : IDisposable
         Mat sourceFrame,
         long colorGeneration)
     {
-        target.Detections.AddRange(detections.Select(detection =>
+        var mappedDetections = detections.Select(detection =>
         {
             var metadata = detection.Metadata is null ? new Dictionary<string, object?>() : new Dictionary<string, object?>(detection.Metadata);
             if (metadata.TryGetValue("TrackingLandmarks", out object? value) && value is PointF[] points)
@@ -528,14 +531,17 @@ internal sealed class CameraPipelineCoordinator : IDisposable
                 Bounds = new Rectangle(detection.Bounds.X + roi.Bounds.X, detection.Bounds.Y + roi.Bounds.Y, detection.Bounds.Width, detection.Bounds.Height),
                 Metadata = metadata
             };
-            var colored = ApplyVehicleColor(binding, sourceFrame, mapped, colorGeneration);
+            return mapped;
+        }).ToArray();
+        foreach (var colored in ApplyVehicleColor(binding, sourceFrame, mappedDetections, colorGeneration))
+        {
             if (colored.Metadata?.GetValueOrDefault("VehicleColorDrawRegion") is true &&
                 colored.Metadata.GetValueOrDefault("VehicleColorDisplayBounds") is Dictionary<string, object?> box &&
                 box["width"] is int width && box["height"] is int height && width > 0 && height > 0)
                 target.Overlays.Add(new ProcessingOverlay { Kind = ProcessingOverlayKind.Rectangle, Color = Color.DeepSkyBlue,
                     Bounds = new Rectangle((int)box["x"]!, (int)box["y"]!, width, height) });
-            return colored;
-        }));
+            target.Detections.Add(colored);
+        }
         target.Overlays.AddRange(overlays.Select(overlay => MapOverlayToFrame(overlay, roi.Bounds)));
         target.OverlaysUpdated |= overlaysUpdated || overlays.Count > 0 || binding.Settings.VehicleColor.Enabled;
     }

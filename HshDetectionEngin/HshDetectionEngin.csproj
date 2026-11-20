@@ -19,5 +19,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Update="Models\VehicleColor\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Models\VehicleDetection\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

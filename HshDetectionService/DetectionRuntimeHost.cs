@@ -934,6 +934,21 @@ public sealed partial class DetectionRuntimeHost : IAsyncDisposable
             component["isValidIranianPlate"] = GetMetadataBool(detection, "Accepted");
             component["recognitionConfidence"] = GetMetadataFloat(detection, "RecognitionConfidence");
             component["recognitionModel"] = GetMetadataString(detection, "RecognitionModel");
+            component["recognitionSource"] = GetMetadataString(detection, "RecognitionSource");
+            component["ocrFallbackReason"] = GetMetadataString(detection, "OcrFallbackReason");
+            component["vehicleColor"] = new JsonObject
+            {
+                ["color"] = GetMetadataString(detection, "VehicleColor"),
+                ["status"] = GetMetadataString(detection, "VehicleColorStatus"),
+                ["score"] = GetMetadataFloat(detection, "VehicleColorScore"),
+                ["model"] = GetMetadataString(detection, "VehicleColorModel"),
+                ["vehicleDetectorModel"] = GetMetadataString(detection, "VehicleColorVehicleDetectorModel"),
+                ["vehicleDetectionScore"] = GetMetadataFloat(detection, "VehicleDetectionScore"),
+                ["reason"] = GetMetadataString(detection, "VehicleColorReason"),
+                ["cached"] = GetMetadataBool(detection, "VehicleColorCached"),
+                ["sampledAt"] = GetMetadataNode(detection, "VehicleColorSampledAt"),
+                ["bounds"] = GetMetadataNode(detection, "VehicleColorSampleBounds")
+            };
             component["hasCharacterDetails"] = GetMetadataBool(detection, "HasCharacterDetails");
             component["characters"] = GetMetadataNode(detection, "Characters") ?? new JsonArray();
         }

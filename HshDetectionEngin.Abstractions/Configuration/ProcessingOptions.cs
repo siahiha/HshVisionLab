@@ -11,9 +11,10 @@ public sealed class PlateProcessingOptions
     public string Preprocessing { get; set; } = "Standard";
     public float Confidence { get; set; } = 0.35f;
     public float NmsIoU { get; set; } = 0.45f;
-    /// <summary>Runs the selected OCR model once for every detected plate crop.</summary>
+    /// <summary>Enables OCR for box-only models, or as fallback when a combined model cannot read reliable plate text.</summary>
     public bool CharacterRecognitionEnabled { get; set; } = false;
     public string CharacterModelFile { get; set; } = "ocr_crnn.onnx";
+    /// <summary>Minimum glyph score for a combined detector and minimum confidence for an OCR result.</summary>
     public float CharacterConfidence { get; set; } = 0.35f;
     /// <summary>Maximum OCR rate per tracked plate. Zero means every detection pass.</summary>
     public int CharacterMaxFps { get; set; } = 4;

@@ -1,11 +1,18 @@
 namespace HshDetectionEngin;
 
-/// <summary>Heuristic body-color sampling anchored to the original plate detector box.</summary>
+/// <summary>Optional whole-vehicle color classification after a qualifying plate box.</summary>
 public sealed class VehicleColorSettings
 {
     public bool Enabled { get; set; } = true;
     public bool DrawSampleRegion { get; set; } = true;
     public bool MedianFilterEnabled { get; set; } = true;
+    public string ModelFile { get; set; } = "vehicle-attributes-recognition-barrier-0039.onnx";
+    public string VehicleDetectorModelFile { get; set; } = "yolox_nano.onnx";
+    public float VehicleDetectionConfidence { get; set; } = .30f;
+    public float VehicleNmsIoU { get; set; } = .45f;
+    public int MaxFps { get; set; } = 2;
+    // Old crop geometry and acceptance fields remain readable for existing JSON.
+    // They are ignored: model argmax is supplementary and has no acceptance threshold.
     public float HeightMultiplier { get; set; } = 3;
     public float WidthMultiplier { get; set; } = 1;
     public float GapHeightMultiplier { get; set; }
@@ -24,13 +31,11 @@ public sealed class VehicleColorSettings
 
     public void Validate()
     {
-        if (!float.IsFinite(HeightMultiplier) || HeightMultiplier < .25f || HeightMultiplier > 10 ||
-            !float.IsFinite(WidthMultiplier) || WidthMultiplier < .25f || WidthMultiplier > 5 ||
-            !float.IsFinite(GapHeightMultiplier) || GapHeightMultiplier < 0 || GapHeightMultiplier > 5 ||
-            TrackTimeoutMs < 1 || TrackTimeoutMs > 60000 ||
-            !float.IsFinite(ModelConfidence) || ModelConfidence <= 0 || ModelConfidence > 1 ||
-            !float.IsFinite(ModelMinimumMargin) || ModelMinimumMargin < 0 || ModelMinimumMargin > 1 ||
-            !float.IsFinite(MinimumRegionCoverage) || MinimumRegionCoverage <= 0 || MinimumRegionCoverage > 1)
-            throw new InvalidOperationException("Invalid vehicle color sampling settings.");
+        if (!Enabled) return;
+        if (string.IsNullOrWhiteSpace(ModelFile) || string.IsNullOrWhiteSpace(VehicleDetectorModelFile) ||
+            !float.IsFinite(VehicleDetectionConfidence) || VehicleDetectionConfidence <= 0 || VehicleDetectionConfidence > 1 ||
+            !float.IsFinite(VehicleNmsIoU) || VehicleNmsIoU <= 0 || VehicleNmsIoU > 1 ||
+            MaxFps < 1 || MaxFps > 10 || TrackTimeoutMs < 1 || TrackTimeoutMs > 60000)
+            throw new InvalidOperationException("Invalid vehicle color settings.");
     }
 }

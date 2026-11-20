@@ -27,6 +27,7 @@ internal sealed class YoloDetector : IDisposable
     private string _inputName = "";
     private string[] _outputNames = [];
     private string[] _classNames = [];
+    private int[] _classIds = [];
 
     private Mat? _letterbox;
     private Mat? _resized;
@@ -54,6 +55,7 @@ internal sealed class YoloDetector : IDisposable
     public int InputHeight => _opt.InputHeight;
     public string ModelPath => _opt.ModelPath;
     public int ClassCount => _classNames.Length;
+    public bool HasCharacterClasses { get; private set; }
     public string ModelInfo { get; private set; } = "";
 
     public YoloDetector(YoloOptions opt)
@@ -63,10 +65,11 @@ internal sealed class YoloDetector : IDisposable
     }
 
     /// <summary>Live-update thresholds without rebuilding the session.</summary>
-    public void UpdateThresholds(float confidence, float nmsIou)
+    public void UpdateThresholds(float confidence, float nmsIou, float? characterConfidence = null)
     {
         _opt.ConfThreshold = confidence;
         _opt.NmsIoUThreshold = nmsIou;
+        _opt.CharacterConfThreshold = characterConfidence;
     }
 
     private void Load()
@@ -93,11 +96,21 @@ internal sealed class YoloDetector : IDisposable
 
         if (_session.ModelMetadata.CustomMetadataMap.TryGetValue("names", out var raw))
             _classNames = ParseClassNames(raw);
+        int plateClass = Array.FindIndex(_classNames, name => string.Equals(name, "plate", StringComparison.OrdinalIgnoreCase));
+        // Combined models may use a different class order (EOS_IDR uses 22
+        // for PLATE). Keep source IDs for NMS/labels and normalize only the
+        // returned detections so tracking and OCR share the engine contract.
+        _classIds = _classNames.Select((name, index) =>
+            plateClass >= 0 && plateClass != PersianPlate.PlateClassId
+                ? PersianPlate.ClassIdOfLabel(name)
+                : index).ToArray();
         // The Plate module owns this detector, so any single-class YOLO
         // export in the plate catalog is a plate detector (some models use
         // labels such as "licence" instead of "plate").
         if (_opt.ForcedClassId is null && _classNames.Length == 1)
             _opt.ForcedClassId = PersianPlate.PlateClassId;
+        HasCharacterClasses = _opt.ForcedClassId is null && _classNames.Any(name =>
+            PersianPlate.ClassIdOfLabel(name) is >= 0 and not PersianPlate.PlateClassId);
 
         int w = _opt.InputWidth;
         int h = _opt.InputHeight;
@@ -217,7 +230,12 @@ internal sealed class YoloDetector : IDisposable
                 float s = output[i + (4 + k) * stride];
                 if (s > best) { best = s; bestCls = k; }
             }
-            if (best < confThresh || bestCls < 0) continue;
+            if (bestCls < 0) continue;
+            int classId = _opt.ForcedClassId ?? (bestCls < _classIds.Length ? _classIds[bestCls] : bestCls);
+            float threshold = PersianPlate.IsPlate(classId)
+                ? confThresh
+                : _opt.CharacterConfThreshold ?? confThresh;
+            if (best < threshold) continue;
 
             _cands.Add(new Candidate
             {
@@ -288,7 +306,8 @@ internal sealed class YoloDetector : IDisposable
                 ? _classNames[a.Cls]
                 : a.Cls.ToString();
 
-            result.Add(new PlateDetection(x1, y1, x2 - x1, y2 - y1, a.Cls, label, a.Score));
+            int classId = _opt.ForcedClassId ?? (a.Cls < _classIds.Length ? _classIds[a.Cls] : a.Cls);
+            result.Add(new PlateDetection(x1, y1, x2 - x1, y2 - y1, classId, label, a.Score));
         }
         return result;
     }

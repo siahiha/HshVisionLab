@@ -14,6 +14,7 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
   </ItemGroup>
   <ItemGroup>
+    <None Update="Models\EOS_IDR.hshmodel" TargetPath="Models\Plate\EOS_IDR.hshmodel" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="Models\plate_yolo.hshmodel" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="Models\plate_yolo_fallback.hshmodel" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="Models\ocr_crnn.hshmodel" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
