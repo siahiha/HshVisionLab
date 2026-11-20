@@ -146,7 +146,7 @@ Store را برای همان trigger و هویت‌های لازم بررسی م
 
 **این حالت در کد و UI Windows پیاده‌سازی شده است؛ Service/Web هنوز پشتیبانی آن را ندارند.** طبق [قرارداد معماری حالت سوم](ARCHITECTURE.md)، پردازش Face/Plate هر ROI می‌تواند فقط localization/tracking را انجام دهد و نمونهٔ مناسب هر track را وارد بافر همان دوربین کند. ظرفیت و سقف حافظهٔ Face و Plate مستقل‌اند و یک نوع فضای نوع دیگر را مصرف نمی‌کند. در تنظیمات عمومی دوربین، تعریف‌های تشخیص مانند taskهای ROI قابل افزودن/ویرایش/حذف هستند؛ هر task به یک تعریف هم‌نوع متصل می‌شود. یک Completion Worker مستقل، SFace یا OCR و آستانه‌های تعریف مقصد را روی نمونه‌ها اعمال می‌کند و فقط نتیجهٔ تکمیل‌شده از مسیر history/trigger/event اعلام می‌شود.
 
-این مسیر از انتخاب `Sequential/Parallel` داخل ROI مستقل است. بافر برای هر track یک نمونهٔ منتظر نگه می‌دارد، نمونه‌ها را با سیاست کیفیت/تازگی جایگزین می‌کند و پس از موفقیت، recognition همان track را تا پایان track یا موعد refresh تکرار نمی‌کند. worker crop و شماره/زمان فریم همان نمونه را حمل می‌کند؛ استفاده از latest-frame هنگام اعلام نتیجه مجاز نیست. بافر، نسل runtime، مالکیت تصویر، retry/TTL، confidence و معیار پذیرش در سند معماری تعریف شده‌اند. پارامترهای اجرایی و پیش‌فرض‌ها در [پیکربندی](CONFIGURATION.md) آمده‌اند. آزمون‌ها در `tests/TrackingCompletion.Tests` با `dotnet run --project tests/TrackingCompletion.Tests -- --models` اجرا می‌شوند؛ گزینهٔ `--models` به لایسنس محلی معتبر و packageهای مدل نیاز دارد.
+این مسیر از انتخاب `Sequential/Parallel` داخل ROI مستقل است. بافر برای هر track یک نمونهٔ منتظر نگه می‌دارد، نمونه‌ها را با سیاست کیفیت/تازگی جایگزین می‌کند و پس از موفقیت، recognition همان track را تا پایان track یا موعد refresh تکرار نمی‌کند. worker crop و شماره/زمان فریم همان نمونه را حمل می‌کند؛ استفاده از latest-frame هنگام اعلام نتیجه مجاز نیست. بافر، نسل runtime، مالکیت تصویر، retry/TTL، confidence و معیار پذیرش در سند معماری تعریف شده‌اند. پارامترهای اجرایی و پیش‌فرض‌ها در [پیکربندی](CONFIGURATION.md) آمده‌اند.
 
 ## 5. قابلیت Plate
 
@@ -278,12 +278,12 @@ package فعلی مدل header `HSHM0001`، IV شانزده‌بایتی و ciph
 ```powershell
 dotnet restore HshVisionLab.sln
 dotnet build HshVisionLab.sln -m:1
-dotnet run --project HshVisionLab.csproj --no-build
+dotnet run --project HshVisionLab/HshVisionLab.csproj --no-build
 
 dotnet run --project HshDetectionEngin.LicenseRequest\HshDetectionEngin.LicenseRequest.csproj
 dotnet run --project HshDetectionEngin.LicenseIssuer\HshDetectionEngin.LicenseIssuer.csproj
 
-dotnet publish HshVisionLab.csproj -c Release -r win-x64 --self-contained false -o .\publish\win-x64
+dotnet publish HshVisionLab/HshVisionLab.csproj -c Release -r win-x64 --self-contained false -o .\publish\win-x64
 ```
 
 پیش از build Debug، همهٔ برنامه‌های درحال اجرای مربوط را ببندید؛ ویندوز ممکن است `.exe` یا `.dll` خروجی را قفل کند. خروجی مشتری باید کل خروجی `dotnet publish` را شامل `HshVisionLab.exe`، `HshVisionLab.dll`، فایل‌های `.deps.json` و `.runtimeconfig.json`، DLLهای پروژه و dependencyها، DLLهای native Emgu/ONNX، پوشهٔ `Models` حاوی packageهای انتخاب‌شده و `license.hshlic` مشتری داشته باشد؛ فهرست فایل‌ها را به تعداد ثابت DLL محدود نکنید. build packageهای `.hshmodel` را به مسیرهای `Models/Plate`، `Models/Face` و `Models/Palm` منتقل می‌کند و فایل خام ONNX را وارد خروجی نمی‌کند. fallback مدل‌های داخل پروژه فقط برای اجرای Debug/Visual Studio است و نباید به بستهٔ مشتری وابسته باشد. `license.hshlic` موجود در workspace فقط برای Debug کپی می‌شود؛ برای Release باید لایسنس مشتری را دستی کنار executable بگذارید.

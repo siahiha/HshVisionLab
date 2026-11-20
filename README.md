@@ -16,6 +16,8 @@
 
 ## اجزای solution
 
+کدها، فرم‌ها، منابع و فایل پروژهٔ برنامهٔ دسکتاپ در پوشهٔ `HshVisionLab/` قرار دارند. فایل `HshVisionLab.sln` در روت، این پروژه و لایه‌های مستقل را کنار هم نگه می‌دارد. خروجی build دسکتاپ زیر `HshVisionLab/bin/` ساخته می‌شود؛ تنظیمات و دیتابیس‌های محلی کنار فایل اجرایی قرار می‌گیرند.
+
 | جزء | مسئولیت |
 | --- | --- |
 | `HshVisionLab.exe` | UI چنددوربینه، preview، ROI، history محلی، automation و Identity database |
@@ -88,7 +90,7 @@ on-demand از دریافت مستقیم موتور مستقل است و متع�
 ```powershell
 dotnet restore HshVisionLab.sln
 dotnet build HshVisionLab.sln -m:1
-dotnet run --project HshVisionLab.csproj --no-build
+dotnet run --project HshVisionLab/HshVisionLab.csproj --no-build
 ```
 
 پیش از build Debug، برنامه‌های درحال اجرا را ببندید تا exe و DLLهای خروجی قفل نباشند.
@@ -99,7 +101,7 @@ dotnet run --project HshVisionLab.csproj --no-build
 - [پیکربندی](docs/CONFIGURATION.md): `settings.json` و پیش‌فرض‌ها.
 - [معماری](docs/ARCHITECTURE.md): مسئولیت‌ها و قرارداد pipeline.
 - [مدل و عملکرد](docs/OPTIMIZATION.md): مدل‌ها، latency و محدودیت امنیتی packageها.
-- آیکون‌های دکمه‌های UI از فونت رسمی Material Icons استفاده می‌کنند؛ resource آن در `Assets/MaterialIcons/MaterialIcons-Regular.ttf` به‌صورت embedded قرار دارد.
+- آیکون‌های دکمه‌های UI از فونت رسمی Material Icons استفاده می‌کنند؛ resource آن در `HshVisionLab/Assets/MaterialIcons/MaterialIcons-Regular.ttf` به‌صورت embedded قرار دارد.
 - قانون فونت UI: فارسی با `Tahoma` اندازهٔ پیش‌فرض ۸ و انگلیسی با `Segoe UI` و اندازهٔ فعلی نمایش داده می‌شود.
 - [عملیات لایسنس](docs/LICENSING.md): درخواست، صدور، archive و rotation کلید.
 - [وضعیت](docs/STATUS.md): قابلیت‌های کامل‌شده و backlog آگاهانه.

@@ -21,7 +21,7 @@
 - رنگ و جهت صرفاً اطلاعات تکمیلی‌اند: Sampling/Unknown رنگ یا جهت نامعلوم، مانع رویداد مستقیم یا ورود به صف OCR نیست؛ خطای تنظیمات یا محاسبهٔ این قابلیت‌ها نیز pipeline اصلی را متوقف نمی‌کند. ثبت پلاک با تنها یک فریم در حالت مستقیم و بافر و با رنگ در حال جمع‌آوری، نامشخص یا غیرفعال، آزموده شده است.
 - مدل ازپیش‌آموزش‌دیدهٔ Intel OMZ 0039 برای رنگ روی کادر بالای پلاک، بستهٔ محافظت‌شده و تبدیل عددی بررسی‌شده به ONNX اضافه شد؛ خوشه‌بندی حذف شده است. هفت رنگ و Unknown، امتیاز/فاصلهٔ دو رنگ و cache تک‌مشاهده‌ای دارد. مدل هنگام ساخت graph آماده می‌شود و خطای آن پذیرش پلاک را متوقف نمی‌کند. ارزیابی دقت روی برش‌های واقعی و worker مستقل باقی است.
 - جهت حرکت مشترک برای همهٔ taskهای دارای TrackId پایدار، شامل Plate/Face/Palm: جهت هشت‌گانه، جهت و بردار صفر برای جسم ثابت، تفکیک Unknown، تنظیم بازه/آستانهٔ لرزش برای هر task در Windows، خط ورود/خروج اختیاری با حاشیهٔ تحمل، preview پیکان/خط و حفظ metadata زمان نمونه در تکمیل ناهمزمان. مسیرهای Sequential/Parallel، ماژول سفارشی، ذخیره/بازخوانی، رابط فارسی/انگلیسی و عبور از خط با ورودی مصنوعی آزموده شده‌اند؛ کیفیت دوربین واقعی و اندازه‌گیری CPU هنوز ارزیابی نشده است.
-- حالت Tracking/بافر تکمیل تشخیص در برنامهٔ Windows برای Face/Plate: تعریف تشخیص در تنظیمات عمومی دوربین، انتخاب مقصد هم‌نوع در task ROI، ظرفیت و حافظهٔ مستقل هر نوع، یک worker ناهمزمان SFace/OCR برای هر دوربین، حفظ فریم/زمان نمونه، retry/TTL/cache و پنجرهٔ وضعیت بافر. تنظیمات قدیمی Inline می‌مانند. آزمون‌های صف، تنظیمات Windows، runtime با منبع مصنوعی و recognizerهای package‌شده در `tests/TrackingCompletion.Tests` قرار دارند؛ benchmark و ارزیابی کیفیت روی دوربین واقعی همچنان لازم است.
+- حالت Tracking/بافر تکمیل تشخیص در برنامهٔ Windows برای Face/Plate: تعریف تشخیص در تنظیمات عمومی دوربین، انتخاب مقصد هم‌نوع در task ROI، ظرفیت و حافظهٔ مستقل هر نوع، یک worker ناهمزمان SFace/OCR برای هر دوربین، حفظ فریم/زمان نمونه، retry/TTL/cache و پنجرهٔ وضعیت بافر. تنظیمات قدیمی Inline می‌مانند. صف، تنظیمات Windows، runtime با منبع مصنوعی و recognizerهای package‌شده پیش‌تر آزموده شده‌اند؛ benchmark و ارزیابی کیفیت روی دوربین واقعی همچنان لازم است.
 - solution شامل UI، Engine، Abstractions، Identity، Plate، Face، Palm، Licensing، Service، LicenseRequest و LicenseIssuer است.
 - چنددوربینه، RTSP/Webcam/file، reconnect، newest-frame capture، ROI چندضلعی و Motion Gate.
 - Plate با YOLO، OCR ایرانی، tracker، overlay و history.
@@ -55,9 +55,8 @@
   session را می‌بندد. Session دارای viewport پس از ۴۵ ثانیه بدون تمدید و pending
   پس از ۳۰ ثانیه منقضی می‌شود. Snapshot تقاضای سه‌ثانیه‌ای با حداکثر ۵ FPS
   ایجاد می‌کند. `GET /api/v1/streams/diagnostics` آمار encode، سن فریم، FPS،
-  ابعاد و صف را می‌دهد. آزمون مستقل در `tests/WebRtcStreaming.Tests` از ورودی
-  مصنوعی استفاده می‌کند؛ benchmark واقعی CPU/RAM و استقرار سرویس از این کار
-  نتیجه‌گیری نمی‌شوند. جزئیات در [Rendering و WebRTC](service/02-RENDERING-WEBRTC.md) است.
+  ابعاد و صف را می‌دهد. بررسی‌های پیشین با ورودی مصنوعی انجام شده‌اند؛
+  benchmark واقعی CPU/RAM و استقرار سرویس از این کار نتیجه‌گیری نمی‌شوند. جزئیات در [Rendering و WebRTC](service/02-RENDERING-WEBRTC.md) است.
 - درگاه مستقل MediaMTX/WHEP برای source فعال RTSP و endpoint سبک `GET /api/v1/streams/{cameraId}/overlay` موجود است. مصرف‌کنندهٔ خام می‌تواند ROI، motion ROI، کادر، label، confidence و primitiveهای پردازشی را سمت کلاینت رسم کند؛ ویدئوی خام برای Drawing دوباره encode نمی‌شود. کامپوننت `RawMediaMtxStream` در سورس موجود است و مسیر فعال tile/focus فعلی نیست.
 - association پلاک/چهره در runtime فعال است و از همان فریم یا پنجرهٔ زمانی حداکثر `Association.MaxWindowMs` (پیش‌فرض 1500ms) استفاده می‌کند؛ خروجی با `SameFrame`، `TemporalAssociation` یا `Standalone` مشخص می‌شود. در حالت پیش‌فرض `RequireSameRoi=true`، هر دو component باید در یک ROI باشند؛ با خاموش‌کردن آن، pair شدن بین ROIهای متفاوت همان دوربین ممکن است. این منطق association مکانی/مالکیتی نیست و برای حالت مبهمِ چند پلاک یا چند چهره pair قطعی تولید نمی‌کند.
 - `ServiceSettingsDocument.HistorySubscription` سناریوهای چندپروفایلی ثبت داخلی را

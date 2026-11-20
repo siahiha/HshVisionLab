@@ -15,101 +15,101 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="HshDetectionEngin.Face\Models\face_yunet_2023mar.hshmodel"
+    <None Include="..\HshDetectionEngin.Face\Models\face_yunet_2023mar.hshmodel"
           Link="Models\Face\face_yunet_2023mar.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Face\Models\face_yunet_2023mar_int8.hshmodel"
+    <None Include="..\HshDetectionEngin.Face\Models\face_yunet_2023mar_int8.hshmodel"
           Link="Models\Face\face_yunet_2023mar_int8.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Face\Models\face_recognition_sface_2021dec.hshmodel"
+    <None Include="..\HshDetectionEngin.Face\Models\face_recognition_sface_2021dec.hshmodel"
           Link="Models\Face\face_recognition_sface_2021dec.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="HshDetectionEngin.Face\HshDetectionEngin.Face.csproj" />
-    <ProjectReference Include="HshDetectionEngin.Identity\HshDetectionEngin.Identity.csproj" />
-    <ProjectReference Include="HshDetectionEngin.Palm\HshDetectionEngin.Palm.csproj" />
-    <ProjectReference Include="HshDetectionEngin.Plate\HshDetectionEngin.Plate.csproj" />
-    <ProjectReference Include="HshDetectionEngin\HshDetectionEngin.csproj" />
-    <ProjectReference Include="HshDetectionEngin.Abstractions\HshDetectionEngin.Abstractions.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin.Face\HshDetectionEngin.Face.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin.Identity\HshDetectionEngin.Identity.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin.Palm\HshDetectionEngin.Palm.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin.Plate\HshDetectionEngin.Plate.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin\HshDetectionEngin.csproj" />
+    <ProjectReference Include="..\HshDetectionEngin.Abstractions\HshDetectionEngin.Abstractions.csproj" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
 	<PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
 	   <PackageReference Include="Emgu.CV" Version="4.13.0.5924" />	  
   </ItemGroup>
 
   <ItemGroup Condition="'$(Configuration)' == 'Debug'">
-    <None Include="license.hshlic" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\license.hshlic" Link="license.hshlic" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="HshDetectionEngin.Palm\Models\palm_blazepalm_full.hshmodel"
+    <None Include="..\HshDetectionEngin.Palm\Models\palm_blazepalm_full.hshmodel"
           Link="Models\Palm\palm_blazepalm_full.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Palm\Models\rtmdet_nano_hand.hshmodel"
+    <None Include="..\HshDetectionEngin.Palm\Models\rtmdet_nano_hand.hshmodel"
           Link="Models\Palm\rtmdet_nano_hand.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Palm\Models\palm_ccnet.hshmodel"
+    <None Include="..\HshDetectionEngin.Palm\Models\palm_ccnet.hshmodel"
           Link="Models\Palm\palm_ccnet.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="HshDetectionEngin.Plate\Models\plate_yolo.hshmodel"
+    <None Include="..\HshDetectionEngin.Plate\Models\plate_yolo.hshmodel"
           Link="Models\Plate\plate_yolo.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\plate_yolo_fallback.hshmodel"
+    <None Include="..\HshDetectionEngin.Plate\Models\plate_yolo_fallback.hshmodel"
           Link="Models\Plate\plate_yolo_fallback.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\ocr_crnn.hshmodel"
+    <None Include="..\HshDetectionEngin.Plate\Models\ocr_crnn.hshmodel"
           Link="Models\Plate\ocr_crnn.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\ocr_crnn.labels.json"
+    <None Include="..\HshDetectionEngin.Plate\Models\ocr_crnn.labels.json"
           Link="Models\Plate\ocr_crnn.labels.json"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\ocr_crnn.ocr.json"
+    <None Include="..\HshDetectionEngin.Plate\Models\ocr_crnn.ocr.json"
           Link="Models\Plate\ocr_crnn.ocr.json"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\ocr_cnn.hshmodel"
+    <None Include="..\HshDetectionEngin.Plate\Models\ocr_cnn.hshmodel"
           Link="Models\Plate\ocr_cnn.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\ocr_cnn.labels.json"
+    <None Include="..\HshDetectionEngin.Plate\Models\ocr_cnn.labels.json"
           Link="Models\Plate\ocr_cnn.labels.json"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\ocr_cnn.ocr.json"
+    <None Include="..\HshDetectionEngin.Plate\Models\ocr_cnn.ocr.json"
           Link="Models\Plate\ocr_cnn.ocr.json"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\chars_best_v26.hshmodel"
+    <None Include="..\HshDetectionEngin.Plate\Models\chars_best_v26.hshmodel"
           Link="Models\Plate\chars_best_v26.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\chars_best_v26_int8.hshmodel"
+    <None Include="..\HshDetectionEngin.Plate\Models\chars_best_v26_int8.hshmodel"
           Link="Models\Plate\chars_best_v26_int8.hshmodel"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\chars_best_v26.labels.json"
+    <None Include="..\HshDetectionEngin.Plate\Models\chars_best_v26.labels.json"
           Link="Models\Plate\chars_best_v26.labels.json"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\chars_best_v26.ocr.json"
+    <None Include="..\HshDetectionEngin.Plate\Models\chars_best_v26.ocr.json"
           Link="Models\Plate\chars_best_v26.ocr.json"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
-    <None Include="HshDetectionEngin.Plate\Models\chars_best_v26_int8.ocr.json"
+    <None Include="..\HshDetectionEngin.Plate\Models\chars_best_v26_int8.ocr.json"
           Link="Models\Plate\chars_best_v26_int8.ocr.json"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
@@ -117,23 +117,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Assets\MaterialIcons\MaterialIcons-Regular.ttf" LogicalName="HshVisionLab.MaterialIcons.ttf" />
-    <Compile Remove="HshDetectionEngin\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.Abstractions\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.Plate\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.Face\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.Identity\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.Palm\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.Licensing\**\*.cs" />
-    <!-- Old build artifacts can remain after removing the legacy CLI project. -->
-    <Compile Remove="HshDetectionEngin.LicenseTool\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.LicenseRequest\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.LicenseIssuer\**\*.cs" />
-    <Compile Remove="HshDetectionEngin.Tools\**\*.cs" />
-    <Compile Remove="artifacts\**\*.cs" />
-    <Compile Remove="tests\**\*.cs" />
-    <!-- The Windows service is a separate SDK project and must not be included
-         by the root project's recursive Compile glob. -->
-    <Compile Remove="HshDetectionService\**\*.cs" />
   </ItemGroup>
 
 </Project>

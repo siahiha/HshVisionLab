@@ -82,9 +82,9 @@ Capture و inference با مخفی‌شدن preview متوقف نمی‌شوند
 `GET /api/v1/streams/diagnostics` ابعاد واقعی، تعداد encode، replacement و
 duplicate، زمان encode، سن فریم، FPS و اندازهٔ صف هر دوربین را می‌دهد. هدف
 پذیرش، حذف توقف مشترک دوربین‌ها و محدودبودن حافظه است؛ عدد بهبود CPU/RAM و
-روانی تصویر باید با بار واقعی قبل/بعد مقایسه شود. آزمون کنسول و browser مصنوعی
-در `tests/WebRtcStreaming.Tests` بدون دوربین واقعی، دیتابیس یا trigger موجود
-است؛ جزئیات در [Rendering و WebRTC](service/02-RENDERING-WEBRTC.md) آمده است.
+روانی تصویر باید با بار واقعی قبل/بعد مقایسه شود. بررسی‌های پیشین با ورودی
+مصنوعی و بدون دوربین واقعی، دیتابیس یا trigger انجام شده‌اند؛ جزئیات در
+[Rendering و WebRTC](service/02-RENDERING-WEBRTC.md) آمده است.
 
 برای sourceهای فعال RTSP، سرویس درگاه مستقل پخش خام نیز فراهم می‌کند:
 

@@ -32,7 +32,7 @@ HshDetectionEngin.LicenseIssuer     ابزار امن مدیریت مشتری و
 - Plate، Face و Palm منطق domain و مدل خود را نگه می‌دارند؛ runtime مدل هر قابلیت را فقط از packageهای `.hshmodel` در پوشهٔ `Models/<Capability>` کنار executable می‌خواند. Palm نیز مانند Plate و Face فقط package می‌پذیرد و مدل خام ONNX یا مدل نصب‌شدهٔ خارج از قرارداد را اجرا نمی‌کند. پوشهٔ flat `Models` و مسیر قدیمی `Modules/<Capability>/Models` نیز برای سازگاری packageها پشتیبانی می‌شوند.
 - Licensing تنها مرجع صدور و اعتبارسنجی license است؛ `HshVisionLab` و ماژول‌های runtime نباید private key را دریافت کنند. `LicenseIssuer` یک UI جداگانه و فقط برای workstation امن صادرکننده است و private key را مصرف می‌کند.
 - `IdentityDatabase` مرجع SQLite برای `People`، `PersonPlates`، `FaceSamples` و `PalmSamples` است. هر شخص یک `PersonId` مشترک دارد و هر modality نمونه‌های یک‌به‌چند خود را نگه می‌دارد؛ UI فقط snapshot رکوردها را برای گرید و مدیریت دریافت می‌کند. `FaceDatabase` و `PalmDatabase` adapterهای سازگار با API قبلی هستند.
-- آیکون‌های دکمه‌های UI از Material Icons رسمی انتخاب می‌شوند و فونت آن به‌صورت resource داخلی در `Assets/MaterialIcons/MaterialIcons-Regular.ttf` embed شده است؛ در runtime وابستگی به سایت یا اینترنت وجود ندارد.
+- آیکون‌های دکمه‌های UI از Material Icons رسمی انتخاب می‌شوند و فونت آن به‌صورت resource داخلی در `HshVisionLab/Assets/MaterialIcons/MaterialIcons-Regular.ttf` embed شده است؛ در runtime وابستگی به سایت یا اینترنت وجود ندارد.
 
 ### چیدمان UI اصلی
 

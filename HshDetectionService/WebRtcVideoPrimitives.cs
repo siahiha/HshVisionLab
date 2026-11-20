@@ -1,8 +1,5 @@
 using System.Diagnostics;
 using System.Drawing;
-using System.Runtime.CompilerServices;
-
-[assembly: InternalsVisibleTo("WebRtcStreaming.Tests")]
 
 namespace HshDetectionService;
 
